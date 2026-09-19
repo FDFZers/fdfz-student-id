@@ -1,10 +1,9 @@
 FROM golang:1.26-alpine AS builder
 
-ARG VERSION=unknown
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
-WORKDIR /app
+WORKDIR /src
 
 COPY go.mod go.sum ./
 
@@ -14,9 +13,8 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w \
-        -X version.Version=${VERSION} \
-        -X version.Commit=${COMMIT} \
-        -X version.BuildTime=${BUILD_TIME}" \
+        -X fdfz-student-id/internal/cfg.Commit=${COMMIT} \
+        -X fdfz-student-id/internal/config.BuildTime=${BUILD_TIME}" \
     -trimpath \
     -o ./server \
     ./cmd/server/main.go
@@ -30,17 +28,21 @@ RUN apk add --no-cache ca-certificates tzdata curl \
     && echo "Asia/Shanghai" > /etc/timezone \
     && apk del tzdata
 
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN addgroup -S ffhub && adduser -S ffhub -G ffhub
 
-USER appuser
+RUN mkdir -p /app/shared && chown -R ffhub:ffhub /app/shared
 
-COPY --from=builder /app/server /app/server
+USER ffhub
 
-EXPOSE 11400
+COPY --from=builder /src/server /app/server
+
+EXPOSE 11411
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/healthz || exit 1
 
 ENV APP_ENV=prod
+ENV SHARED_DIR="./shared"
+VOLUME /app/shared
 
 ENTRYPOINT ["/app/server"]

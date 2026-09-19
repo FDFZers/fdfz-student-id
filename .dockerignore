@@ -35,3 +35,6 @@ logs
 # dotenv environment variable files
 .env
 .env.*
+
+# Storage
+/storage
