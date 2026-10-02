@@ -12,7 +12,7 @@ import (
 const UserBanCacheDuration = 1 * time.Minute
 
 func UserBanCacheKey(userID int64) string {
-	return fmt.Sprintf("user:ban:%d", userID)
+	return fmt.Sprintf("student_id:user:ban:%d", userID)
 }
 
 const banUserSQL = `
@@ -64,6 +64,12 @@ FROM user_bans
 WHERE user_id = $1  AND enabled = true AND (end_time IS NULL OR end_time > now())
 `
 
+const disableUserSQL = `
+UPDATE users
+SET enabled = false
+WHERE id = $1
+`
+
 func GetUserBan(ctx context.Context, userID int64) (*model.UserBan, *errs.Error) {
 	ban, err := db.GetCached(
 		ctx,
@@ -80,6 +86,13 @@ func GetUserBan(ctx context.Context, userID int64) (*model.UserBan, *errs.Error)
 	)
 	if err != nil {
 		return nil, err.AppendDetails("封禁信息获取失败")
+	}
+	if ban != nil && ban.Enabled && ban.EndTime.Valid && ban.EndTime.Time.Before(time.Now()) {
+		ban.Enabled = false
+		if _, err := db.R.Pool.Exec(ctx, disableUserSQL, userID); err != nil {
+			return nil, errs.CreatePGError(err, "用户", "Failed to disable user").AppendDetails("用户封禁过期禁用失败", "封禁信息获取失败")
+		}
+		db.R.Del(ctx, UserBanCacheKey(userID))
 	}
 	return ban, nil
 }

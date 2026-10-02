@@ -4,29 +4,53 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
+
+	"github.com/dlclark/regexp2"
 )
 
 type KnownPermission struct {
-	Permission
-	Parents []*Permission
+	Nodes   []string
+	Parents []*string
 }
+
+type PermPlaceholders map[string]string
+type MatchResult = []SingleMatchResult
+
+type SingleMatchResult struct {
+	Nodes        []string
+	Placeholders PermPlaceholders
+}
+
+var PermissionRegex = regexp2.MustCompile(`\A(?:(?:[a-zA-Z_\-]|\*{1,2})\.)*(?:[a-zA-Z_\-]|\*{1,2})\z`, regexp2.None)
 
 var (
 	KnownPermissionsByID    map[int64]KnownPermission
 	KnownPermissionsByValue map[string]KnownPermission
 )
 
-type PermPlaceholders map[string]string
-type MatchResult = []SingleMatchResult
-
-type SingleMatchResult struct {
-	Permission   Permission
-	Placeholders PermPlaceholders
+func SplitNodes(perm string) ([]string, error) {
+	matches, err := PermissionRegex.MatchString(perm)
+	if err != nil {
+		return nil, err
+	}
+	if !matches {
+		return nil, fmt.Errorf("invalid permission %s", perm)
+	}
+	nodes := strings.Split(perm, ".")
+	if slices.Contains(nodes, "") {
+		return nil, fmt.Errorf("invalid permission %s", perm)
+	}
+	return nodes, nil
 }
 
-func MatchKnown(userPermissions []Permission) MatchResult {
+func NodesToPerm(nodes []string) string {
+	return strings.Join(nodes, ".")
+}
+
+func MatchKnown(userPerm []string) MatchResult {
 	knownByFirst := make(map[string][]KnownPermission)
 	var knownFirstPlaceholder []KnownPermission
 
@@ -44,13 +68,18 @@ func MatchKnown(userPermissions []Permission) MatchResult {
 	}
 
 	placeholderMap := make(map[string]map[string]PermPlaceholders)
-	permByKey := make(map[string]Permission)
+	permNodesByKey := make(map[string][]string)
 	added := make(map[string]bool)
 
-	var addResult func(kp KnownPermission, placeholders PermPlaceholders)
-	addResult = func(kp KnownPermission, placeholders PermPlaceholders) {
-		permission := kp.Permission
-		permKey := permission.String()
+	var addResult func(kp KnownPermission, placeholders PermPlaceholders, stack map[string]bool)
+	addResult = func(kp KnownPermission, placeholders PermPlaceholders, stack map[string]bool) {
+		permKey := NodesToPerm(kp.Nodes)
+
+		if stack[permKey] {
+			return
+		}
+		stack[permKey] = true
+		defer delete(stack, permKey)
 
 		key := permKey + "::" + placeholdersKey(placeholders)
 		if added[key] {
@@ -58,7 +87,7 @@ func MatchKnown(userPermissions []Permission) MatchResult {
 		}
 		added[key] = true
 
-		permPlaceholders := getPlaceholders(permission.Nodes)
+		permPlaceholders := getPlaceholders(kp.Nodes)
 
 		newPlaceholders := make(PermPlaceholders, len(permPlaceholders)+len(placeholders))
 		for _, name := range permPlaceholders {
@@ -73,7 +102,7 @@ func MatchKnown(userPermissions []Permission) MatchResult {
 
 		if placeholderMap[permKey] == nil {
 			placeholderMap[permKey] = make(map[string]PermPlaceholders)
-			permByKey[permKey] = permission
+			permNodesByKey[permKey] = kp.Nodes
 		}
 		if len(resPlaceholders) > 0 {
 			phKey := placeholdersKey(resPlaceholders)
@@ -81,23 +110,26 @@ func MatchKnown(userPermissions []Permission) MatchResult {
 		}
 
 		for _, parent := range kp.Parents {
-			parentKP, ok := KnownPermissionsByValue[parent.String()]
+			parentKP, ok := KnownPermissionsByValue[*parent]
 			if !ok {
 				continue
 			}
-			addResult(parentKP, newPlaceholders)
+			addResult(parentKP, newPlaceholders, stack)
 		}
 	}
 
-	seenUser := make(map[string]struct{}, len(userPermissions))
-	for _, userPerm := range userPermissions {
-		userKey := userPerm.String()
+	seenUser := make(map[string]struct{}, len(userPerm))
+	for _, userPerm := range userPerm {
+		userKey := userPerm
 		if _, ok := seenUser[userKey]; ok {
 			continue
 		}
 		seenUser[userKey] = struct{}{}
 
-		uNodes := userPerm.Nodes
+		uNodes, err := SplitNodes(userPerm)
+		if err != nil {
+			continue
+		}
 
 		var candidates []KnownPermission
 		if len(uNodes) == 0 {
@@ -115,21 +147,21 @@ func MatchKnown(userPermissions []Permission) MatchResult {
 		for _, kp := range candidates {
 			ph, ok := matchPermNodes(uNodes, kp.Nodes, 0, 0, make(PermPlaceholders))
 			if ok {
-				addResult(kp, ph)
+				addResult(kp, ph, make(map[string]bool))
 			}
 		}
 	}
 
 	var result MatchResult
 	for permKey, phMap := range placeholderMap {
-		permission := permByKey[permKey]
+		nodes := permNodesByKey[permKey]
 		if len(phMap) == 0 {
-			result = append(result, SingleMatchResult{Permission: permission})
+			result = append(result, SingleMatchResult{Nodes: nodes})
 			continue
 		}
 		if len(phMap) == 1 {
 			for _, ph := range phMap {
-				result = append(result, SingleMatchResult{Permission: permission, Placeholders: ph})
+				result = append(result, SingleMatchResult{Nodes: nodes, Placeholders: ph})
 			}
 			continue
 		}
@@ -139,12 +171,12 @@ func MatchKnown(userPermissions []Permission) MatchResult {
 			phList = append(phList, ph)
 		}
 
-		merged, err := mergePlaceholders(permission.Nodes, phList)
+		merged, err := mergePlaceholders(nodes, phList)
 		if err != nil {
 			continue
 		}
 		for _, ph := range merged {
-			result = append(result, SingleMatchResult{Permission: permission, Placeholders: ph})
+			result = append(result, SingleMatchResult{Nodes: nodes, Placeholders: ph})
 		}
 	}
 
@@ -224,6 +256,9 @@ func matchPermNodes(u, k []string, uIndex, kIndex int, placeholders PermPlacehol
 
 	if isPlaceholderNode(kNode) {
 		placeholderName := kNode[1 : len(kNode)-1]
+		if old, ok := placeholders[placeholderName]; ok && old != uNode {
+			return nil, false
+		}
 		newPlaceholders := copyPlaceholders(placeholders)
 		newPlaceholders[placeholderName] = uNode
 		return matchPermNodes(u, k, uIndex+1, kIndex+1, newPlaceholders)
@@ -241,17 +276,19 @@ func mergePlaceholders(nodes []string, placeholders []PermPlaceholders) ([]PermP
 	}
 
 	mergePlaceholder := func(a, b PermPlaceholders) ([]PermPlaceholders, bool) {
+		aCopy := copyPlaceholders(a)
+		bCopy := copyPlaceholders(b)
 		changed := false
 		for i := len(kPlaceholders) - 1; i >= 0; i-- {
 			placeholder := kPlaceholders[i]
-			aValue := a[placeholder]
-			bValue := b[placeholder]
+			aValue := aCopy[placeholder]
+			bValue := bCopy[placeholder]
 			if aValue == "*" && bValue != "*" {
-				b[placeholder] = "*"
+				bCopy[placeholder] = "*"
 				changed = true
 			}
 			if bValue == "*" && aValue != "*" {
-				a[placeholder] = "*"
+				aCopy[placeholder] = "*"
 				changed = true
 			}
 			if aValue != "*" && bValue != "*" && aValue != bValue {
@@ -261,10 +298,10 @@ func mergePlaceholders(nodes []string, placeholders []PermPlaceholders) ([]PermP
 		if !changed {
 			return nil, false
 		}
-		if reflect.DeepEqual(a, b) {
-			return []PermPlaceholders{a}, true
+		if reflect.DeepEqual(aCopy, bCopy) {
+			return []PermPlaceholders{aCopy}, true
 		}
-		return []PermPlaceholders{a, b}, true
+		return []PermPlaceholders{aCopy, bCopy}, true
 	}
 
 	for {
@@ -291,14 +328,11 @@ func MatchResultToPermStrings(result MatchResult) []string {
 		return []string{}
 	}
 
-	out := make([]string, 0, len(result))
-
+	outMap := make(map[string]struct{})
 	for _, r := range result {
-		permission := r.Permission
-
 		if len(r.Placeholders) > 0 {
-			nodes := make([]string, len(permission.Nodes))
-			copy(nodes, permission.Nodes)
+			nodes := make([]string, len(r.Nodes))
+			copy(nodes, r.Nodes)
 
 			for i, node := range nodes {
 				if !isPlaceholderNode(node) {
@@ -311,13 +345,17 @@ func MatchResultToPermStrings(result MatchResult) []string {
 				}
 			}
 
-			permission.Nodes = nodes
+			r.Nodes = nodes
 		}
 
-		s := permission.String()
-		out = append(out, s)
+		s := NodesToPerm(r.Nodes)
+		outMap[s] = struct{}{}
 	}
 
+	out := make([]string, 0, len(outMap))
+	for s := range outMap {
+		out = append(out, s)
+	}
 	sort.Strings(out)
 	return out
 }

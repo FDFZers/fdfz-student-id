@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	// PasswordAlgorithmArgon2id is a PasswordAlgorithm of type argon2id.
-	PasswordAlgorithmArgon2id PasswordAlgorithm = "argon2id"
+	// PasswordAlgorithmArgon2ID is a PasswordAlgorithm of type argon2ID.
+	PasswordAlgorithmArgon2ID PasswordAlgorithm = "argon2id"
 	// PasswordAlgorithmBcrypt is a PasswordAlgorithm of type bcrypt.
 	PasswordAlgorithmBcrypt PasswordAlgorithm = "bcrypt"
 )
@@ -22,7 +22,7 @@ const (
 var ErrInvalidPasswordAlgorithm = fmt.Errorf("not a valid PasswordAlgorithm, try [%s]", strings.Join(_PasswordAlgorithmNames, ", "))
 
 var _PasswordAlgorithmNames = []string{
-	string(PasswordAlgorithmArgon2id),
+	string(PasswordAlgorithmArgon2ID),
 	string(PasswordAlgorithmBcrypt),
 }
 
@@ -36,7 +36,7 @@ func PasswordAlgorithmNames() []string {
 // PasswordAlgorithmValues returns a list of the values for PasswordAlgorithm
 func PasswordAlgorithmValues() []PasswordAlgorithm {
 	return []PasswordAlgorithm{
-		PasswordAlgorithmArgon2id,
+		PasswordAlgorithmArgon2ID,
 		PasswordAlgorithmBcrypt,
 	}
 }
@@ -54,7 +54,7 @@ func (x PasswordAlgorithm) IsValid() bool {
 }
 
 var _PasswordAlgorithmValue = map[string]PasswordAlgorithm{
-	"argon2id": PasswordAlgorithmArgon2id,
+	"argon2id": PasswordAlgorithmArgon2ID,
 	"bcrypt":   PasswordAlgorithmBcrypt,
 }
 
@@ -248,5 +248,127 @@ func (x *RegisterRequestStatus) Scan(value interface{}) (err error) {
 
 // Value implements the driver Valuer interface.
 func (x RegisterRequestStatus) Value() (driver.Value, error) {
+	return x.String(), nil
+}
+
+const (
+	// TokenTypeUser is a TokenType of type user.
+	TokenTypeUser TokenType = "user"
+	// TokenTypeStepup is a TokenType of type stepup.
+	TokenTypeStepup TokenType = "stepup"
+	// TokenTypeOAuth is a TokenType of type OAuth.
+	TokenTypeOAuth TokenType = "oauth"
+)
+
+var ErrInvalidTokenType = fmt.Errorf("not a valid TokenType, try [%s]", strings.Join(_TokenTypeNames, ", "))
+
+var _TokenTypeNames = []string{
+	string(TokenTypeUser),
+	string(TokenTypeStepup),
+	string(TokenTypeOAuth),
+}
+
+// TokenTypeNames returns a list of possible string values of TokenType.
+func TokenTypeNames() []string {
+	tmp := make([]string, len(_TokenTypeNames))
+	copy(tmp, _TokenTypeNames)
+	return tmp
+}
+
+// TokenTypeValues returns a list of the values for TokenType
+func TokenTypeValues() []TokenType {
+	return []TokenType{
+		TokenTypeUser,
+		TokenTypeStepup,
+		TokenTypeOAuth,
+	}
+}
+
+// String implements the Stringer interface.
+func (x TokenType) String() string {
+	return string(x)
+}
+
+// IsValid provides a quick way to determine if the typed value is
+// part of the allowed enumerated values
+func (x TokenType) IsValid() bool {
+	_, err := ParseTokenType(string(x))
+	return err == nil
+}
+
+var _TokenTypeValue = map[string]TokenType{
+	"user":   TokenTypeUser,
+	"stepup": TokenTypeStepup,
+	"oauth":  TokenTypeOAuth,
+}
+
+// ParseTokenType attempts to convert a string to a TokenType.
+func ParseTokenType(name string) (TokenType, error) {
+	if x, ok := _TokenTypeValue[name]; ok {
+		return x, nil
+	}
+	return TokenType(""), fmt.Errorf("%s is %w", name, ErrInvalidTokenType)
+}
+
+// MarshalText implements the text marshaller method.
+func (x TokenType) MarshalText() ([]byte, error) {
+	return []byte(string(x)), nil
+}
+
+// UnmarshalText implements the text unmarshaller method.
+func (x *TokenType) UnmarshalText(text []byte) error {
+	tmp, err := ParseTokenType(string(text))
+	if err != nil {
+		return err
+	}
+	*x = tmp
+	return nil
+}
+
+// AppendText appends the textual representation of itself to the end of b
+// (allocating a larger slice if necessary) and returns the updated slice.
+//
+// Implementations must not retain b, nor mutate any bytes within b[:len(b)].
+func (x *TokenType) AppendText(b []byte) ([]byte, error) {
+	return append(b, x.String()...), nil
+}
+
+var errTokenTypeNilPtr = errors.New("value pointer is nil") // one per type for package clashes
+
+// Scan implements the Scanner interface.
+func (x *TokenType) Scan(value interface{}) (err error) {
+	if value == nil {
+		*x = TokenType("")
+		return
+	}
+
+	// A wider range of scannable types.
+	// driver.Value values at the top of the list for expediency
+	switch v := value.(type) {
+	case string:
+		*x, err = ParseTokenType(v)
+	case []byte:
+		*x, err = ParseTokenType(string(v))
+	case TokenType:
+		*x = v
+	case *TokenType:
+		if v == nil {
+			return errTokenTypeNilPtr
+		}
+		*x = *v
+	case *string:
+		if v == nil {
+			return errTokenTypeNilPtr
+		}
+		*x, err = ParseTokenType(*v)
+	default:
+		return errors.New("invalid type for TokenType")
+	}
+
+	return
+}
+
+// Value implements the driver Valuer interface.
+func (x TokenType) Value() (driver.Value, error) {
 	return x.String(), nil
 }

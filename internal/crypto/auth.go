@@ -16,18 +16,21 @@ import (
 // 验证码
 // ---------------------------------------------------------------------------
 
-const codeCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+const (
+	CodeCharset  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	TokenCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+)
 
-func GenerateCode(length int) (string, error) {
+func GenerateCode(length int, charset string) (string, error) {
 	result := make([]byte, length)
-	maxIndex := big.NewInt(int64(len(codeCharset)))
+	maxIndex := big.NewInt(int64(len(charset)))
 
 	for i := range length {
 		idx, err := rand.Int(rand.Reader, maxIndex)
 		if err != nil {
 			return "", err
 		}
-		result[i] = codeCharset[idx.Int64()]
+		result[i] = charset[idx.Int64()]
 	}
 	return string(result), nil
 }
@@ -62,7 +65,7 @@ func VerifyTOTP(secret string, code string) (bool, error) {
 
 func VerifyUserPassword(password string, info *model.UserPassword) (bool, error) {
 	switch info.Algorithm {
-	case model.PasswordAlgorithmArgon2id:
+	case model.PasswordAlgorithmArgon2ID:
 		return VerifyArgon2ID(password, info.Password)
 	case model.PasswordAlgorithmBcrypt:
 		return VerifyBcrypt(password, info.Password)

@@ -40,6 +40,10 @@ func (e *Error) Respond(c *gin.Context) {
 	c.JSON(e.HTTPCode, e.Info)
 }
 
+func (e *Error) Abort(c *gin.Context) {
+	c.AbortWithStatusJSON(e.HTTPCode, e.Info)
+}
+
 func InternalError() *Error {
 	return CreateError(http.StatusInternalServerError, "internal_error")
 }
@@ -51,6 +55,9 @@ func IllegalStateError() *Error {
 }
 func RequestTooLargeError() *Error {
 	return CreateError(http.StatusRequestEntityTooLarge, "request_too_large")
+}
+func RateLimitExceededError() *Error {
+	return CreateError(http.StatusTooManyRequests, "rate_limit_exceeded")
 }
 func UnauthorizedError() *Error {
 	return CreateError(http.StatusUnauthorized, "unauthorized")
@@ -77,7 +84,7 @@ func CreatePGError(err error, item, log string) *Error {
 
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || !strings.HasPrefix(pgErr.Code, "23") {
-		return CreateAndLogInternalError(err, log).AppendDetails("数据库内部错误")
+		return CreateAndLogInternalError(err, log).AppendDetails("PostreSQL 错误")
 	}
 
 	return ConflictError().AppendDetails(fmt.Sprintf("“%s”冲突", pgErr.ConstraintName))

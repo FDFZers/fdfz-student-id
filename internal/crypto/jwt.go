@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-func GenerateToken(uuid uuid.UUID, claims *model.TokenClaims) (string, error) {
+func GenerateJWT(uuid uuid.UUID, claims *model.TokenClaims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, &model.RegisteredTokenClaims{
-		*claims,
-		jwt.RegisteredClaims{
+		TokenClaims: *claims,
+		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "fdfz-student-id",
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(cfg.C.AccessTokenTTL)),
 			NotBefore: jwt.NewNumericDate(time.Now()),
@@ -22,18 +22,18 @@ func GenerateToken(uuid uuid.UUID, claims *model.TokenClaims) (string, error) {
 			ID:        uuid.String(),
 		},
 	})
-	return token.SignedString(cfg.C.JWTSecret)
+	return token.SignedString([]byte(cfg.C.JWTSecret))
 }
 
-func ParseToken(tokenString string) (*model.RegisteredTokenClaims, error) {
+func ParseJWT(tokenString string) (*model.RegisteredTokenClaims, error) {
 	token, err := jwt.ParseWithClaims(
 		tokenString,
 		&model.RegisteredTokenClaims{},
-		func(token *jwt.Token) (interface{}, error) {
+		func(token *jwt.Token) (any, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-			return cfg.C.JWTSecret, nil
+			return []byte(cfg.C.JWTSecret), nil
 		},
 		jwt.WithValidMethods([]string{"HS256"}),
 		jwt.WithIssuer("fdfz-student-id"),

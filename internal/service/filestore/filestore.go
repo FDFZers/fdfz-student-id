@@ -72,7 +72,7 @@ func UploadFile(fileHeader *multipart.FileHeader, request *model.StoreFileReq) *
 		return errs.InternalError().AppendDetails("请求序列化失败")
 	}
 
-	endpoint, err := url.JoinPath(cfg.C.FilestoreSite, "/api/internal/upload/store")
+	endpoint, err := url.JoinPath(cfg.C.FilestoreEndpoint, "/api/internal/upload/store")
 	if err != nil {
 		return errs.InternalError().AppendDetails("URL 路径拼接失败")
 	}

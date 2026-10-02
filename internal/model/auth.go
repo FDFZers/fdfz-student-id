@@ -12,10 +12,10 @@ import (
 // ENUM(pending, approved, rejected)
 type RegisterRequestStatus string
 
-// ENUM(argon2id, bcrypt)
+// ENUM(argon2ID = "argon2id", bcrypt)
 type PasswordAlgorithm string
 
-// ENUM(user, oauth)
+// ENUM(user, stepup, OAuth = "oauth")
 type TokenType string
 
 type RegisterRequest struct {
@@ -31,7 +31,9 @@ type RegisterRequest struct {
 
 	CreatedAt      time.Time             `json:"created_at" db:"created_at"`
 	Status         RegisterRequestStatus `json:"status" db:"status"`
+	CreatedUserID  *int64                `json:"created_user_id" db:"created_user_id"`
 	ReviewerUserID *int64                `json:"reviewer_user_id" db:"reviewer_user_id"`
+	ReviewComment  *string               `json:"review_comment" db:"review_comment"`
 	ReviewedAt     *time.Time            `json:"reviewed_at" db:"reviewed_at"`
 }
 
@@ -42,7 +44,7 @@ type UserPassword struct {
 	UpdatedAt time.Time         `json:"updated_at" db:"updated_at"`
 }
 
-type UserTotp struct {
+type UserTOTP struct {
 	UserID    int64     `json:"user_id" db:"user_id"`
 	Secret    string    `json:"secret" db:"secret"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
@@ -53,6 +55,7 @@ type UserSession struct {
 	UserID int64     `json:"user_id" db:"user_id"`
 
 	SessionTokenHash string `json:"session_token_hash" db:"session_token_hash"`
+	IsTemporary      bool   `json:"is_temporary" db:"is_temporary"`
 
 	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at" db:"updated_at"`
@@ -69,6 +72,7 @@ type TokenClaims struct {
 	TokenType   TokenType   `json:"token_type" db:"token_type"`
 	AppID       null.String `json:"app_id" db:"app_id"`
 	Permissions []string    `json:"permissions" db:"permissions"`
+	IsTemporary bool        `json:"is_temporary" db:"is_temporary"`
 }
 
 type RegisteredTokenClaims struct {

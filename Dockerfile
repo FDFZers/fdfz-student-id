@@ -36,7 +36,7 @@ USER ffhub
 
 COPY --from=builder /src/server /app/server
 
-EXPOSE 11411
+EXPOSE 11400
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/healthz || exit 1

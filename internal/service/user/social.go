@@ -2,9 +2,12 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // ---------------------------------------------------------------------------
@@ -12,7 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 
 const getUserEmailSQL = `
-SELECT id, user_id, email, created_at
+SELECT id, user_id, email, created_at, deleted_at
 FROM user_emails
 WHERE user_id = $1 AND deleted_at IS NULL
 `
@@ -20,8 +23,11 @@ WHERE user_id = $1 AND deleted_at IS NULL
 func GetUserEmail(ctx context.Context, userID int64) (*model.UserEmail, *errs.Error) {
 	var e model.UserEmail
 	err := db.R.QueryRow(ctx, getUserEmailSQL, userID).
-		Scan(&e.ID, &e.UserID, &e.Email, &e.CreatedAt)
+		Scan(&e.ID, &e.UserID, &e.Email, &e.CreatedAt, &e.DeletedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, errs.CreatePGError(err, "邮箱", "Failed to get user email").AppendDetails("邮箱获取失败")
 	}
 	return &e, nil
@@ -75,7 +81,7 @@ func DeleteUserEmail(ctx context.Context, userID int64) *errs.Error {
 // ---------------------------------------------------------------------------
 
 const getUserQQSQL = `
-SELECT id, user_id, qq, created_at
+SELECT id, user_id, qq, created_at, deleted_at
 FROM user_qqs
 WHERE user_id = $1 AND deleted_at IS NULL
 `
@@ -83,8 +89,11 @@ WHERE user_id = $1 AND deleted_at IS NULL
 func GetUserQQ(ctx context.Context, userID int64) (*model.UserQQ, *errs.Error) {
 	var e model.UserQQ
 	err := db.R.QueryRow(ctx, getUserQQSQL, userID).
-		Scan(&e.ID, &e.UserID, &e.QQ, &e.CreatedAt)
+		Scan(&e.ID, &e.UserID, &e.QQ, &e.CreatedAt, &e.DeletedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, errs.CreatePGError(err, "QQ", "Failed to get user QQ").AppendDetails("QQ 获取失败")
 	}
 	return &e, nil

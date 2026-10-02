@@ -53,14 +53,14 @@ type UserEmail struct {
 	ID        int64     `json:"id" db:"id"`
 	UserID    int64     `json:"user_id" db:"user_id"`
 	Email     string    `json:"email" db:"email"`
-	IsPrimary bool      `json:"is_primary" db:"is_primary"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	DeletedAt null.Time `json:"deleted_at" db:"deleted_at"`
 }
 
 type UserQQ struct {
 	ID        int64     `json:"id" db:"id"`
 	UserID    int64     `json:"user_id" db:"user_id"`
 	QQ        string    `json:"qq" db:"qq"`
-	IsPrimary bool      `json:"is_primary" db:"is_primary"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	DeletedAt null.Time `json:"deleted_at" db:"deleted_at"`
 }

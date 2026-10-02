@@ -27,4 +27,20 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 			"is_prod":    cfg.IsProd,
 		})
 	})
+
+	api.GET("/ipinfo", func(c *gin.Context) {
+		ip := c.ClientIP()
+		school, ok := cfg.C.SchoolIPs[ip]
+		if ok {
+			c.JSON(http.StatusOK, gin.H{
+				"ip":   ip,
+				"type": school,
+			})
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"ip":   ip,
+				"type": "other",
+			})
+		}
+	})
 }

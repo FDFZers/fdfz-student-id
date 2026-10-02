@@ -2,10 +2,31 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+
+	"github.com/jackc/pgx/v5"
 )
+
+// ---------------------------------------------------------------------------
+// 获取密码
+// ---------------------------------------------------------------------------
+
+const getUserPasswordSQL = `
+SELECT user_id, password, algorithm, updated_at FROM user_passwords WHERE user_id = $1
+`
+
+func GetUserPassword(ctx context.Context, userID int64) (*model.UserPassword, *errs.Error) {
+	var pwd model.UserPassword
+	err := db.R.QueryRow(ctx, getUserPasswordSQL, userID).
+		Scan(&pwd.UserID, &pwd.Password, &pwd.Algorithm, &pwd.UpdatedAt)
+	if err != nil {
+		return nil, errs.CreatePGError(err, "密码", "Failed to get user password").AppendDetails("获取密码失败")
+	}
+	return &pwd, nil
+}
 
 // ---------------------------------------------------------------------------
 // 密码设置
@@ -39,11 +60,14 @@ const getUserTotpSQL = `
 SELECT user_id, secret, updated_at FROM user_totp WHERE user_id = $1
 `
 
-func GetUserTotp(ctx context.Context, userID int64) (*model.UserTotp, *errs.Error) {
-	var t model.UserTotp
+func GetUserTOTP(ctx context.Context, userID int64) (*model.UserTOTP, *errs.Error) {
+	var t model.UserTOTP
 	err := db.R.QueryRow(ctx, getUserTotpSQL, userID).
 		Scan(&t.UserID, &t.Secret, &t.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, errs.CreatePGError(err, "TOTP", "Failed to get user TOTP").AppendDetails("获取 TOTP 失败")
 	}
 	return &t, nil
@@ -61,7 +85,7 @@ DO UPDATE SET secret = EXCLUDED.secret
 RETURNING updated_at
 `
 
-func UpsertUserTotp(ctx context.Context, t *model.UserTotp) *errs.Error {
+func UpsertUserTotp(ctx context.Context, t *model.UserTOTP) *errs.Error {
 	err := db.R.Pool.QueryRow(ctx, upsertUserTotpSQL, t.UserID, t.Secret).
 		Scan(&t.UpdatedAt)
 	if err != nil {

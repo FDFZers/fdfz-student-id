@@ -7,6 +7,7 @@ import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/altcha-org/altcha-lib-go/v2"
@@ -47,6 +48,11 @@ func VerifyChallenge(payload altcha.Payload) (res altcha.VerifySolutionResult, e
 }
 
 func VerifyPayloadStr(payloadStr string) *errs.Error {
+	if cfg.C.BypassCaptcha {
+		slog.Debug("Bypassed captcha")
+		return nil
+	}
+
 	jsonBytes, err := base64.StdEncoding.DecodeString(payloadStr)
 	if err != nil {
 		return errs.BadRequestError().AppendDetails("Altcha 载荷无效")

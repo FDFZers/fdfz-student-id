@@ -2,13 +2,12 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fdfz-student-id/internal/errs"
-	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -36,11 +35,11 @@ func GetRedis[T any](
 			return &data, nil
 		} else {
 			// 缓存数据损坏，返回解析错误
-			return nil, errs.CreateAndLogInternalError(err, "Failed to parse cached data")
+			return nil, errs.CreateAndLogInternalError(err, "Failed to parse cached data").AppendDetails("Redis 缓存数据损坏")
 		}
 	} else if !errors.Is(err, redis.Nil) {
 		// Redis 错误
-		return nil, errs.CreateAndLogInternalError(err, "Failed to get cached data")
+		return nil, errs.CreateAndLogInternalError(err, "Failed to get cached data").AppendDetails("Redis 错误")
 	}
 	// 缓存未命中
 	return nil, nil
@@ -55,11 +54,11 @@ func SetRedis[T any](
 	// 序列化数据
 	bytes, err := json.Marshal(&value)
 	if err != nil {
-		return errs.CreateAndLogInternalError(err, "Failed to marshal cached data")
+		return errs.CreateAndLogInternalError(err, "Failed to marshal cached data").AppendDetails("Redis 数据序列化失败")
 	}
 	// 设置 Redis 缓存值
 	if err := R.Set(ctx, key, bytes, duration).Err(); err != nil {
-		return errs.CreateAndLogInternalError(err, "Failed to set cached data")
+		return errs.CreateAndLogInternalError(err, "Failed to set cached data").AppendDetails("Redis 缓存值设置失败")
 	}
 	return nil
 }
@@ -70,24 +69,12 @@ func GetCached[T any](
 	duration time.Duration,
 	queryFn func() (*T, error), // 缓存未命中时的回源查询函数
 ) (*T, *errs.Error) {
-	// 获取 Redis 缓存值
-	res, err := R.Get(ctx, key).Result()
-	if err == nil {
-		// 命中空值
-		if res == RedisEmptyMark {
-			return nil, nil
-		}
-		// 命中数据
-		var data T
-		if err := json.Unmarshal([]byte(res), &data); err == nil {
-			return &data, nil
-		} else {
-			// 缓存数据损坏，回源查询
-			slog.Warn("Failed to parse cached data", "error", err)
-		}
-	} else if !errors.Is(err, redis.Nil) {
-		// Redis 错误，回源查询
-		slog.Warn("Failed to get cached data", "error", err)
+	rData, rErr := GetRedis[T](ctx, key)
+	if rErr != nil {
+		return nil, rErr
+	}
+	if rData != nil {
+		return rData, nil
 	}
 
 	// 数据为空，回源查询
@@ -100,7 +87,7 @@ func GetCached[T any](
 		}
 		SetRedis(ctx, key, data, duration)
 		return data, nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		// 数据库错误
 		return nil, errs.CreatePGError(err, item, "Failed to query database")
 	}

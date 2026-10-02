@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -14,7 +15,7 @@ const (
 )
 
 func RegisterRequestCacheKey(id int64) string {
-	return fmt.Sprintf("register_request:id:%d", id)
+	return fmt.Sprintf("student_id:register_request:id:%d", id)
 }
 
 // ---------------------------------------------------------------------------
@@ -25,7 +26,8 @@ const createRegisterRequestSQL = `
 INSERT INTO register_requests (
     username, type, student_num, real_name, school, password
 ) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, created_at, status
+RETURNING id, created_at, status,
+    created_user_id, reviewer_user_id, review_comment, reviewed_at
 `
 
 func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.Error {
@@ -46,6 +48,10 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 		&r.ID,
 		&r.CreatedAt,
 		&r.Status,
+		&r.CreatedUserID,
+		&r.ReviewerUserID,
+		&r.ReviewComment,
+		&r.ReviewedAt,
 	)
 	if err != nil {
 		return errs.CreatePGError(err, "注册请求", "Failed to create register request").
@@ -64,7 +70,7 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 
 const getRegisterRequestSQL = `
 SELECT id, username, type, student_num, real_name, school, password,
-    created_at, status, reviewer_user_id, reviewed_at
+    created_at, status, created_user_id, reviewer_user_id, review_comment, reviewed_at
 FROM register_requests
 WHERE id = $1
 `
@@ -90,7 +96,9 @@ func GetRegisterRequestByID(
 				&req.Password,
 				&req.CreatedAt,
 				&req.Status,
+				&req.CreatedUserID,
 				&req.ReviewerUserID,
+				&req.ReviewComment,
 				&req.ReviewedAt,
 			)
 			if err != nil {
@@ -111,7 +119,7 @@ func GetRegisterRequestByID(
 
 const reviewRegisterRequestSQL = `
 UPDATE register_requests
-SET status = $2, reviewer_user_id = $3, reviewed_at = now()
+SET status = $2, reviewer_user_id = $3, review_comment = $4, reviewed_at = now()
 WHERE id = $1 AND status = 'pending'
 RETURNING username, reviewed_at
 `
@@ -119,8 +127,15 @@ RETURNING username, reviewed_at
 const rollbackReviewSQL = `
 UPDATE register_requests
 SET status = 'pending',
+    created_user_id = NULL,
     reviewer_user_id = NULL,
     reviewed_at = NULL
+WHERE id = $1 AND status = 'approved'
+`
+
+const setRegisterRequestCreatedUserSQL = `
+UPDATE register_requests
+SET created_user_id = $2
 WHERE id = $1 AND status = 'approved'
 `
 
@@ -128,6 +143,7 @@ func ReviewRegisterRequest(
 	ctx context.Context,
 	id int64,
 	status model.RegisterRequestStatus,
+	reviewComment string,
 	reviewerID int64,
 ) *errs.Error {
 	var username string
@@ -137,7 +153,7 @@ func ReviewRegisterRequest(
 		return errs.BadRequestError().AppendDetails("不能将注册请求标记为待审核", "注册请求审核失败")
 	}
 
-	err := db.R.QueryRow(ctx, reviewRegisterRequestSQL, id, status, reviewerID).Scan(&username, &reviewedAt)
+	err := db.R.QueryRow(ctx, reviewRegisterRequestSQL, id, status, reviewerID, reviewComment).Scan(&username, &reviewedAt)
 	if err != nil {
 		return errs.CreatePGError(err, "注册请求", "Failed to review register request").AppendDetails("注册请求审核失败")
 	}
@@ -171,12 +187,16 @@ func ReviewRegisterRequest(
 	}
 	pwd := &model.UserPassword{
 		Password:  req.Password,
-		Algorithm: model.PasswordAlgorithmArgon2id,
-		UpdatedAt: time.Now(),
+		Algorithm: model.PasswordAlgorithmArgon2ID,
 	}
 	if createErr := CreateUser(ctx, u, pwd); createErr != nil {
 		return rollback(createErr)
 	}
+
+	if _, err := db.R.Exec(ctx, setRegisterRequestCreatedUserSQL, id, u.ID); err != nil {
+		slog.Error("Failed to set created user for register request", "error", err, "register_id", id, "user_id", u.ID)
+	}
+
 	return nil
 }
 

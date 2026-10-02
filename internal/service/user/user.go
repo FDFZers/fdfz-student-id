@@ -17,15 +17,15 @@ const (
 )
 
 func UserCacheKey(id int64) string {
-	return fmt.Sprintf("user:id:%d", id)
+	return fmt.Sprintf("student_id:user:info:id:%d", id)
 }
 
 func UserIDCacheKey(username string) string {
-	return fmt.Sprintf("user:username:%s", username)
+	return fmt.Sprintf("student_id:user:id_by_username:%s", username)
 }
 
 func UsernameExistsCacheKey(username string) string {
-	return fmt.Sprintf("user:username:exists:%s", strings.ToLower(username))
+	return fmt.Sprintf("student_id:user:username_exists:%s", strings.ToLower(username))
 }
 
 // ---------------------------------------------------------------------------

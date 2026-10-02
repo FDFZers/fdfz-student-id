@@ -12,18 +12,22 @@ import (
 var C *Config
 
 type Config struct {
-	PostgresURL      string
-	RedisURL         string
-	FilestoreSite    string
-	APIKey           string
-	AltchaHMACSecret string
-	JWTSecret        string
-	AccessTokenTTL   time.Duration
-	SessionTokenTTL  time.Duration
-	SMTP             SMTPConfig
-	SchoolIPs        map[string]model.School
-	TrustedProxies   []string
-	SharedDir        string
+	PostgresURL         string
+	RedisURL            string
+	FilestoreEndpoint   string
+	NapCatEndpoint      string
+	APIKey              string
+	AltchaHMACSecret    string
+	JWTSecret           string
+	AccessTokenTTL      time.Duration
+	TempSessionTokenTTL time.Duration
+	PermSessionTokenTTL time.Duration
+	CodeSendInterval    time.Duration
+	SMTP                SMTPConfig
+	SchoolIPs           map[string]model.School
+	TrustedProxies      []string
+	SharedDir           string
+	BypassCaptcha       bool
 }
 
 type SMTPConfig struct {
@@ -45,13 +49,17 @@ func LoadConfig() error {
 		return err
 	}
 
-	cfg.FilestoreSite = env("FILESTORE_SITE", "https://static.fdfz.top/")
-	cfg.AccessTokenTTL = envDur("ACCESS_TOKEN_TTL", 15*time.Minute)
-	cfg.SessionTokenTTL = envDur("SESSION_TOKEN_TTL", 30*24*time.Hour)
+	cfg.FilestoreEndpoint = env("FILESTORE_ENDPOINT", "https://static.fdfz.top/")
+	cfg.NapCatEndpoint = env("NAPCAT_ENDPOINT", "https://napcat.fdfz.top/")
+	cfg.AccessTokenTTL = envDur("ACCESS_TOKEN_TTL", 30*time.Minute)
+	cfg.PermSessionTokenTTL = envDur("PERM_SESSION_TOKEN_TTL", 30*24*time.Hour)
+	cfg.TempSessionTokenTTL = envDur("TEMP_SESSION_TOKEN_TTL", 24*time.Hour)
+	cfg.CodeSendInterval = envDur("CODE_SEND_INTERVAL", 1*time.Minute)
 	cfg.SMTP.Host = env("SMTP_HOST", "mail.fdfz.top")
 	cfg.SMTP.Port = env("SMTP_PORT", "587")
 	cfg.SMTP.From = env("SMTP_FROM", "FDFZ Bot <noreply@fdfz.top>")
 	cfg.SMTP.Username = env("SMTP_USERNAME", "<noreply@fdfz.top>")
+	cfg.BypassCaptcha = !IsProd && env("BYPASS_CAPTCHA", "false") == "true"
 	cfg.SharedDir = env("SHARED_DIR", "./shared")
 
 	if cfg.SMTP.Password, err = requireEnv("SMTP_PASSWORD"); err != nil {

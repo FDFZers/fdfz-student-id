@@ -180,6 +180,7 @@ CREATE TABLE user_sessions
     user_id            BIGINT       NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 
     session_token_hash VARCHAR(128) NOT NULL, -- argon2id
+    is_temporary       BOOLEAN      NOT NULL DEFAULT false,
 
     created_at         TIMESTAMPTZ  NOT NULL             DEFAULT now(),
     updated_at         TIMESTAMPTZ  NOT NULL             DEFAULT now(),
@@ -232,6 +233,8 @@ CREATE TABLE register_requests
 
     created_at       TIMESTAMPTZ             NOT NULL DEFAULT now(),
     status           register_request_status NOT NULL DEFAULT 'pending',
+    created_user_id  BIGINT REFERENCES users (id) ON DELETE RESTRICT,
+    review_comment   TEXT                    NOT NULL DEFAULT '',
     reviewer_user_id BIGINT REFERENCES users (id) ON DELETE RESTRICT,
     reviewed_at      TIMESTAMPTZ                      DEFAULT NULL,
 
@@ -243,6 +246,9 @@ CREATE INDEX idx_register_requests_student_num
 CREATE INDEX idx_register_requests_pending
     ON register_requests (status)
     WHERE reviewed_at IS NULL;
+CREATE INDEX idx_register_requests_created_user
+    ON register_requests (created_user_id)
+    WHERE created_user_id IS NOT NULL;
 CREATE INDEX idx_register_requests_reviewer
     ON register_requests (reviewer_user_id);
 CREATE UNIQUE INDEX idx_register_requests_student_num_pending

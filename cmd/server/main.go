@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/router"
+	"fdfz-student-id/internal/schedule"
 	"fdfz-student-id/internal/storage"
 	"log/slog"
 	"net/http"
@@ -39,7 +40,7 @@ func main() {
 
 	slog.SetDefault(logger)
 
-	slog.Info("Starting filestore backend", "commit", cfg.Commit, "build_time", cfg.BuildTime, "is_prod", cfg.IsProd)
+	slog.Info("Starting Student ID backend", "commit", cfg.Commit, "build_time", cfg.BuildTime, "is_prod", cfg.IsProd)
 
 	// 读取 .env
 	if !cfg.IsProd {
@@ -88,6 +89,12 @@ func main() {
 	slog.Info("Database migrations completed")
 
 	// 启动服务器
+	cron, err := schedule.ScheduleCron()
+	if err != nil {
+		slog.Error("Error starting cron", "error", err)
+		os.Exit(1)
+	}
+
 	r, healthcheckR := gin.New(), gin.New()
 	r.Use(sloggin.New(logger))
 
@@ -107,7 +114,7 @@ func main() {
 	router.InitHealthCheckRouter(healthcheckR)
 
 	srv := &http.Server{
-		Addr:    ":11411",
+		Addr:    ":11400",
 		Handler: r,
 	}
 
@@ -117,7 +124,12 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("Starting server on port 11411")
+		slog.Info("Starting cron")
+		cron.Start()
+	}()
+
+	go func() {
+		slog.Info("Starting server on port 11400")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("Server startup failed", "error", err)
 			os.Exit(1)
@@ -138,7 +150,10 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	slog.Info("Filestore backend shutting down")
+	slog.Info("Student ID backend shutting down")
+
+	cron.Stop()
+	slog.Info("Cron stopped")
 
 	slog.Info("Waiting for active connections to close")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
