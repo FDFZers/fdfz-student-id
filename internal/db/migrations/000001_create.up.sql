@@ -1,6 +1,5 @@
 BEGIN;
 
--- =============================================
 -- 枚举类型定义
 -- =============================================
 CREATE TYPE password_algorithm AS ENUM ('argon2id', 'bcrypt');
@@ -38,10 +37,9 @@ CREATE TABLE users
 
     nickname     VARCHAR(32)           DEFAULT NULL,
     signature    VARCHAR(128) NOT NULL DEFAULT '',
-    birthday     DATE                  DEFAULT NULL,
     bio          TEXT         NOT NULL DEFAULT '',
 
-    visibilities JSONB        NOT NULL DEFAULT '{"real_name":"private","birthday":"private"}',
+    visibilities JSONB        NOT NULL DEFAULT '{"real_name":"private"}',
 
     created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),

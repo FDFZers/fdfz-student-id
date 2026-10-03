@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/errs"
@@ -25,7 +26,7 @@ type loginInitRequestReq struct {
 	AltchaPayload string `json:"altcha_payload"`
 }
 
-func loginInitRequestHandler(c *gin.Context) {
+func loginInitHandler(c *gin.Context) {
 	var req loginInitRequestReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errs.BadRequestError().AppendDetails("请求解析失败", "登录失败").Respond(c)
@@ -59,12 +60,12 @@ func loginInitRequestHandler(c *gin.Context) {
 	}
 	if ban != nil && ban.Enabled {
 		if ban.EndTime.Valid {
-			errs.UnauthorizedError().AppendDetails(
+			errs.PermissionDeniedError().AppendDetails(
 				fmt.Sprintf("用户已封禁：%s（%s）", ban.Reason, ban.EndTime.Time.Format("2006-01-02 15:04:05")),
 				"登录失败",
 			).Respond(c)
 		} else {
-			errs.UnauthorizedError().AppendDetails(
+			errs.PermissionDeniedError().AppendDetails(
 				fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
 				"登录失败",
 			).Respond(c)
@@ -105,7 +106,7 @@ type loginFinalizeRequestReq struct {
 	SessionID uuid.UUID `json:"session_id"`
 }
 
-func loginFinalizeRequestHandler(c *gin.Context) {
+func loginFinalizeHandler(c *gin.Context) {
 	var req loginFinalizeRequestReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errs.BadRequestError().AppendDetails("请求解析失败", "登录失败").Respond(c)
@@ -117,16 +118,16 @@ func loginFinalizeRequestHandler(c *gin.Context) {
 		err.AppendDetails("登录失败").Respond(c)
 		return
 	} else if authSession == nil {
-		errs.UnauthorizedError().AppendDetails("鉴权会话不存在", "登录失败").Respond(c)
+		errs.NotFoundError().AppendDetails("鉴权会话不存在", "登录失败").Respond(c)
 		return
 	}
 
 	if authSession.Type != auth.AuthSessionTypeLogin {
-		errs.UnauthorizedError().AppendDetails("鉴权会话类型错误", "登录失败").Respond(c)
+		errs.BadRequestError().AppendDetails("鉴权会话类型错误", "登录失败").Respond(c)
 		return
 	}
 	if !authSession.Passed2FA {
-		errs.UnauthorizedError().AppendDetails("二次验证未通过", "登录失败").Respond(c)
+		errs.IllegalStateError().AppendDetails("二次验证未通过", "登录失败").Respond(c)
 		return
 	}
 
@@ -149,10 +150,9 @@ func loginFinalizeRequestHandler(c *gin.Context) {
 	}
 
 	session := &model.UserSession{
-		UserID:           authSession.UserID,
-		SessionTokenHash: sessionTokenHash,
-		IsTemporary:      authSession.IsTemporary,
-		ExpiresAt:        time.Now().Add(dur),
+		UserID:      authSession.UserID,
+		IsTemporary: authSession.IsTemporary,
+		ExpiresAt:   time.Now().Add(dur),
 	}
 	if err := auth.CreateSession(c.Request.Context(), session); err != nil {
 		err.AppendDetails("登录失败").Respond(c)
@@ -183,13 +183,105 @@ func loginFinalizeRequestHandler(c *gin.Context) {
 		return
 	}
 
-	if err := auth.UpdateSessionClient(c, session.UUID); err != nil {
+	exp, err := auth.UpdateSessionClient(c, session.UUID, sessionTokenHash)
+	if err != nil {
 		rollback(err).Respond(c)
 		return
 	}
 
 	c.SetCookie("access_token", accessToken, int(cfg.C.AccessTokenTTL.Seconds()), "/", "fdfz.top", false, false)
-	c.SetCookie("session_token", sessionToken, int(dur.Seconds()), "/", "fdfz.top", true, true)
+	c.SetCookie("session_token", sessionToken, int(exp.Sub(time.Now()).Seconds()), "/", "fdfz.top", true, true)
+
+	c.JSON(http.StatusOK, gin.H{})
+}
+
+func refreshTokenHandler(c *gin.Context) {
+	sessionToken, err := c.Cookie("session_token")
+	if errors.Is(err, http.ErrNoCookie) {
+		errs.NotFoundError().AppendDetails("会话令牌不存在").Respond(c)
+		return
+	} else if err != nil {
+		errs.CreateAndLogInternalError(err, "Failed to get session token cookie").AppendDetails("会话令牌获取失败", "令牌刷新失败").Respond(c)
+		return
+	}
+
+	hash, err := crypto.HashArgon2ID(sessionToken)
+	if err != nil {
+		errs.CreateAndLogInternalError(err, "Failed to hash session token").AppendDetails("令牌哈希失败", "令牌刷新失败").Respond(c)
+		return
+	}
+
+	session, sErr := auth.GetSessionByTokenHash(c.Request.Context(), hash)
+	if sErr != nil {
+		errs.CreateAndLogInternalError(sErr, "Failed to get session by token hash").AppendDetails("会话获取失败", "令牌刷新失败").Respond(c)
+		return
+	} else if session == nil {
+		errs.NotFoundError().AppendDetails("会话不存在", "令牌刷新失败").Respond(c)
+		return
+	}
+
+	usr, uErr := user.GetUserByID(c.Request.Context(), session.UserID)
+	if uErr != nil {
+		uErr.AppendDetails("令牌刷新失败").Respond(c)
+		return
+	}
+
+	ban, uErr := user.GetUserBan(c.Request.Context(), usr.ID)
+	if uErr != nil {
+		uErr.AppendDetails("令牌刷新失败").Respond(c)
+		return
+	}
+	if ban != nil && ban.Enabled {
+		if ban.EndTime.Valid {
+			errs.PermissionDeniedError().AppendDetails(
+				fmt.Sprintf("用户已封禁：%s（%s）", ban.Reason, ban.EndTime.Time.Format("2006-01-02 15:04:05")),
+				"令牌刷新失败",
+			).Respond(c)
+		} else {
+			errs.PermissionDeniedError().AppendDetails(
+				fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
+				"令牌刷新失败",
+			).Respond(c)
+		}
+		return
+	}
+
+	sessionToken, cErr := crypto.GenerateCode(128, crypto.TokenCharset)
+	if cErr != nil {
+		errs.CreateAndLogInternalError(cErr, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
+		return
+	}
+	sessionTokenHash, cErr := crypto.HashArgon2ID(sessionToken)
+	if cErr != nil {
+		errs.CreateAndLogInternalError(cErr, "Failed to hash session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
+		return
+	}
+
+	perms, uErr := user.GetUserPerms(c.Request.Context(), session.UserID)
+	if uErr != nil {
+		uErr.AppendDetails("令牌刷新失败").Respond(c)
+		return
+	}
+
+	accessToken, cErr := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
+		UserID:      session.UserID,
+		TokenType:   model.TokenTypeUser,
+		Permissions: perm.MatchAll(perms),
+		IsTemporary: session.IsTemporary,
+	})
+	if cErr != nil {
+		errs.CreateAndLogInternalError(cErr, "Failed to generate access token").AppendDetails("令牌生成失败", "令牌刷新失败").Respond(c)
+		return
+	}
+
+	exp, aErr := auth.UpdateSessionClient(c, session.UUID, sessionTokenHash)
+	if aErr != nil {
+		aErr.AppendDetails("令牌刷新失败").Respond(c)
+		return
+	}
+
+	c.SetCookie("access_token", accessToken, int(cfg.C.AccessTokenTTL.Seconds()), "/", "fdfz.top", false, false)
+	c.SetCookie("session_token", sessionToken, int(exp.Sub(time.Now()).Seconds()), "/", "fdfz.top", true, true)
 
 	c.JSON(http.StatusOK, gin.H{})
 }

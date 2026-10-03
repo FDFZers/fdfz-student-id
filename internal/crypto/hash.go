@@ -17,7 +17,7 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	argonTime    = 1
+	argonTime    = 3
 	argonMemory  = 64 * 1024 // 64 MiB in KiB
 	argonThreads = 4
 	argonKeyLen  = 32

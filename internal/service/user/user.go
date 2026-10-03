@@ -36,8 +36,8 @@ const createUserWithPasswordSQL = `
 WITH new_user AS (
     INSERT INTO users (
         username, type, student_num, real_name, school,
-        nickname, signature, birthday, bio, visibilities
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        nickname, signature, bio, visibilities
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING id, created_at, updated_at
 ),
 new_password AS (
@@ -70,7 +70,6 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 		u.School,
 		u.Nickname,
 		u.Signature,
-		u.Birthday,
 		u.Bio,
 		vis,
 		pwd.Password,
@@ -98,7 +97,7 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 
 const getUserSQL = `
 SELECT id, username, type, student_num, real_name, school,
-    nickname, signature, birthday, bio, visibilities,
+    nickname, signature, bio, visibilities,
     created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1 AND deleted_at IS NULL
@@ -131,7 +130,6 @@ func GetUserByID(
 				&u.School,
 				&u.Nickname,
 				&u.Signature,
-				&u.Birthday,
 				&u.Bio,
 				&vis,
 				&u.CreatedAt,
@@ -193,9 +191,8 @@ SET
     school       = $5,
     nickname     = $6,
     signature    = $7,
-    birthday     = $8,
-    bio          = $9,
-    visibilities = $10
+    bio          = $8,
+    visibilities = $9
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING updated_at
 `
@@ -228,7 +225,6 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 		u.School,
 		u.Nickname,
 		u.Signature,
-		u.Birthday,
 		u.Bio,
 		vis,
 	).Scan(&u.UpdatedAt)

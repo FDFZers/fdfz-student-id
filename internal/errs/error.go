@@ -62,8 +62,11 @@ func RateLimitExceededError() *Error {
 func UnauthorizedError() *Error {
 	return CreateError(http.StatusUnauthorized, "unauthorized")
 }
+func PermissionDeniedError() *Error {
+	return CreateError(http.StatusForbidden, "permission_denied")
+}
 func UnsupportedMediaTypeError() *Error {
-	return CreateError(http.StatusUnsupportedMediaType, "unauthorized")
+	return CreateError(http.StatusUnsupportedMediaType, "unsupported_media_type")
 }
 func NotFoundError() *Error {
 	return CreateError(http.StatusNotFound, "not_found")

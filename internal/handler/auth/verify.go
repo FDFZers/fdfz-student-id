@@ -18,7 +18,7 @@ type verifyEmailInitReq struct {
 	SessionID uuid.UUID `json:"session_id"`
 }
 
-func verifyEmailInit(c *gin.Context) {
+func verifyEmailInitHandler(c *gin.Context) {
 	var req verifyEmailInitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errs.BadRequestError().AppendDetails("请求解析失败", "邮箱验证码发送失败").Respond(c)
@@ -73,7 +73,7 @@ type verifyEmailReq struct {
 	Code      string    `json:"code"`
 }
 
-func verifyEmail(c *gin.Context) {
+func verifyEmailHandler(c *gin.Context) {
 	var req verifyEmailReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errs.BadRequestError().AppendDetails("请求解析失败", "邮箱验证失败").Respond(c)
@@ -120,7 +120,7 @@ type verifyTOTPReq struct {
 	SessionID uuid.UUID `json:"session_id"`
 }
 
-func verifyTOTP(c *gin.Context) {
+func verifyTOTPHandler(c *gin.Context) {
 	var req verifyTOTPReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errs.BadRequestError().AppendDetails("请求解析失败", "TOTP 验证失败").Respond(c)

@@ -1,67 +1,42 @@
 package perm
 
-import "fmt"
+import (
+	"sort"
+)
 
-type MatchFunc = func(perm string) bool
-
-func And(a, b MatchFunc) MatchFunc {
-	return func(perm string) bool {
-		return a(perm) && b(perm)
-	}
+func Contains(s []string, target string) bool {
+	i := sort.Search(len(s), func(i int) bool { return s[i] >= target })
+	return i < len(s) && s[i] == target
 }
 
-func Or(a, b MatchFunc) MatchFunc {
-	return func(perm string) bool {
-		return a(perm) || b(perm)
-	}
-}
-
-func Not(a MatchFunc) MatchFunc {
-	return func(perm string) bool {
-		return !a(perm)
-	}
-}
-
-func All(funcs ...MatchFunc) MatchFunc {
-	return func(perm string) bool {
-		for _, m := range funcs {
-			if !m(perm) {
-				return false
-			}
+func ContainsAny(s []string, targets ...string) bool {
+	i, j := 0, 0
+	for i < len(s) && j < len(targets) {
+		switch {
+		case s[i] < targets[j]:
+			i++
+		case s[i] > targets[j]:
+			j++
+		default:
+			return true
 		}
+	}
+	return false
+}
+
+func ContainsAll(s []string, targets ...string) bool {
+	if len(targets) == 0 {
 		return true
 	}
-}
-
-func Any(funcs ...MatchFunc) MatchFunc {
-	return func(perm string) bool {
-		for _, m := range funcs {
-			if m(perm) {
-				return true
-			}
-		}
+	if len(targets) > len(s) {
 		return false
 	}
-}
-
-func None(funcs ...MatchFunc) MatchFunc {
-	return func(perm string) bool {
-		for _, m := range funcs {
-			if m(perm) {
-				return false
-			}
+	i, j := 0, 0
+	for i < len(s) && j < len(targets) {
+		if s[i] == targets[j] {
+			j++
 		}
-		return true
+		i++
 	}
-}
-
-func MatchPerm(perm string) MatchFunc {
-	if ok, err := RegexPerm.MatchString(perm); err != nil {
-		panic(fmt.Errorf("failed to validate permission: %w", err))
-	} else if !ok {
-		panic(fmt.Errorf("invalid permission %s", perm))
-	}
-	return func(other string) bool {
-		return perm == other
-	}
+	return j == len(targets)
 }

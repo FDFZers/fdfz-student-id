@@ -4,8 +4,6 @@ import (
 	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/perm"
-	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -21,7 +19,7 @@ func ParseToken() gin.HandlerFunc {
 		}
 		claims, err := crypto.ParseJWT(token)
 		if err != nil {
-			errs.UnauthorizedError().AppendDetails("令牌解析失败", "鉴权失败").Abort(c)
+			errs.BadRequestError().AppendDetails("令牌解析失败", "鉴权失败").Abort(c)
 			return
 		}
 		c.Set("token_claims", claims)
@@ -44,21 +42,9 @@ func RequireTokenType(typ model.TokenType) gin.HandlerFunc {
 		RequireToken()(c)
 		claims := c.MustGet("token_claims").(*model.TokenClaims)
 		if claims.TokenType != typ {
-			errs.UnauthorizedError().AppendDetails("令牌类型错误", "鉴权失败").Abort(c)
+			errs.PermissionDeniedError().AppendDetails("令牌类型错误", "鉴权失败").Abort(c)
 			return
 		}
 		c.Next()
-	}
-}
-
-func RequirePermission(matchable perm.MatchFunc) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		RequireToken()(c)
-		claims := c.MustGet("token_claims").(*model.TokenClaims)
-		if slices.ContainsFunc(claims.Permissions, matchable) {
-			c.Next()
-			return
-		}
-		errs.UnauthorizedError().AppendDetails("权限不足", "鉴权失败").Abort(c)
 	}
 }

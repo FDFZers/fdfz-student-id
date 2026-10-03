@@ -68,7 +68,9 @@ func RunMigrations() error {
 	}
 	defer func(m *migrate.Migrate) {
 		sourceErr, dbErr := m.Close()
-		slog.Warn("Failed to close migration database", "sourceErr", sourceErr, "dbErr", dbErr)
+		if sourceErr != nil || dbErr != nil {
+			slog.Warn("Failed to close migration database", "sourceErr", sourceErr, "dbErr", dbErr)
+		}
 	}(m)
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {

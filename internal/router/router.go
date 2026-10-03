@@ -4,6 +4,7 @@ import (
 	"fdfz-student-id/internal/handler/auth"
 	"fdfz-student-id/internal/handler/healthcheck"
 	"fdfz-student-id/internal/handler/misc"
+	"fdfz-student-id/internal/handler/user"
 	"strings"
 	"time"
 
@@ -44,6 +45,7 @@ func InitRouter(r *gin.Engine) {
 
 	misc.InitRoutes(v1, internal)
 	auth.InitRoutes(internal)
+	user.InitRoutes(v1)
 }
 
 func InitHealthCheckRouter(r *gin.Engine) {

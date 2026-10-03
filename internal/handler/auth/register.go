@@ -28,7 +28,7 @@ type createRegisterRequestReq struct {
 	AltchaPayload string         `form:"altcha_payload"`
 }
 
-func createRegisterRequestHandler(c *gin.Context) {
+func createRegisterHandler(c *gin.Context) {
 	// 解析请求
 	var req createRegisterRequestReq
 	if err := c.ShouldBind(&req); err != nil {

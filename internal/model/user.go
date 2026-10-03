@@ -11,11 +11,13 @@ import (
 // ENUM(student, teacher)
 type UserType string
 
+// ENUM(FDFZ = fdfz,FFXH = ffxh,FFQP = ffqp,FFPD = ffpd, FFJA = ffja)
+type School string
+
 // ENUM(public, friends, private)
 type Visibility string
 
 type Visibilities struct {
-	Birthday Visibility `json:"birthday"`
 	RealName Visibility `json:"real_name"`
 }
 
@@ -30,7 +32,6 @@ type User struct {
 
 	Nickname  null.String `json:"nickname" db:"nickname"`
 	Signature string      `json:"signature" db:"signature"`
-	Birthday  null.Time   `json:"birthday" db:"birthday"`
 	Bio       string      `json:"bio" db:"bio"`
 
 	Visibilities Visibilities `json:"visibilities" db:"visibilities"`

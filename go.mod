@@ -3,6 +3,7 @@ module fdfz-student-id
 go 1.26.0
 
 require (
+	github.com/Masterminds/squirrel v1.5.4
 	github.com/altcha-org/altcha-lib-go/v2 v2.0.0-20260929091010-3753ae8468c1
 	github.com/dlclark/regexp2 v1.12.0
 	github.com/gin-contrib/cors v1.7.9
@@ -50,6 +51,8 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/labstack/gommon v0.5.0 // indirect
+	github.com/lann/builder v0.0.0-20180802200727-47ae307949d0 // indirect
+	github.com/lann/ps v0.0.0-20150810152359-62de8c46ede0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

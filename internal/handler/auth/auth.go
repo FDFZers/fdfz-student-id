@@ -8,10 +8,11 @@ import (
 
 func InitRoutes(internal *gin.RouterGroup) {
 	group := internal.Group("/auth")
-	group.POST("/register", middleware.LimitSize(5<<20), createRegisterRequestHandler)
-	group.POST("/login/init", loginInitRequestHandler)
-	group.POST("/login/finalize", loginFinalizeRequestHandler)
-	group.POST("/verify/email/init", verifyEmailInit)
-	group.POST("/verify/email/verify", verifyEmail)
-	group.POST("/verify/totp", verifyTOTP)
+	group.POST("/register", middleware.LimitSize(5<<20), createRegisterHandler)
+	group.POST("/login/init", loginInitHandler)
+	group.POST("/login/finalize", loginFinalizeHandler)
+	group.POST("/verify/email/init", verifyEmailInitHandler)
+	group.POST("/verify/email/verify", verifyEmailHandler)
+	group.POST("/verify/totp", verifyTOTPHandler)
+	group.POST("/refresh", refreshTokenHandler)
 }

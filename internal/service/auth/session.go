@@ -167,27 +167,28 @@ func ListUserSessions(
 const updateSessionClientSQL = `
 UPDATE user_sessions
 SET last_used_at = now(),
-    last_ip = $2,
-    last_user_agent = $3,
+    session_token_hash = $2,
+    last_ip = $3,
+    last_user_agent = $4,
     expires_at = CASE
-        WHEN is_temporary = false THEN $4
+        WHEN is_temporary = false THEN $5
         ELSE expires_at
     END
 WHERE uuid = $1 AND revoked_at IS NULL
-RETURNING session_token_hash
+RETURNING expires_at
 `
 
 func UpdateSessionClient(
 	c *gin.Context,
 	id uuid.UUID,
-) *errs.Error {
-
-	var tokenHash string
-	err := db.R.QueryRow(c.Request.Context(), updateSessionClientSQL, id, c.ClientIP(), c.Request.UserAgent(), time.Now().Add(cfg.C.PermSessionTokenTTL)).Scan(&tokenHash)
+	sessionTokenHash string,
+) (time.Time, *errs.Error) {
+	var expiresAt time.Time
+	err := db.R.QueryRow(c.Request.Context(), updateSessionClientSQL, id, sessionTokenHash, c.ClientIP(), c.Request.UserAgent(), time.Now().Add(cfg.C.PermSessionTokenTTL)).Scan(&expiresAt)
 	if err != nil {
-		return errs.CreatePGError(err, "用户会话", "Failed to update session").AppendDetails("用户会话更新失败")
+		return expiresAt, errs.CreatePGError(err, "用户会话", "Failed to update session").AppendDetails("用户会话更新失败")
 	}
-	return nil
+	return expiresAt, nil
 }
 
 // ---------------------------------------------------------------------------
