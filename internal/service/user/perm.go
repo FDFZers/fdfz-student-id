@@ -4,6 +4,8 @@ import (
 	"context"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
+	"fdfz-student-id/internal/perm"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -36,5 +38,15 @@ func GetUserPerms(
 	if err != nil {
 		return nil, errs.CreatePGError(err, "用户权限", "Failed to get user permissions").AppendDetails("用户权限获取失败")
 	}
+
+	for _, p := range perms {
+		if ok, err := perm.RegexPermUser.MatchString(p); err != nil {
+			return nil, errs.CreateAndLogInternalError(err, "用户权限", "Failed to validate permission").AppendDetails("权限校验失败", "用户权限获取失败")
+		} else if !ok {
+			slog.Error("Invalid user permission", "userID", userID, "permission", p)
+			return nil, errs.InternalError().AppendDetails("存在无效用户权限", "用户权限获取失败")
+		}
+	}
+
 	return perms, nil
 }

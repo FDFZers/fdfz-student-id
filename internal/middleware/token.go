@@ -51,7 +51,7 @@ func RequireTokenType(typ model.TokenType) gin.HandlerFunc {
 	}
 }
 
-func RequirePermission(matchable perm.MatchableFunc) gin.HandlerFunc {
+func RequirePermission(matchable perm.MatchFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		RequireToken()(c)
 		claims := c.MustGet("token_claims").(*model.TokenClaims)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/db"
+	"fdfz-student-id/internal/perm"
 	"fdfz-student-id/internal/router"
 	"fdfz-student-id/internal/schedule"
 	"fdfz-student-id/internal/storage"
@@ -87,6 +88,12 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("Database migrations completed")
+
+	// 加载权限
+	if err := perm.LoadDefinitions(context.Background()); err != nil {
+		slog.Error("Error loading permissions", "error", err)
+		os.Exit(1)
+	}
 
 	// 启动服务器
 	cron, err := schedule.ScheduleCron()

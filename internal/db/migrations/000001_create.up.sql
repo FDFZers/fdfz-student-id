@@ -319,29 +319,6 @@ CREATE TRIGGER trg_permissions_updated_at
 EXECUTE FUNCTION fn_update_timestamp();
 
 -- =============================================
--- 权限组 permission_groups
--- =============================================
-CREATE TABLE permission_groups
-(
-    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name        VARCHAR(128)   NOT NULL UNIQUE,
-    permissions VARCHAR(128)[] NOT NULL DEFAULT '{}',
-    description TEXT           NOT NULL DEFAULT '',
-    disabled    BOOLEAN        NOT NULL DEFAULT false,
-    created_at  TIMESTAMPTZ    NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ    NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_permission_groups_disabled
-    ON permission_groups (disabled);
-
-CREATE TRIGGER trg_permission_groups_updated_at
-    BEFORE UPDATE
-    ON permission_groups
-    FOR EACH ROW
-EXECUTE FUNCTION fn_update_timestamp();
-
--- =============================================
 -- 用户权限 user_permissions
 -- =============================================
 CREATE TABLE user_permissions

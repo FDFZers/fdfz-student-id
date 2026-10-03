@@ -84,7 +84,7 @@ func loginInitRequestHandler(c *gin.Context) {
 		return
 	}
 
-	methods := make([]string, 0)
+	methods := make([]string, 0, 3)
 	if session.TOTPSecret.Valid {
 		methods = append(methods, "totp")
 	}
@@ -172,12 +172,10 @@ func loginFinalizeRequestHandler(c *gin.Context) {
 		return
 	}
 
-	matched := perm.MatchKnown(perms)
-
 	accessToken, cErr := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      authSession.UserID,
 		TokenType:   model.TokenTypeUser,
-		Permissions: perm.MatchResultToPermStrings(matched),
+		Permissions: perm.MatchAll(perms),
 		IsTemporary: authSession.IsTemporary,
 	})
 	if cErr != nil {
