@@ -186,8 +186,7 @@ func ReviewRegisterRequest(
 		School:     req.School,
 	}
 	pwd := &model.UserPassword{
-		Password:  req.Password,
-		Algorithm: model.PasswordAlgorithmArgon2ID,
+		Password: req.Password,
 	}
 	if createErr := CreateUser(ctx, u, pwd); createErr != nil {
 		return rollback(createErr)

@@ -2,7 +2,6 @@ BEGIN;
 
 -- 枚举类型定义
 -- =============================================
-CREATE TYPE password_algorithm AS ENUM ('argon2id', 'bcrypt');
 CREATE TYPE user_type AS ENUM ('student', 'teacher');
 CREATE TYPE school AS ENUM ('fdfz', 'ffxh', 'ffqp', 'ffpd', 'ffja');
 CREATE TYPE oauth_client_type AS ENUM ('confidential', 'public');
@@ -39,7 +38,9 @@ CREATE TABLE users
     signature    VARCHAR(128) NOT NULL DEFAULT '',
     bio          TEXT         NOT NULL DEFAULT '',
 
-    visibilities JSONB        NOT NULL DEFAULT '{"real_name":"private"}',
+    visibilities JSONB        NOT NULL DEFAULT '{
+      "real_name": "private"
+    }',
 
     created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -97,10 +98,9 @@ CREATE INDEX idx_user_bans_enabled_end_time
 -- =============================================
 CREATE TABLE user_passwords
 (
-    user_id    BIGINT             NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
-    password   VARCHAR(256)       NOT NULL,
-    algorithm  password_algorithm NOT NULL DEFAULT 'argon2id',
-    updated_at TIMESTAMPTZ        NOT NULL DEFAULT now(),
+    user_id    BIGINT       NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+    password   VARCHAR(256) NOT NULL, -- argon2id
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
     CONSTRAINT pk_user_passwords PRIMARY KEY (user_id)
 );
 
@@ -178,7 +178,7 @@ CREATE TABLE user_sessions
     user_id            BIGINT       NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 
     session_token_hash VARCHAR(128) NOT NULL, -- argon2id
-    is_temporary       BOOLEAN      NOT NULL DEFAULT false,
+    is_temporary       BOOLEAN      NOT NULL             DEFAULT false,
 
     created_at         TIMESTAMPTZ  NOT NULL             DEFAULT now(),
     updated_at         TIMESTAMPTZ  NOT NULL             DEFAULT now(),

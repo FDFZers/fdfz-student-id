@@ -4,12 +4,10 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // ---------------------------------------------------------------------------
@@ -90,26 +88,4 @@ func decodeArgon2IDHash(encodedHash string) (*params, []byte, []byte, error) {
 	}
 
 	return &p, salt, hash, nil
-}
-
-// ---------------------------------------------------------------------------
-// Bcrypt
-// ---------------------------------------------------------------------------
-
-func HashBcrypt(str string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(str), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
-}
-
-func VerifyBcrypt(str, encodedHash string) (bool, error) {
-	err := bcrypt.CompareHashAndPassword([]byte(encodedHash), []byte(str))
-	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	return true, nil
 }

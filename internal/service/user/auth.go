@@ -15,13 +15,13 @@ import (
 // ---------------------------------------------------------------------------
 
 const getUserPasswordSQL = `
-SELECT user_id, password, algorithm, updated_at FROM user_passwords WHERE user_id = $1
+SELECT user_id, password, updated_at FROM user_passwords WHERE user_id = $1
 `
 
 func GetUserPassword(ctx context.Context, userID int64) (*model.UserPassword, *errs.Error) {
 	var pwd model.UserPassword
 	err := db.R.QueryRow(ctx, getUserPasswordSQL, userID).
-		Scan(&pwd.UserID, &pwd.Password, &pwd.Algorithm, &pwd.UpdatedAt)
+		Scan(&pwd.UserID, &pwd.Password, &pwd.UpdatedAt)
 	if err != nil {
 		return nil, errs.CreatePGError(err, "密码", "Failed to get user password").AppendDetails("获取密码失败")
 	}
@@ -33,10 +33,10 @@ func GetUserPassword(ctx context.Context, userID int64) (*model.UserPassword, *e
 // ---------------------------------------------------------------------------
 
 const upsertUserPasswordSQL = `
-INSERT INTO user_passwords (user_id, password, algorithm)
-VALUES ($1, $2, $3)
+INSERT INTO user_passwords (user_id, password)
+VALUES ($1, $2)
 ON CONFLICT (user_id)
-DO UPDATE SET password = EXCLUDED.password, algorithm = EXCLUDED.algorithm
+DO UPDATE SET password = EXCLUDED.password
 RETURNING updated_at
 `
 
@@ -44,7 +44,6 @@ func UpsertUserPassword(ctx context.Context, pwd *model.UserPassword) *errs.Erro
 	err := db.R.QueryRow(ctx, upsertUserPasswordSQL,
 		pwd.UserID,
 		pwd.Password,
-		pwd.Algorithm,
 	).Scan(&pwd.UpdatedAt)
 	if err != nil {
 		return errs.CreatePGError(err, "密码", "Failed to upsert user password").AppendDetails("密码设置失败")

@@ -7,10 +7,8 @@ import (
 	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/user"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,21 +54,10 @@ func ValidateUserPassword(ctx context.Context, userID int64, password string) *e
 	if err != nil {
 		return err.AppendDetails("密码验证失败")
 	}
-	if ok, err := crypto.VerifyUserPassword(password, pwd); err != nil {
+	if ok, err := crypto.VerifyArgon2ID(password, pwd.Password); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to verify user password").AppendDetails("密码验证失败")
 	} else if !ok {
 		return errs.UnauthorizedError().AppendDetails("用户名或密码错误", "密码验证失败")
-	}
-	if pwd.Algorithm == model.PasswordAlgorithmBcrypt {
-		hash, err := crypto.HashArgon2ID(password)
-		if err != nil {
-			slog.Warn("Failed to hash when migrating password", "error", err, "userID", userID)
-		}
-		user.UpsertUserPassword(ctx, &model.UserPassword{
-			UserID:    userID,
-			Password:  hash,
-			Algorithm: model.PasswordAlgorithmArgon2ID,
-		})
 	}
 	return nil
 }

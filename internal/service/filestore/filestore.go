@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/storage"
 	fileutils "fdfz-student-id/internal/util/file"
 	"io"
@@ -19,7 +18,21 @@ import (
 	"github.com/guregu/null/v6"
 )
 
-func UploadFile(fileHeader *multipart.FileHeader, request *model.StoreFileReq) *errs.Error {
+type StoreFileReq struct {
+	Slug         string      `json:"slug,omitempty"`
+	FilePath     string      `json:"file_path,omitempty"`
+	FileName     string      `json:"file_name,omitempty"`
+	ContentType  null.String `json:"content_type"`
+	SHA512       null.String `json:"sha512"`
+	IsPrivate    bool        `json:"is_private"`
+	ShouldUpsert bool        `json:"should_upsert"`
+	ShouldCopy   bool        `json:"should_copy"`
+	UserID       null.Int64  `json:"user_id"`
+	AppID        null.Int64  `json:"app_id"`
+	BanComment   null.String `json:"ban_comment"`
+}
+
+func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.Error {
 	rel, dst, err := storage.UploadTempPath()
 	if err != nil {
 		return errs.InternalError().AppendDetails("临时文件路径获取失败")
@@ -55,7 +68,7 @@ func UploadFile(fileHeader *multipart.FileHeader, request *model.StoreFileReq) *
 		}
 	}(dst)
 
-	jsonData, err := json.Marshal(&model.StoreFileReq{
+	jsonData, err := json.Marshal(&StoreFileReq{
 		Slug:         request.Slug,
 		FilePath:     rel,
 		FileName:     request.FileName,

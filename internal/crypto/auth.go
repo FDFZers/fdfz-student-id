@@ -2,8 +2,6 @@ package crypto
 
 import (
 	"crypto/rand"
-	"fdfz-student-id/internal/model"
-	"fmt"
 	"math/big"
 	"strconv"
 	"time"
@@ -57,19 +55,4 @@ func VerifyTOTP(secret string, code string) (bool, error) {
 		return false, err
 	}
 	return c == code, nil
-}
-
-// ---------------------------------------------------------------------------
-// 密码
-// ---------------------------------------------------------------------------
-
-func VerifyUserPassword(password string, info *model.UserPassword) (bool, error) {
-	switch info.Algorithm {
-	case model.PasswordAlgorithmArgon2ID:
-		return VerifyArgon2ID(password, info.Password)
-	case model.PasswordAlgorithmBcrypt:
-		return VerifyBcrypt(password, info.Password)
-	default:
-		return false, fmt.Errorf("unknown password algorithm: %s", info.Algorithm)
-	}
 }

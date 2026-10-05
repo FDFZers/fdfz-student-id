@@ -41,8 +41,8 @@ WITH new_user AS (
     RETURNING id, created_at, updated_at
 ),
 new_password AS (
-    INSERT INTO user_passwords (user_id, password, algorithm)
-    SELECT id, $11, $12
+    INSERT INTO user_passwords (user_id, password)
+    SELECT id, $11
     FROM new_user
     RETURNING user_id, updated_at
 )
@@ -73,7 +73,6 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 		u.Bio,
 		vis,
 		pwd.Password,
-		pwd.Algorithm,
 	).Scan(
 		&u.ID,
 		&u.CreatedAt,

@@ -69,7 +69,7 @@ func setAvatarHandler(c *gin.Context) {
 		return
 	}
 
-	if err := filestore.UploadFile(fileHeader, &model.StoreFileReq{
+	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
 		Slug:     "/student_id/avatars/" + targetStr,
 		FileName: targetStr + strings.ToLower(path.Ext(fileHeader.Filename)),
 		AppID:    null.IntFrom(1),
@@ -135,7 +135,7 @@ func setBannerHandler(c *gin.Context) {
 		return
 	}
 
-	if err := filestore.UploadFile(fileHeader, &model.StoreFileReq{
+	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
 		Slug:     "/student_id/banners/" + targetStr,
 		FileName: targetStr + strings.ToLower(path.Ext(fileHeader.Filename)),
 		AppID:    null.IntFrom(1),

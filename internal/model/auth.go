@@ -12,9 +12,6 @@ import (
 // ENUM(pending, approved, rejected)
 type RegisterRequestStatus string
 
-// ENUM(argon2ID = "argon2id", bcrypt)
-type PasswordAlgorithm string
-
 // ENUM(user, stepup, OAuth = "oauth")
 type TokenType string
 
@@ -38,10 +35,9 @@ type RegisterRequest struct {
 }
 
 type UserPassword struct {
-	UserID    int64             `json:"user_id" db:"user_id"`
-	Password  string            `json:"password" db:"password"`
-	Algorithm PasswordAlgorithm `json:"algorithm" db:"algorithm"`
-	UpdatedAt time.Time         `json:"updated_at" db:"updated_at"`
+	UserID    int64     `json:"user_id" db:"user_id"`
+	Password  string    `json:"password" db:"password"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type UserTOTP struct {
