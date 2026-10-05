@@ -24,8 +24,8 @@ func RegisterRequestCacheKey(id int64) string {
 
 const createRegisterRequestSQL = `
 INSERT INTO register_requests (
-    username, type, student_num, real_name, school, password
-) VALUES ($1, $2, $3, $4, $5, $6)
+    username, nickname, type, student_num, real_name, school, password
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, created_at, status,
     created_user_id, reviewer_user_id, review_comment, reviewed_at
 `
@@ -39,6 +39,7 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 
 	err := db.R.QueryRow(ctx, createRegisterRequestSQL,
 		r.Username,
+		r.Nickname,
 		r.Type,
 		r.StudentNum,
 		r.RealName,
@@ -69,7 +70,7 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 // ---------------------------------------------------------------------------
 
 const getRegisterRequestSQL = `
-SELECT id, username, type, student_num, real_name, school, password,
+SELECT id, username, nickname, type, student_num, real_name, school, password,
     created_at, status, created_user_id, reviewer_user_id, review_comment, reviewed_at
 FROM register_requests
 WHERE id = $1
@@ -89,6 +90,7 @@ func GetRegisterRequestByID(
 			err := db.R.QueryRow(ctx, getRegisterRequestSQL, id).Scan(
 				&req.ID,
 				&req.Username,
+				&req.Nickname,
 				&req.Type,
 				&req.StudentNum,
 				&req.RealName,
@@ -180,6 +182,7 @@ func ReviewRegisterRequest(
 	}
 	u := &model.User{
 		Username:   req.Username,
+		Nickname:   req.Nickname,
 		Type:       req.Type,
 		StudentNum: req.StudentNum,
 		RealName:   req.RealName,

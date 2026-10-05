@@ -9,11 +9,12 @@ import (
 	"github.com/dlclark/regexp2"
 )
 
-var regexUsername = regexp2.MustCompile(`^.{1,32}$`, regexp2.Multiline)
-var regexRealName = regexp2.MustCompile(`^[\u4e00-\u9fff\u00b7]{1,4}$`, regexp2.Multiline)
-var regexStudentNum = regexp2.MustCompile(`^\d{8}$`, regexp2.Multiline)
-var regexEmail = regexp2.MustCompile(`^([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\"(\[\]!#-[^-~ \t]|(\\[\t -~]))+\")@([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\[[\t -Z^-~]*])$`, regexp2.Multiline)
-var regexPassword = regexp2.MustCompile(`^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,64}$`, regexp2.Multiline)
+var regexUsername = regexp2.MustCompile(`\A[a-zA-Z0-9_-]{1,32}\z`, regexp2.None)
+var regexNickname = regexp2.MustCompile(`\A.{1,32}\z`, regexp2.None)
+var regexRealName = regexp2.MustCompile(`\A[\u4e00-\u9fff\u00b7]{1,4}\z`, regexp2.None)
+var regexStudentNum = regexp2.MustCompile(`\A\d{8}\z`, regexp2.None)
+var regexEmail = regexp2.MustCompile(`\A([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\"(\[\]!#-[^-~ \t]|(\\[\t -~]))+\")@([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\[[\t -Z^-~]*])\z`, regexp2.None)
+var regexPassword = regexp2.MustCompile(`\A^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,64}$\z`, regexp2.None)
 var emailBlockedDomains = map[string]struct{}{
 	"fdfz.top": {},
 }
@@ -23,6 +24,15 @@ func ValidateUsername(username string) *errs.Error {
 		return errs.CreateAndLogInternalError(err, "Failed to validate username").AppendDetails("用户名校验失败")
 	} else if !ok {
 		return errs.BadRequestError().AppendDetails("无效的用户名")
+	}
+	return nil
+}
+
+func ValidateNickname(nickname string) *errs.Error {
+	if ok, err := regexNickname.MatchString(nickname); err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to validate nickname").AppendDetails("昵称校验失败")
+	} else if !ok {
+		return errs.BadRequestError().AppendDetails("无效的昵称")
 	}
 	return nil
 }

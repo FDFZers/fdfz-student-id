@@ -20,6 +20,7 @@ import (
 
 type createRegisterRequestReq struct {
 	Username      string         `form:"username"`
+	Nickname      string         `form:"nickname"`
 	Type          model.UserType `form:"type" binding:"required"`
 	StudentNum    string         `form:"student_num"`
 	RealName      string         `form:"real_name"`
@@ -95,6 +96,11 @@ func createRegisterHandler(c *gin.Context) {
 		return
 	}
 
+	var nickname null.String
+	if req.Nickname != "" && req.Nickname != req.Username {
+		nickname = null.StringFrom(req.Nickname)
+	}
+
 	// 查询用户名占用信息
 	if taken, err := user.IsUsernameTaken(c.Request.Context(), req.Username); err != nil {
 		errs.InternalError().AppendDetails("用户名占用信息查询失败", "注册失败").Respond(c)
@@ -114,6 +120,7 @@ func createRegisterHandler(c *gin.Context) {
 	// 创建注册请求
 	r := &model.RegisterRequest{
 		Username:   req.Username,
+		Nickname:   nickname,
 		Type:       req.Type,
 		StudentNum: studentNum,
 		RealName:   req.RealName,

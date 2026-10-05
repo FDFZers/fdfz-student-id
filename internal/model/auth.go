@@ -23,8 +23,9 @@ type RegisterRequest struct {
 	RealName   string      `json:"real_name" db:"real_name"`
 	School     School      `json:"school" db:"school"`
 
-	Username string `json:"username" db:"username"`
-	Password string `json:"password" db:"password"`
+	Username string      `json:"username" db:"username"`
+	Nickname null.String `json:"nickname" db:"nickname"`
+	Password string      `json:"password" db:"password"`
 
 	CreatedAt      time.Time             `json:"created_at" db:"created_at"`
 	Status         RegisterRequestStatus `json:"status" db:"status"`

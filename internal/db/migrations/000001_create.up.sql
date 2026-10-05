@@ -227,6 +227,7 @@ CREATE TABLE register_requests
     school           school                  NOT NULL DEFAULT 'fdfz',
 
     username         VARCHAR(32)             NOT NULL,
+    nickname         VARCHAR(32)                      DEFAULT NULL,
     password         VARCHAR(256)            NOT NULL, -- argon2id
 
     created_at       TIMESTAMPTZ             NOT NULL DEFAULT now(),
