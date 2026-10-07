@@ -83,6 +83,8 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 		return errs.CreatePGError(err, "用户", "Failed to create user").AppendDetails("用户创建失败")
 	}
 
+	// TODO: 增加权限
+
 	db.SetRedis(ctx, UserIDCacheKey(u.Username), u.ID, UserCacheDuration)
 	db.SetRedis(ctx, UserCacheKey(u.ID), u, UserCacheDuration)
 	db.R.Del(ctx, UsernameExistsCacheKey(u.Username))
@@ -157,7 +159,7 @@ func GetUserByUsername(
 ) (*model.User, *errs.Error) {
 	id, err := db.GetCached(
 		ctx,
-		"用户ID",
+		"用户 ID",
 		UserIDCacheKey(username),
 		UserCacheDuration,
 		func() (*int64, error) {

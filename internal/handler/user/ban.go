@@ -16,7 +16,7 @@ func getUserBanHandler(c *gin.Context) {
 	targetIDStr := c.Param("id")
 	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
 	if err != nil {
-		errs.BadRequestError().AppendDetails("无效的用户ID", "获取用户封禁信息失败").Respond(c)
+		errs.BadRequestError().AppendDetails("无效的用户 ID", "获取用户封禁信息失败").Respond(c)
 		return
 	}
 

@@ -12,10 +12,10 @@ import (
 
 var searchCfg = search.SearchConfig{
 	Table:             "users",
-	Item:              "user",
+	Item:              "用户",
 	Fields:            []search.Field{{ID: "id", Column: "id"}, {ID: "username", Column: "username"}, {ID: "nickname", Column: "nickname"}, {ID: "student_num", Column: "student_num"}},
 	MatchMethods:      search.MatchMethodValues(),
-	SortableFields:    []search.Field{{ID: "id", Column: "id"}, {ID: "username", Column: "username"}, {ID: "nickname", Column: "nickname"}, {ID: "student_num", Column: "student_num"}, {ID: "created_at", Column: "created_at"}},
+	SortableFields:    []search.Field{{ID: "username", Column: "username"}, {ID: "nickname", Column: "nickname"}, {ID: "student_num", Column: "student_num"}, {ID: "created_at", Column: "created_at"}},
 	Tags:              []search.Tag{{ID: "type", Column: "type", ValueMap: search.ValueMapOf(model.UserTypeNames())}, {ID: "school", Column: "school", ValueMap: search.ValueMapOf(model.SchoolNames())}},
 	DefaultSortColumn: "id",
 }

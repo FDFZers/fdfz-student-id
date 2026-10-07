@@ -1,0 +1,46 @@
+package regreq
+
+import (
+	"fdfz-student-id/internal/errs"
+	"fdfz-student-id/internal/model"
+	"fdfz-student-id/internal/perm"
+	"fdfz-student-id/internal/service/user"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+)
+
+type reviewRegisterReq struct {
+	ID      int64                       `json:"id"`
+	Status  model.RegisterRequestStatus `json:"status"`
+	Comment string                      `json:"comment"`
+}
+
+func reviewRegisterHandler(c *gin.Context) {
+	var req reviewRegisterReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errs.BadRequestError().AppendDetails("请求解析失败", "注册请求审核失败").Respond(c)
+		return
+	}
+
+	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	reqIDStr := c.Param("id")
+	reqID, err := strconv.ParseInt(reqIDStr, 10, 64)
+	if err != nil {
+		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册请求审核失败").Respond(c)
+		return
+	}
+
+	if !perm.Contains(claims.Permissions, "student_id.register_requests.review") {
+		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
+		return
+	}
+
+	if err := user.ReviewRegisterRequest(c.Request.Context(), reqID, req.Status, req.Comment, claims.UserID); err != nil {
+		err.Respond(c)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{})
+}
