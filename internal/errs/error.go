@@ -59,8 +59,14 @@ func RequestTooLargeError() *Error {
 func RateLimitExceededError() *Error {
 	return CreateError(http.StatusTooManyRequests, "rate_limit_exceeded")
 }
-func UnauthorizedError() *Error {
-	return CreateError(http.StatusUnauthorized, "unauthorized")
+func ForbiddenError() *Error {
+	return CreateError(http.StatusForbidden, "forbidden")
+}
+func InvalidTokenError() *Error {
+	return CreateError(http.StatusUnauthorized, "invalid_token")
+}
+func TokenExpiredError() *Error {
+	return CreateError(http.StatusUnauthorized, "token_expired")
 }
 func PermissionDeniedError() *Error {
 	return CreateError(http.StatusForbidden, "permission_denied")

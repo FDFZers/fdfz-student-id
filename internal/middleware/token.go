@@ -1,12 +1,14 @@
 package middleware
 
 import (
+	"errors"
 	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func ParseToken() gin.HandlerFunc {
@@ -19,7 +21,11 @@ func ParseToken() gin.HandlerFunc {
 		}
 		claims, err := crypto.ParseJWT(token)
 		if err != nil {
-			errs.BadRequestError().AppendDetails("令牌解析失败", "鉴权失败").Abort(c)
+			if errors.Is(err, jwt.ErrTokenExpired) {
+				errs.TokenExpiredError().AppendDetails("令牌过期", "鉴权失败").Abort(c)
+				return
+			}
+			errs.InvalidTokenError().AppendDetails("无效的令牌", "鉴权失败").Abort(c)
 			return
 		}
 		c.Set("token_claims", claims)
@@ -30,7 +36,7 @@ func ParseToken() gin.HandlerFunc {
 func RequireToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if _, exists := c.Get("token_claims"); !exists {
-			errs.UnauthorizedError().AppendDetails("未提供令牌", "鉴权失败").Abort(c)
+			errs.InvalidTokenError().AppendDetails("未提供令牌", "鉴权失败").Abort(c)
 			return
 		}
 		c.Next()
@@ -42,7 +48,7 @@ func RequireTokenType(typ model.TokenType) gin.HandlerFunc {
 		RequireToken()(c)
 		claims := c.MustGet("token_claims").(*model.TokenClaims)
 		if claims.TokenType != typ {
-			errs.PermissionDeniedError().AppendDetails("令牌类型错误", "鉴权失败").Abort(c)
+			errs.InvalidTokenError().AppendDetails("令牌类型错误", "鉴权失败").Abort(c)
 			return
 		}
 		c.Next()

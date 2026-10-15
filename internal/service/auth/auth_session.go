@@ -57,7 +57,7 @@ func ValidateUserPassword(ctx context.Context, userID int64, password string) *e
 	if ok, err := crypto.VerifyArgon2ID(password, pwd.Password); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to verify user password").AppendDetails("密码验证失败")
 	} else if !ok {
-		return errs.UnauthorizedError().AppendDetails("用户名或密码错误", "密码验证失败")
+		return errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败")
 	}
 	return nil
 }

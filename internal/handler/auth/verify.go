@@ -102,7 +102,7 @@ func verifyEmailHandler(c *gin.Context) {
 	}
 
 	if session.EmailCode.String != req.Code {
-		errs.UnauthorizedError().AppendDetails("验证码错误", "邮箱验证失败").Respond(c)
+		errs.ForbiddenError().AppendDetails("验证码错误", "邮箱验证失败").Respond(c)
 		return
 	}
 
@@ -149,7 +149,7 @@ func verifyTOTPHandler(c *gin.Context) {
 		errs.CreateAndLogInternalError(err, "Failed to verify TOTP").AppendDetails("TOTP 校验失败", "TOTP 验证失败").Respond(c)
 		return
 	} else if !ok {
-		errs.UnauthorizedError().AppendDetails("验证码错误", "TOTP 验证失败").Respond(c)
+		errs.ForbiddenError().AppendDetails("验证码错误", "TOTP 验证失败").Respond(c)
 		return
 	}
 

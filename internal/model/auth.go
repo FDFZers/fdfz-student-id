@@ -65,11 +65,12 @@ type UserSession struct {
 }
 
 type TokenClaims struct {
-	UserID      int64       `json:"user_id" db:"user_id"`
-	TokenType   TokenType   `json:"token_type" db:"token_type"`
-	AppID       null.String `json:"app_id" db:"app_id"`
-	Permissions []string    `json:"permissions" db:"permissions"`
-	IsTemporary bool        `json:"is_temporary" db:"is_temporary"`
+	UserID      int64       `json:"user_id"`
+	TokenType   TokenType   `json:"token_type"`
+	AppID       null.String `json:"app_id"`
+	Nonce       null.String `json:"nonce"`
+	Permissions []string    `json:"permissions"`
+	IsTemporary bool        `json:"is_temporary"`
 }
 
 type RegisteredTokenClaims struct {

@@ -285,3 +285,16 @@ func refreshTokenHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{})
 }
+
+func logoutHandler(c *gin.Context) {
+	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+
+	if err := auth.RevokeSession(c.Request.Context(), uuid.MustParse(claims.ID)); err != nil {
+		err.AppendDetails("登出失败").Respond(c)
+		return
+	}
+
+	c.SetCookie("access_token", "", 0, "/", "fdfz.top", false, false)
+	c.SetCookie("session_token", "", 0, "/", "fdfz.top", true, true)
+	c.JSON(http.StatusOK, gin.H{})
+}

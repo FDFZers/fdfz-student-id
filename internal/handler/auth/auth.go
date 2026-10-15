@@ -15,4 +15,5 @@ func InitRoutes(internal *gin.RouterGroup) {
 	group.POST("/verify/email/verify", verifyEmailHandler)
 	group.POST("/verify/totp", verifyTOTPHandler)
 	group.POST("/refresh", refreshTokenHandler)
+	group.POST("/logout", logoutHandler)
 }
