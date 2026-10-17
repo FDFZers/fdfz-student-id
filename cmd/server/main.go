@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fdfz-student-id/internal/cfg"
+	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/perm"
 	"fdfz-student-id/internal/router"
@@ -59,6 +60,12 @@ func main() {
 	// 初始化存储目录
 	if err := storage.EnsureDir(); err != nil {
 		slog.Error("Error initializing storage directory", "error", err)
+		os.Exit(1)
+	}
+
+	// 初始化 JWT 密钥
+	if err := crypto.LoadJWTKeys(); err != nil {
+		slog.Error("Error initializing jwt keys", "error", err)
 		os.Exit(1)
 	}
 

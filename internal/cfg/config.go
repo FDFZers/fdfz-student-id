@@ -18,7 +18,7 @@ type Config struct {
 	NapCatEndpoint      string
 	APIKey              string
 	AltchaHMACSecret    string
-	JWTSecret           string
+	JWTKeyID            string
 	AccessTokenTTL      time.Duration
 	TempSessionTokenTTL time.Duration
 	PermSessionTokenTTL time.Duration
@@ -86,10 +86,10 @@ func LoadConfig() error {
 		return fmt.Errorf("Altcha HMAC secret not set")
 	}
 
-	if cfg.JWTSecret, err = requireEnv("JWT_SECRET"); err != nil {
+	if cfg.JWTKeyID, err = requireEnv("JWT_KID"); err != nil {
 		return err
-	} else if len(cfg.JWTSecret) == 0 {
-		return fmt.Errorf("JWT secret not set")
+	} else if len(cfg.JWTKeyID) == 0 {
+		return fmt.Errorf("JWT kid not set")
 	}
 
 	for p := range strings.SplitSeq(env("TRUSTED_PROXIES", ""), ",") {

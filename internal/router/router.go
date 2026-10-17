@@ -45,7 +45,7 @@ func InitRouter(r *gin.Engine) {
 	internal := r.Group("/api/internal")
 
 	misc.InitRoutes(v1, internal)
-	auth.InitRoutes(internal)
+	auth.InitRoutes(v1, internal)
 	regreq.InitRoutes(v1)
 	user.InitRoutes(v1)
 }
