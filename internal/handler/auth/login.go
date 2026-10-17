@@ -51,6 +51,9 @@ func loginInitHandler(c *gin.Context) {
 	if err != nil {
 		err.AppendDetails("登录失败").Respond(c)
 		return
+	} else if usr == nil {
+		errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败", "登录失败").Respond(c)
+		return
 	}
 
 	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)

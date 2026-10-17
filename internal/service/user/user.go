@@ -21,7 +21,7 @@ func UserCacheKey(id int64) string {
 }
 
 func UserIDCacheKey(username string) string {
-	return fmt.Sprintf("student_id:user:id_by_username:%s", username)
+	return fmt.Sprintf("student_id:user:id_by_username:%s", strings.ToLower(username))
 }
 
 func UsernameExistsCacheKey(username string) string {
@@ -106,7 +106,7 @@ WHERE id = $1 AND deleted_at IS NULL
 
 const getUsernameSQL = `
 SELECT id FROM users
-WHERE username = $1 AND deleted_at IS NULL
+WHERE lower(username) = lower($1) AND deleted_at IS NULL
 `
 
 func GetUserByID(
@@ -209,7 +209,7 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 		return getErr.AppendDetails("用户更新失败")
 	}
 
-	if oldUser.Username != u.Username {
+	if !strings.EqualFold(oldUser.Username, u.Username) {
 		taken, err := IsUsernameTaken(ctx, u.Username)
 		if err != nil {
 			return err.AppendDetails("用户更新失败")

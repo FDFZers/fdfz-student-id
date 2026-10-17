@@ -1,6 +1,7 @@
 package router
 
 import (
+	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/handler/auth"
 	"fdfz-student-id/internal/handler/healthcheck"
 	"fdfz-student-id/internal/handler/misc"
@@ -22,6 +23,9 @@ func InitRouter(r *gin.Engine) {
 	internalCors := cors.New(cors.Config{
 		AllowOriginFunc: func(origin string) bool {
 			if origin == "https://fdfz.top" {
+				return true
+			}
+			if !cfg.IsProd && strings.HasSuffix(origin, "localhost") {
 				return true
 			}
 			return strings.HasPrefix(origin, "https://") && strings.HasSuffix(origin, ".fdfz.top")
