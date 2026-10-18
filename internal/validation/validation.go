@@ -9,7 +9,7 @@ import (
 	"github.com/dlclark/regexp2"
 )
 
-var regexUsername = regexp2.MustCompile(`\A[a-zA-Z0-9_-]{1,32}\z`, regexp2.None)
+var regexUsername = regexp2.MustCompile(`\A[a-zA-Z0-9_-]{4,32}\z`, regexp2.None)
 var regexNickname = regexp2.MustCompile(`\A.{1,32}\z`, regexp2.None)
 var regexRealName = regexp2.MustCompile(`\A[\u4e00-\u9fff\u00b7]{1,4}\z`, regexp2.None)
 var regexStudentNum = regexp2.MustCompile(`\A\d{8}\z`, regexp2.None)
