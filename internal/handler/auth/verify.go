@@ -1,13 +1,11 @@
 package auth
 
 import (
-	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/email"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/service/auth"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -42,8 +40,8 @@ func verifyEmailInitHandler(c *gin.Context) {
 		errs.IllegalStateError().AppendDetails("不支持邮箱验证", "邮箱验证码发送失败").Respond(c)
 		return
 	}
-	if session.LastSentAt.Add(cfg.C.CodeSendInterval).After(time.Now()) {
-		errs.RateLimitExceededError().AppendDetails("验证码发送频率过高", "邮箱验证码发送失败").Respond(c)
+	if auth.ValidateEmailRateLimit(c.Request.Context(), session.Email.String) != nil {
+		errs.RateLimitExceededError().AppendDetails("邮箱验证码发送失败").Respond(c)
 		return
 	}
 
@@ -59,11 +57,12 @@ func verifyEmailInitHandler(c *gin.Context) {
 	}
 
 	session.EmailCode = null.StringFrom(code)
-	session.LastSentAt = time.Now()
 	if err := auth.UpdateAuthSession(c.Request.Context(), session, true); err != nil {
 		errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证更新失败", "邮箱验证码发送失败").Respond(c)
 		return
 	}
+
+	auth.UpdateEmailLastSentAt(c.Request.Context(), session.Email.String)
 
 	c.JSON(http.StatusOK, gin.H{})
 }

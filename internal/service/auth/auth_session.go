@@ -33,12 +33,7 @@ type AuthSession struct {
 	Email       null.String
 	EmailCode   null.String
 	TOTPSecret  null.String
-	LastSentAt  time.Time
 	Passed2FA   bool
-}
-
-func (s *AuthSession) canSendCode() bool {
-	return time.Since(s.LastSentAt) > cfg.C.CodeSendInterval
 }
 
 func AuthSessionIDCacheKey(id uuid.UUID) string {
@@ -47,6 +42,14 @@ func AuthSessionIDCacheKey(id uuid.UUID) string {
 
 func AuthSessionQQCacheKey(qq string) string {
 	return fmt.Sprintf("student_id:auth:session:id_by_qq:%s", qq)
+}
+
+func EmailLastSentAtCacheKey(email string) string {
+	return fmt.Sprintf("student_id:auth:rate_limit:email:%s", email)
+}
+
+func QQLastSentAtCacheKey(qq string) string {
+	return fmt.Sprintf("student_id:auth:rate_limit:qq:%s", qq)
 }
 
 func ValidateUserPassword(ctx context.Context, userID int64, password string) *errs.Error {
@@ -58,6 +61,40 @@ func ValidateUserPassword(ctx context.Context, userID int64, password string) *e
 		return errs.CreateAndLogInternalError(err, "Failed to verify user password").AppendDetails("密码验证失败")
 	} else if !ok {
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败")
+	}
+	return nil
+}
+
+func ValidateEmailRateLimit(ctx context.Context, email string) *errs.Error {
+	lastSentAt, err := db.GetRedis[time.Time](ctx, EmailLastSentAtCacheKey(email))
+	if err != nil {
+		return err.AppendDetails("邮箱发送频率限制查询失败")
+	} else if lastSentAt != nil && time.Since(*lastSentAt) < cfg.C.CodeSendInterval {
+		return errs.RateLimitExceededError().AppendDetails("邮箱发送频率过快")
+	}
+	return nil
+}
+
+func ValidateQQRateLimit(ctx context.Context, qq string) *errs.Error {
+	lastSentAt, err := db.GetRedis[time.Time](ctx, QQLastSentAtCacheKey(qq))
+	if err != nil {
+		return err.AppendDetails("QQ 发送频率限制查询失败")
+	} else if lastSentAt != nil && time.Since(*lastSentAt) < cfg.C.CodeSendInterval {
+		return errs.RateLimitExceededError().AppendDetails("QQ 发送频率过快")
+	}
+	return nil
+}
+
+func UpdateEmailLastSentAt(ctx context.Context, email string) *errs.Error {
+	if err := db.SetRedis(ctx, EmailLastSentAtCacheKey(email), time.Now(), AuthSession2FACacheDuration); err != nil {
+		return err.AppendDetails("邮箱发送频率限制更新失败")
+	}
+	return nil
+}
+
+func UpdateQQLastSentAt(ctx context.Context, qq string) *errs.Error {
+	if err := db.SetRedis(ctx, QQLastSentAtCacheKey(qq), time.Now(), AuthSession2FACacheDuration); err != nil {
+		return err.AppendDetails("QQ 发送频率限制更新失败")
 	}
 	return nil
 }

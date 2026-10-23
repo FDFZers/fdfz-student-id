@@ -42,7 +42,7 @@ WITH new_user AS (
 ),
 new_password AS (
     INSERT INTO user_passwords (user_id, password)
-    SELECT id, $11
+    SELECT id, $10
     FROM new_user
     RETURNING user_id, updated_at
 )

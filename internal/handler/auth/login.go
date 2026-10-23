@@ -19,6 +19,13 @@ import (
 	"github.com/google/uuid"
 )
 
+func cookieDomain() string {
+	if cfg.IsProd {
+		return ".fdfz.top"
+	}
+	return ".ffhub.localhost"
+}
+
 type loginInitRequestReq struct {
 	Username      string `json:"username"`
 	Password      string `json:"password"`
@@ -192,8 +199,8 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("access_token", accessToken, int(cfg.C.AccessTokenTTL.Seconds()), "/", "fdfz.top", false, false)
-	c.SetCookie("session_token", sessionToken, int(exp.Sub(time.Now()).Seconds()), "/", "fdfz.top", true, true)
+	c.SetCookie("access_token", accessToken, int(cfg.C.AccessTokenTTL.Seconds()), "/", cookieDomain(), false, false)
+	c.SetCookie("session_token", sessionToken, int(exp.Sub(time.Now()).Seconds()), "/", cookieDomain(), true, true)
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -283,8 +290,8 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("access_token", accessToken, int(cfg.C.AccessTokenTTL.Seconds()), "/", "fdfz.top", false, false)
-	c.SetCookie("session_token", sessionToken, int(exp.Sub(time.Now()).Seconds()), "/", "fdfz.top", true, true)
+	c.SetCookie("access_token", accessToken, int(cfg.C.AccessTokenTTL.Seconds()), "/", cookieDomain(), false, false)
+	c.SetCookie("session_token", sessionToken, int(exp.Sub(time.Now()).Seconds()), "/", cookieDomain(), true, true)
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -297,7 +304,7 @@ func logoutHandler(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("access_token", "", 0, "/", "fdfz.top", false, false)
-	c.SetCookie("session_token", "", 0, "/", "fdfz.top", true, true)
+	c.SetCookie("access_token", "", 0, "/", cookieDomain(), false, false)
+	c.SetCookie("session_token", "", 0, "/", cookieDomain(), true, true)
 	c.JSON(http.StatusOK, gin.H{})
 }
