@@ -2,13 +2,13 @@
 package auth
 
 import (
-	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/service/filestore"
 	"fdfz-student-id/internal/service/user"
-	"fdfz-student-id/internal/validation"
+	"fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/validation"
 	"net/http"
 	"path"
 	"strings"

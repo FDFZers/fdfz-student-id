@@ -2,6 +2,7 @@ package regreq
 
 import (
 	"fdfz-student-id/internal/errs"
+	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/service/user"
 	"net/http"
 
@@ -9,8 +10,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// registerRequestStatusHandler 供未登录的注册申请者凭注册申请 ID 查询审核状态。
 func registerRequestStatusHandler(c *gin.Context) {
+	if err := captcha.VerifyPayloadStr(c.Query("altcha_payload")); err != nil {
+		err.AppendDetails("注册请求状态查询失败").Respond(c)
+		return
+	}
+
 	id, err := uuid.Parse(c.Query("id"))
 	if err != nil {
 		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册请求状态查询失败").Respond(c)

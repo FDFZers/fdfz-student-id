@@ -3,7 +3,7 @@ package regreq
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/perm"
+	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
 	"net/http"
 

@@ -3,24 +3,24 @@ package regreq
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/perm"
-	"fdfz-student-id/internal/search"
+	"fdfz-student-id/internal/service/perm"
+	search2 "fdfz-student-id/internal/service/search"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-var searchCfg = search.SearchConfig{
+var searchCfg = search2.SearchConfig{
 	Table:             "register_requests",
 	Item:              "注册请求",
-	Fields:            []search.Field{{ID: "id", Column: "id"}, {ID: "student_num", Column: "student_num"}, {ID: "real_name", Column: "real_name"}, {ID: "created_user_id", Column: "created_user_id"}},
-	MatchMethods:      search.MatchMethodValues(),
-	SortableFields:    []search.Field{{ID: "created_at", Column: "created_at"}, {ID: "reviewed_at", Column: "reviewed_at"}},
-	Tags:              []search.Tag{{ID: "status", Column: "status", ValueMap: search.ValueMapOf(model.RegisterRequestStatusNames())}, {ID: "type", Column: "type", ValueMap: search.ValueMapOf(model.UserTypeNames())}, {ID: "school", Column: "school", ValueMap: search.ValueMapOf(model.SchoolNames())}},
+	Fields:            []search2.Field{{ID: "id", Column: "id"}, {ID: "student_num", Column: "student_num"}, {ID: "real_name", Column: "real_name"}, {ID: "created_user_id", Column: "created_user_id"}},
+	MatchMethods:      search2.MatchMethodValues(),
+	SortableFields:    []search2.Field{{ID: "created_at", Column: "created_at"}, {ID: "reviewed_at", Column: "reviewed_at"}},
+	Tags:              []search2.Tag{{ID: "status", Column: "status", ValueMap: search2.ValueMapOf(model.RegisterRequestStatusNames())}, {ID: "type", Column: "type", ValueMap: search2.ValueMapOf(model.UserTypeNames())}, {ID: "school", Column: "school", ValueMap: search2.ValueMapOf(model.SchoolNames())}},
 	DefaultSortColumn: "id",
 }
 
-var searchInfo = search.GetInfo(&searchCfg)
+var searchInfo = search2.GetInfo(&searchCfg)
 
 func SearchInfoHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
@@ -32,7 +32,7 @@ func SearchInfoHandler(c *gin.Context) {
 }
 
 func SearchQueryHandler(c *gin.Context) {
-	var req search.SearchRequest
+	var req search2.SearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errs.BadRequestError().AppendDetails("请求解析失败", "注册请求搜索失败").Respond(c)
 		return
@@ -44,7 +44,7 @@ func SearchQueryHandler(c *gin.Context) {
 		return
 	}
 
-	requests, err := search.ExecSearch[model.RegisterRequest](c, &searchCfg, &req)
+	requests, err := search2.ExecSearch[model.RegisterRequest](c, &searchCfg, &req)
 	if err != nil {
 		err.AppendDetails("注册请求搜索失败").Respond(c)
 		return

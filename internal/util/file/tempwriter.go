@@ -4,7 +4,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"errors"
-	"fdfz-student-id/internal/storage"
+	"fdfz-student-id/internal/util/storage"
 	"fmt"
 	"hash"
 	"io"

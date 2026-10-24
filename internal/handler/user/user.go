@@ -3,7 +3,7 @@ package user
 import (
 	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/perm"
+	"fdfz-student-id/internal/service/perm"
 
 	"github.com/gin-gonic/gin"
 )

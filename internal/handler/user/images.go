@@ -3,9 +3,9 @@ package user
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/perm"
 	"fdfz-student-id/internal/service/filestore"
-	"fdfz-student-id/internal/validation"
+	"fdfz-student-id/internal/service/perm"
+	"fdfz-student-id/internal/util/validation"
 	"path"
 	"strconv"
 	"strings"

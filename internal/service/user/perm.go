@@ -4,7 +4,7 @@ import (
 	"context"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/perm"
+	"fdfz-student-id/internal/service/perm"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"

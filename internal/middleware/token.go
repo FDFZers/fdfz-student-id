@@ -2,9 +2,9 @@ package middleware
 
 import (
 	"errors"
-	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	"fdfz-student-id/internal/util/crypto"
 	"strings"
 
 	"github.com/gin-gonic/gin"

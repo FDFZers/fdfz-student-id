@@ -3,14 +3,14 @@ package auth
 import (
 	"errors"
 	"fdfz-student-id/internal/cfg"
-	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/perm"
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/captcha"
+	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
-	"fdfz-student-id/internal/validation"
+	crypto2 "fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/validation"
 	"fmt"
 	"net/http"
 	"time"
@@ -141,12 +141,12 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	sessionToken, cErr := crypto.GenerateCode(128, crypto.TokenCharset)
+	sessionToken, cErr := crypto2.GenerateCode(128, crypto2.TokenCharset)
 	if cErr != nil {
 		errs.CreateAndLogInternalError(cErr, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
-	sessionTokenHash, cErr := crypto.HashArgon2ID(sessionToken)
+	sessionTokenHash, cErr := crypto2.HashArgon2ID(sessionToken)
 	if cErr != nil {
 		errs.CreateAndLogInternalError(cErr, "Failed to hash session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
@@ -182,7 +182,7 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	accessToken, cErr := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
+	accessToken, cErr := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      authSession.UserID,
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),
@@ -215,7 +215,7 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	hash, err := crypto.HashArgon2ID(sessionToken)
+	hash, err := crypto2.HashArgon2ID(sessionToken)
 	if err != nil {
 		errs.CreateAndLogInternalError(err, "Failed to hash session token").AppendDetails("令牌哈希失败", "令牌刷新失败").Respond(c)
 		return
@@ -256,12 +256,12 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	sessionToken, cErr := crypto.GenerateCode(128, crypto.TokenCharset)
+	sessionToken, cErr := crypto2.GenerateCode(128, crypto2.TokenCharset)
 	if cErr != nil {
 		errs.CreateAndLogInternalError(cErr, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
-	sessionTokenHash, cErr := crypto.HashArgon2ID(sessionToken)
+	sessionTokenHash, cErr := crypto2.HashArgon2ID(sessionToken)
 	if cErr != nil {
 		errs.CreateAndLogInternalError(cErr, "Failed to hash session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
@@ -273,7 +273,7 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	accessToken, cErr := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
+	accessToken, cErr := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      session.UserID,
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),

@@ -1,10 +1,10 @@
 package auth
 
 import (
-	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/service/captcha"
+	"fdfz-student-id/internal/util/crypto"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

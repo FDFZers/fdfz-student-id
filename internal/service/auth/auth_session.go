@@ -4,10 +4,10 @@ package auth
 import (
 	"context"
 	"fdfz-student-id/internal/cfg"
-	"fdfz-student-id/internal/crypto"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/service/user"
+	"fdfz-student-id/internal/util/crypto"
 	"fmt"
 	"time"
 
