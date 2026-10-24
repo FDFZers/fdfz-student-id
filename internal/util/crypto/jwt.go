@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"slices"
 	"time"
 
 	"fdfz-student-id/internal/cfg"
@@ -69,8 +70,13 @@ func LoadJWTKeys() error {
 
 func GenerateJWT(id uuid.UUID, claims *model.TokenClaims) (string, error) {
 	now := time.Now()
+
+	claimsCopy := *claims
+	claimsCopy.Permissions = slices.Clone(claims.Permissions)
+	slices.Sort(claimsCopy.Permissions)
+
 	token := jwt.NewWithClaims(jwt.SigningMethodRS512, &model.RegisteredTokenClaims{
-		TokenClaims: *claims,
+		TokenClaims: claimsCopy,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "fdfz-student-id",
 			ExpiresAt: jwt.NewNumericDate(now.Add(cfg.C.AccessTokenTTL)),

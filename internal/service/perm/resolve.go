@@ -185,9 +185,9 @@ func extractPlaceholders(defNodes, permNodes []string) (PlaceholderInfo, bool) {
 // u 代表用户输入的权限节点 (可能包含 *, **)
 // d 代表系统定义的权限节点 (可能包含占位符 {xxx})
 func matchPermNodes(u, d []string, uIndex, dIndex int, placeholders PlaceholderInfo) (PlaceholderInfo, bool) {
-	// 如果用户节点用完了，看看定义节点是不是也恰好匹配完了
+	// 用户节点用完时，定义节点也必须恰好用完，否则只说明用户权限是
 	if uIndex >= len(u) {
-		return placeholders, true
+		return placeholders, dIndex >= len(d)
 	}
 	// 如果定义节点用完但用户节点还有，说明不匹配
 	if dIndex >= len(d) {
@@ -197,7 +197,7 @@ func matchPermNodes(u, d []string, uIndex, dIndex int, placeholders PlaceholderI
 	uNode := u[uIndex]
 	dNode := d[dIndex]
 
-	// 算法核心分支 1：处理 '**' 通配符 (匹配零个或多个节点)
+	// 算法核心分支 1：处理 '**' 通配符 (匹配一个或多个节点)
 	if uNode == "**" {
 		// 尝试所有可能的匹配长度。
 		// 让 '**' 匹配掉 d 中 1 个、2 个... 直到末尾的所有节点，并递归检测后续节点是否能匹配。
