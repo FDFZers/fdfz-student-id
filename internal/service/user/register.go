@@ -8,14 +8,16 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
 	RegisterRequestCacheDuration = 5 * time.Minute
 )
 
-func RegisterRequestCacheKey(id int64) string {
-	return fmt.Sprintf("student_id:register_request:id:%d", id)
+func RegisterRequestCacheKey(id uuid.UUID) string {
+	return fmt.Sprintf("student_id:register_request:id:%s", id)
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +80,7 @@ WHERE id = $1
 
 func GetRegisterRequestByID(
 	ctx context.Context,
-	id int64,
+	id uuid.UUID,
 ) (*model.RegisterRequest, *errs.Error) {
 	r, err := db.GetCached(
 		ctx,
@@ -143,7 +145,7 @@ WHERE id = $1 AND status = 'approved'
 
 func ReviewRegisterRequest(
 	ctx context.Context,
-	id int64,
+	id uuid.UUID,
 	status model.RegisterRequestStatus,
 	reviewComment string,
 	reviewerID int64,
@@ -212,7 +214,7 @@ WHERE id = $1
 RETURNING username
 `
 
-func DeleteRegisterRequest(ctx context.Context, id int64) *errs.Error {
+func DeleteRegisterRequest(ctx context.Context, id uuid.UUID) *errs.Error {
 	var username string
 	err := db.R.QueryRow(ctx, deleteRegisterRequestSQL, id).Scan(&username)
 	if err != nil {

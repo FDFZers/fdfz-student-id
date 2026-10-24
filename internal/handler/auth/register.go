@@ -11,7 +11,6 @@ import (
 	"fdfz-student-id/internal/validation"
 	"net/http"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -135,8 +134,8 @@ func createRegisterHandler(c *gin.Context) {
 
 	// 上传佐证图片
 	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
-		Slug:      "/student_id/proof_images/" + strconv.FormatInt(r.ID, 10),
-		FileName:  strconv.FormatInt(r.ID, 10) + strings.ToLower(path.Ext(fileHeader.Filename)),
+		Slug:      "/student_id/proof_images/" + r.ID.String(),
+		FileName:  r.ID.String() + strings.ToLower(path.Ext(fileHeader.Filename)),
 		IsPrivate: true,
 		AppID:     null.IntFrom(1),
 	}); err != nil {
@@ -148,5 +147,7 @@ func createRegisterHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	c.JSON(http.StatusOK, gin.H{
+		"id": r.ID,
+	})
 }

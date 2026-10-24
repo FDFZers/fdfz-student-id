@@ -16,7 +16,7 @@ type RegisterRequestStatus string
 type TokenType string
 
 type RegisterRequest struct {
-	ID int64 `json:"id" db:"id"`
+	ID uuid.UUID `json:"id" db:"id"`
 
 	Type       UserType    `json:"type" db:"type"`
 	StudentNum null.String `json:"student_num" db:"student_num"`

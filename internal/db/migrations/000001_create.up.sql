@@ -217,7 +217,7 @@ EXECUTE FUNCTION fn_update_timestamp();
 -- =============================================
 CREATE TABLE register_requests
 (
-    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id               UUID                    NOT NULL PRIMARY KEY DEFAULT uuidv7(),
 
     type             user_type               NOT NULL DEFAULT 'student',
     student_num      VARCHAR(8)                      DEFAULT NULL,

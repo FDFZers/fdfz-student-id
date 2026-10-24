@@ -6,13 +6,13 @@ import (
 	"fdfz-student-id/internal/perm"
 	"fdfz-student-id/internal/service/user"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type reviewRegisterReq struct {
-	ID      int64                       `json:"id"`
+	ID      uuid.UUID                   `json:"id"`
 	Status  model.RegisterRequestStatus `json:"status"`
 	Comment string                      `json:"comment"`
 }
@@ -24,20 +24,18 @@ func reviewRegisterHandler(c *gin.Context) {
 		return
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	reqIDStr := c.Param("id")
-	reqID, err := strconv.ParseInt(reqIDStr, 10, 64)
-	if err != nil {
+	if req.ID == uuid.Nil {
 		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册请求审核失败").Respond(c)
 		return
 	}
 
+	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	if !perm.Contains(claims.Permissions, "student_id.register_requests.review") {
 		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
 		return
 	}
 
-	if err := user.ReviewRegisterRequest(c.Request.Context(), reqID, req.Status, req.Comment, claims.UserID); err != nil {
+	if err := user.ReviewRegisterRequest(c.Request.Context(), req.ID, req.Status, req.Comment, claims.UserID); err != nil {
 		err.Respond(c)
 		return
 	}
