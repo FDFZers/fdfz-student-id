@@ -50,9 +50,11 @@ CREATE TABLE users
 CREATE UNIQUE INDEX idx_users_username_lower_active
     ON users (lower(username))
     WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX idx_users_student_num_active
-    ON users (student_num)
+CREATE UNIQUE INDEX idx_users_school_student_num_active
+    ON users (school, student_num)
     WHERE type = 'student' AND deleted_at IS NULL;
+CREATE INDEX idx_users_student_num
+    ON users (student_num);
 CREATE INDEX idx_users_type_active
     ON users (type)
     WHERE deleted_at IS NULL;
@@ -213,7 +215,7 @@ CREATE TRIGGER trg_user_sessions_updated_at
 EXECUTE FUNCTION fn_update_timestamp();
 
 -- =============================================
--- 注册申请 register_requests
+-- 注册请求 register_requests
 -- =============================================
 CREATE TABLE register_requests
 (
@@ -248,8 +250,8 @@ CREATE INDEX idx_register_requests_created_user
     WHERE created_user_id IS NOT NULL;
 CREATE INDEX idx_register_requests_reviewer
     ON register_requests (reviewer_user_id);
-CREATE UNIQUE INDEX idx_register_requests_student_num_pending
-    ON register_requests (student_num)
+CREATE UNIQUE INDEX idx_register_requests_school_student_num_pending
+    ON register_requests (school, student_num)
     WHERE status = 'pending' AND type = 'student';
 
 -- =============================================

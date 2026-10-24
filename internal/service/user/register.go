@@ -39,6 +39,14 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 		return errs.ConflictError().AppendDetails("用户名已存在", "注册请求创建失败")
 	}
 
+	if r.Type == model.UserTypeStudent {
+		if taken, err := IsStudentNumTaken(ctx, r.School, r.StudentNum, 0); err != nil {
+			return err.AppendDetails("注册请求创建失败")
+		} else if taken {
+			return errs.ConflictError().AppendDetails("该学校的学号已存在", "注册请求创建失败")
+		}
+	}
+
 	err := db.R.QueryRow(ctx, createRegisterRequestSQL,
 		r.Username,
 		r.Nickname,

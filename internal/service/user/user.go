@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/guregu/null/v6"
 )
 
 const (
@@ -56,6 +58,13 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 		return err.AppendDetails("用户创建失败")
 	} else if taken {
 		return errs.ConflictError().AppendDetails("用户名已存在", "用户创建失败")
+	}
+	if u.Type == model.UserTypeStudent {
+		if taken, err := IsStudentNumTaken(ctx, u.School, u.StudentNum, 0); err != nil {
+			return err.AppendDetails("用户创建失败")
+		} else if taken {
+			return errs.ConflictError().AppendDetails("该学校学号已被注册或正在审核中", "用户创建失败")
+		}
 	}
 	vis, err := json.Marshal(u.Visibilities)
 	if err != nil {
@@ -218,6 +227,16 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 		}
 	}
 
+	if u.Type == model.UserTypeStudent &&
+		(oldUser.School != u.School || oldUser.StudentNum != u.StudentNum) {
+		taken, err := IsStudentNumTaken(ctx, u.School, u.StudentNum, u.ID)
+		if err != nil {
+			return err.AppendDetails("用户更新失败")
+		} else if taken {
+			return errs.ConflictError().AppendDetails("该学校学号已被注册或正在审核中", "用户更新失败")
+		}
+	}
+
 	err = db.R.QueryRow(ctx, updateUserSQL,
 		u.ID,
 		u.Username,
@@ -302,4 +321,36 @@ func IsUsernameTaken(ctx context.Context, username string) (bool, *errs.Error) {
 		return false, nil
 	}
 	return *exists, nil
+}
+
+// ---------------------------------------------------------------------------
+// 检查学号是否已被占用
+// ---------------------------------------------------------------------------
+
+const checkStudentNumExistsSQL = `
+SELECT EXISTS (
+    SELECT 1 FROM users
+    WHERE type = 'student' AND deleted_at IS NULL
+      AND school = $1 AND student_num = $2 AND id <> $3
+    UNION ALL
+    SELECT 1 FROM register_requests
+    WHERE type = 'student' AND status = 'pending'
+      AND school = $1 AND student_num = $2
+)
+`
+
+func IsStudentNumTaken(
+	ctx context.Context,
+	school model.School,
+	studentNum null.String,
+	excludeUserID int64,
+) (bool, *errs.Error) {
+	if !studentNum.Valid {
+		return false, nil
+	}
+	var taken bool
+	if err := db.R.QueryRow(ctx, checkStudentNumExistsSQL, school, studentNum.String, excludeUserID).Scan(&taken); err != nil {
+		return false, errs.CreatePGError(err, "学号占用信息", "Failed to check student num")
+	}
+	return taken, nil
 }
