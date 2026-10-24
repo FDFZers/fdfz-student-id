@@ -20,9 +20,16 @@ func getUserBanHandler(c *gin.Context) {
 		return
 	}
 
-	hasSelfPerm := targetID == claims.UserID && perm.Contains(claims.Permissions, "student_id.user.profile.ban.read.self")
-	hasPerm := hasSelfPerm || perm.ContainsAny(claims.Permissions, "student_id.user.profile.public.read", "student_id.user.profile.ban.read")
-	if !hasPerm {
+	var allowed bool
+	if targetID == claims.UserID {
+		allowed = perm.ContainsAny(claims.Permissions,
+			"student_id.user.profile.ban.read",
+			"student_id.user.profile.ban.read.self",
+		)
+	} else {
+		allowed = perm.Contains(claims.Permissions, "student_id.user.profile.ban.read")
+	}
+	if !allowed {
 		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
 		return
 	}

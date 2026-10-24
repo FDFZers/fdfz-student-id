@@ -59,15 +59,9 @@ WITH expire AS (
     SET enabled = false
     WHERE user_id = $1 AND enabled = true AND end_time IS NOT NULL AND end_time <= now()
 )
-SELECT id, user_id, reason, end_time, created_at
+SELECT id, user_id, reason, end_time, created_at, enabled
 FROM user_bans
-WHERE user_id = $1  AND enabled = true AND (end_time IS NULL OR end_time > now())
-`
-
-const disableUserSQL = `
-UPDATE users
-SET enabled = false
-WHERE id = $1
+WHERE user_id = $1 AND enabled = true AND (end_time IS NULL OR end_time > now())
 `
 
 func GetUserBan(ctx context.Context, userID int64) (*model.UserBan, *errs.Error) {
@@ -79,7 +73,7 @@ func GetUserBan(ctx context.Context, userID int64) (*model.UserBan, *errs.Error)
 		func() (*model.UserBan, error) {
 			var b model.UserBan
 			err := db.R.QueryRow(ctx, getUserBanSQL, userID).Scan(
-				&b.ID, &b.UserID, &b.Reason, &b.EndTime, &b.CreatedAt,
+				&b.ID, &b.UserID, &b.Reason, &b.EndTime, &b.CreatedAt, &b.Enabled,
 			)
 			return &b, err
 		},
@@ -87,12 +81,9 @@ func GetUserBan(ctx context.Context, userID int64) (*model.UserBan, *errs.Error)
 	if err != nil {
 		return nil, err.AppendDetails("封禁信息获取失败")
 	}
-	if ban != nil && ban.Enabled && ban.EndTime.Valid && ban.EndTime.Time.Before(time.Now()) {
-		ban.Enabled = false
-		if _, err := db.R.Pool.Exec(ctx, disableUserSQL, userID); err != nil {
-			return nil, errs.CreatePGError(err, "用户", "Failed to disable user").AppendDetails("用户封禁过期禁用失败", "封禁信息获取失败")
-		}
+	if ban != nil && ban.EndTime.Valid && !ban.EndTime.Time.After(time.Now()) {
 		db.R.Del(ctx, UserBanCacheKey(userID))
+		return nil, nil
 	}
 	return ban, nil
 }

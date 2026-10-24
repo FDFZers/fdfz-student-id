@@ -2,13 +2,24 @@ package crypto
 
 import (
 	"crypto/rand"
+	"crypto/sha512"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
 )
+
+// ---------------------------------------------------------------------------
+// Sha512
+// ---------------------------------------------------------------------------
+
+func HashSHA512(token string) string {
+	sum := sha512.Sum512([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
 
 // ---------------------------------------------------------------------------
 // Argon2ID

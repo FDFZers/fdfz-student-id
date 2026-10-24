@@ -60,7 +60,7 @@ SELECT uuid, user_id, session_token_hash, is_temporary,
     created_at, updated_at, expires_at, last_used_at, revoked_at,
     last_ip, last_user_agent
 FROM user_sessions
-WHERE session_token_hash = $1 AND revoked_at IS NULL
+WHERE session_token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
 `
 
 func GetSessionByUUID(
@@ -95,8 +95,8 @@ func GetSessionByTokenHash(
 	err := db.R.QueryRow(ctx, getSessionByTokenHashSQL, tokenHash).Scan(
 		&s.UUID,
 		&s.UserID,
-		&s.IsTemporary,
 		&s.SessionTokenHash,
+		&s.IsTemporary,
 		&s.CreatedAt,
 		&s.UpdatedAt,
 		&s.ExpiresAt,

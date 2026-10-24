@@ -12,6 +12,7 @@ import (
 	crypto2 "fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/validation"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -24,6 +25,26 @@ func cookieDomain() string {
 		return ".fdfz.top"
 	}
 	return ".ffhub.localhost"
+}
+
+func setTokenCookies(c *gin.Context, accessToken, sessionToken string, accessMaxAge, sessionMaxAge int) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("access_token", accessToken, accessMaxAge, "/", cookieDomain(), cfg.IsProd, false)
+	c.SetCookie("session_token", sessionToken, sessionMaxAge, "/", cookieDomain(), cfg.IsProd, true)
+}
+
+func respondBanned(c *gin.Context, ban *model.UserBan, item string) {
+	if ban.EndTime.Valid {
+		errs.PermissionDeniedError().AppendDetails(
+			fmt.Sprintf("用户已封禁：%s（%s）", ban.Reason, ban.EndTime.Time.Format("2006-01-02 15:04:05")),
+			item,
+		).Respond(c)
+	} else {
+		errs.PermissionDeniedError().AppendDetails(
+			fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
+			item,
+		).Respond(c)
+	}
 }
 
 type loginInitRequestReq struct {
@@ -63,28 +84,18 @@ func loginInitHandler(c *gin.Context) {
 		return
 	}
 
+	if err := auth.ValidateUserPassword(c.Request.Context(), usr.ID, req.Password); err != nil {
+		err.AppendDetails("登录失败").Respond(c)
+		return
+	}
+
 	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
 	if err != nil {
 		err.AppendDetails("登录失败").Respond(c)
 		return
 	}
-	if ban != nil && ban.Enabled {
-		if ban.EndTime.Valid {
-			errs.PermissionDeniedError().AppendDetails(
-				fmt.Sprintf("用户已封禁：%s（%s）", ban.Reason, ban.EndTime.Time.Format("2006-01-02 15:04:05")),
-				"登录失败",
-			).Respond(c)
-		} else {
-			errs.PermissionDeniedError().AppendDetails(
-				fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
-				"登录失败",
-			).Respond(c)
-		}
-		return
-	}
-
-	if err := auth.ValidateUserPassword(c.Request.Context(), usr.ID, req.Password); err != nil {
-		err.AppendDetails("登录失败").Respond(c)
+	if ban != nil {
+		respondBanned(c, ban, "登录失败")
 		return
 	}
 
@@ -141,16 +152,22 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
+	ban, bErr := user.GetUserBan(c.Request.Context(), authSession.UserID)
+	if bErr != nil {
+		bErr.AppendDetails("登录失败").Respond(c)
+		return
+	}
+	if ban != nil {
+		respondBanned(c, ban, "登录失败")
+		return
+	}
+
 	sessionToken, cErr := crypto2.GenerateCode(128, crypto2.TokenCharset)
 	if cErr != nil {
 		errs.CreateAndLogInternalError(cErr, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
-	sessionTokenHash, cErr := crypto2.HashArgon2ID(sessionToken)
-	if cErr != nil {
-		errs.CreateAndLogInternalError(cErr, "Failed to hash session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
-		return
-	}
+	sessionTokenHash := crypto2.HashSHA512(sessionToken)
 
 	var dur time.Duration
 	if authSession.IsTemporary {
@@ -160,9 +177,10 @@ func loginFinalizeHandler(c *gin.Context) {
 	}
 
 	session := &model.UserSession{
-		UserID:      authSession.UserID,
-		IsTemporary: authSession.IsTemporary,
-		ExpiresAt:   time.Now().Add(dur),
+		UserID:           authSession.UserID,
+		SessionTokenHash: sessionTokenHash,
+		IsTemporary:      authSession.IsTemporary,
+		ExpiresAt:        time.Now().Add(dur),
 	}
 	if err := auth.CreateSession(c.Request.Context(), session); err != nil {
 		err.AppendDetails("登录失败").Respond(c)
@@ -199,8 +217,11 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("access_token", accessToken, int(cfg.C.AccessTokenTTL.Seconds()), "/", cookieDomain(), false, false)
-	c.SetCookie("session_token", sessionToken, int(exp.Sub(time.Now()).Seconds()), "/", cookieDomain(), true, true)
+	if dErr := auth.DeleteAuthSession(c.Request.Context(), authSession); dErr != nil {
+		slog.Warn("Failed to delete auth session after login", "error", dErr.Info.Error, "session_id", authSession.ID)
+	}
+
+	setTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -215,24 +236,23 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	hash, err := crypto2.HashArgon2ID(sessionToken)
-	if err != nil {
-		errs.CreateAndLogInternalError(err, "Failed to hash session token").AppendDetails("令牌哈希失败", "令牌刷新失败").Respond(c)
-		return
-	}
+	hash := crypto2.HashSHA512(sessionToken)
 
 	session, sErr := auth.GetSessionByTokenHash(c.Request.Context(), hash)
 	if sErr != nil {
 		errs.CreateAndLogInternalError(sErr, "Failed to get session by token hash").AppendDetails("会话获取失败", "令牌刷新失败").Respond(c)
 		return
 	} else if session == nil {
-		errs.NotFoundError().AppendDetails("会话不存在", "令牌刷新失败").Respond(c)
+		errs.NotFoundError().AppendDetails("会话不存在或已过期", "令牌刷新失败").Respond(c)
 		return
 	}
 
 	usr, uErr := user.GetUserByID(c.Request.Context(), session.UserID)
 	if uErr != nil {
 		uErr.AppendDetails("令牌刷新失败").Respond(c)
+		return
+	} else if usr == nil {
+		errs.NotFoundError().AppendDetails("用户不存在", "令牌刷新失败").Respond(c)
 		return
 	}
 
@@ -241,18 +261,8 @@ func refreshTokenHandler(c *gin.Context) {
 		uErr.AppendDetails("令牌刷新失败").Respond(c)
 		return
 	}
-	if ban != nil && ban.Enabled {
-		if ban.EndTime.Valid {
-			errs.PermissionDeniedError().AppendDetails(
-				fmt.Sprintf("用户已封禁：%s（%s）", ban.Reason, ban.EndTime.Time.Format("2006-01-02 15:04:05")),
-				"令牌刷新失败",
-			).Respond(c)
-		} else {
-			errs.PermissionDeniedError().AppendDetails(
-				fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
-				"令牌刷新失败",
-			).Respond(c)
-		}
+	if ban != nil {
+		respondBanned(c, ban, "令牌刷新失败")
 		return
 	}
 
@@ -261,11 +271,7 @@ func refreshTokenHandler(c *gin.Context) {
 		errs.CreateAndLogInternalError(cErr, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
-	sessionTokenHash, cErr := crypto2.HashArgon2ID(sessionToken)
-	if cErr != nil {
-		errs.CreateAndLogInternalError(cErr, "Failed to hash session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
-		return
-	}
+	sessionTokenHash := crypto2.HashSHA512(sessionToken)
 
 	perms, uErr := user.GetUserPerms(c.Request.Context(), session.UserID)
 	if uErr != nil {
@@ -290,8 +296,7 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie("access_token", accessToken, int(cfg.C.AccessTokenTTL.Seconds()), "/", cookieDomain(), false, false)
-	c.SetCookie("session_token", sessionToken, int(exp.Sub(time.Now()).Seconds()), "/", cookieDomain(), true, true)
+	setTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -299,12 +304,17 @@ func refreshTokenHandler(c *gin.Context) {
 func logoutHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
-	if err := auth.RevokeSession(c.Request.Context(), uuid.MustParse(claims.ID)); err != nil {
+	sessionID, err := uuid.Parse(claims.ID)
+	if err != nil {
+		errs.InvalidTokenError().AppendDetails("无效的会话", "登出失败").Respond(c)
+		return
+	}
+
+	if err := auth.RevokeSession(c.Request.Context(), sessionID); err != nil {
 		err.AppendDetails("登出失败").Respond(c)
 		return
 	}
 
-	c.SetCookie("access_token", "", 0, "/", cookieDomain(), false, false)
-	c.SetCookie("session_token", "", 0, "/", cookieDomain(), true, true)
+	setTokenCookies(c, "", "", 0, 0)
 	c.JSON(http.StatusOK, gin.H{})
 }

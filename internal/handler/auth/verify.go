@@ -1,16 +1,52 @@
 package auth
 
 import (
+	"crypto/subtle"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/email"
 	"fdfz-student-id/internal/util/crypto"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/guregu/null/v6"
 )
+
+func check2FAAttempts(c *gin.Context, session *auth.AuthSession, item string) bool {
+	attempts, err := auth.GetAuthSessionAttempts(c.Request.Context(), session.ID)
+	if err != nil {
+		err.AppendDetails(item).Respond(c)
+		return false
+	}
+	if attempts >= auth.MaxAuthSessionAttempts {
+		errs.RateLimitExceededError().AppendDetails("验证失败次数过多，请重新使用密码登录", item).Respond(c)
+		return false
+	}
+	return true
+}
+
+func record2FAFailure(c *gin.Context, session *auth.AuthSession, item string) bool {
+	if _, err := auth.IncreaseAuthSessionAttempts(c.Request.Context(), session.ID); err != nil {
+		err.AppendDetails(item).Respond(c)
+		return false
+	}
+	return true
+}
+
+func complete2FA(c *gin.Context, session *auth.AuthSession, item string) bool {
+	session.Passed2FA = true
+	session.EmailCode = null.String{}
+	if err := auth.UpdateAuthSession(c.Request.Context(), session, false); err != nil {
+		errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证通过失败", item).Respond(c)
+		return false
+	}
+	if err := auth.ResetAuthSessionAttempts(c.Request.Context(), session.ID); err != nil {
+		slog.Warn("Failed to reset auth session attempts", "error", err.Info.Error, "session_id", session.ID)
+	}
+	return true
+}
 
 type verifyEmailInitReq struct {
 	SessionID uuid.UUID `json:"session_id"`
@@ -98,16 +134,21 @@ func verifyEmailHandler(c *gin.Context) {
 	}
 	if !session.EmailCode.Valid {
 		errs.IllegalStateError().AppendDetails("邮箱验证码未发送", "邮箱验证失败").Respond(c)
+		return
+	}
+	if !check2FAAttempts(c, session, "邮箱验证失败") {
+		return
 	}
 
-	if session.EmailCode.String != req.Code {
+	if subtle.ConstantTimeCompare([]byte(session.EmailCode.String), []byte(req.Code)) != 1 {
+		if !record2FAFailure(c, session, "邮箱验证失败") {
+			return
+		}
 		errs.ForbiddenError().AppendDetails("验证码错误", "邮箱验证失败").Respond(c)
 		return
 	}
 
-	session.Passed2FA = true
-	if err := auth.UpdateAuthSession(c.Request.Context(), session, false); err != nil {
-		errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证通过失败", "邮箱验证失败").Respond(c)
+	if !complete2FA(c, session, "邮箱验证失败") {
 		return
 	}
 
@@ -143,18 +184,22 @@ func verifyTOTPHandler(c *gin.Context) {
 		errs.IllegalStateError().AppendDetails("不支持 TOTP 验证", "TOTP 验证失败").Respond(c)
 		return
 	}
+	if !check2FAAttempts(c, session, "TOTP 验证失败") {
+		return
+	}
 
 	if ok, err := crypto.VerifyTOTP(session.TOTPSecret.String, req.Code); err != nil {
 		errs.CreateAndLogInternalError(err, "Failed to verify TOTP").AppendDetails("TOTP 校验失败", "TOTP 验证失败").Respond(c)
 		return
 	} else if !ok {
+		if !record2FAFailure(c, session, "TOTP 验证失败") {
+			return
+		}
 		errs.ForbiddenError().AppendDetails("验证码错误", "TOTP 验证失败").Respond(c)
 		return
 	}
 
-	session.Passed2FA = true
-	if err := auth.UpdateAuthSession(c.Request.Context(), session, false); err != nil {
-		errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证通过失败", "TOTP 验证失败").Respond(c)
+	if !complete2FA(c, session, "TOTP 验证失败") {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{})

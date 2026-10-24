@@ -111,6 +111,8 @@ func main() {
 
 	r, healthcheckR := gin.New(), gin.New()
 	r.Use(sloggin.New(logger))
+	r.Use(gin.Recovery())
+	healthcheckR.Use(gin.Recovery())
 
 	if proxies := cfg.C.TrustedProxies; len(proxies) > 0 {
 		if err := r.SetTrustedProxies(proxies); err != nil {

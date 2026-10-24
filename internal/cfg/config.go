@@ -51,7 +51,7 @@ func LoadConfig() error {
 
 	cfg.FilestoreEndpoint = env("FILESTORE_ENDPOINT", "https://static.fdfz.top/")
 	cfg.NapCatEndpoint = env("NAPCAT_ENDPOINT", "https://napcat.fdfz.top/")
-	cfg.AccessTokenTTL = envDur("ACCESS_TOKEN_TTL", 30*time.Minute)
+	cfg.AccessTokenTTL = envDur("ACCESS_TOKEN_TTL", 10*time.Minute)
 	cfg.PermSessionTokenTTL = envDur("PERM_SESSION_TOKEN_TTL", 30*24*time.Hour)
 	cfg.TempSessionTokenTTL = envDur("TEMP_SESSION_TOKEN_TTL", 24*time.Hour)
 	cfg.CodeSendInterval = envDur("CODE_SEND_INTERVAL", 1*time.Minute)

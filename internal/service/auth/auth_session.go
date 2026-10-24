@@ -18,6 +18,7 @@ import (
 const (
 	AuthSessionCacheDuration    = 2 * time.Minute
 	AuthSession2FACacheDuration = 10 * time.Minute
+	MaxAuthSessionAttempts      = 5
 )
 
 // ENUM(login, stepup, reset_password)
@@ -52,9 +53,16 @@ func QQLastSentAtCacheKey(qq string) string {
 	return fmt.Sprintf("student_id:auth:rate_limit:qq:%s", qq)
 }
 
+func AuthSessionAttemptsCacheKey(id uuid.UUID) string {
+	return fmt.Sprintf("student_id:auth:session:attempts:%s", id)
+}
+
 func ValidateUserPassword(ctx context.Context, userID int64, password string) *errs.Error {
 	pwd, err := user.GetUserPassword(ctx, userID)
 	if err != nil {
+		if err.Info.Error == "not_found" {
+			return errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败")
+		}
 		return err.AppendDetails("密码验证失败")
 	}
 	if ok, err := crypto.VerifyArgon2ID(password, pwd.Password); err != nil {
@@ -177,12 +185,46 @@ func UpdateAuthSession(ctx context.Context, session *AuthSession, codeSent bool)
 	return nil
 }
 
-func DeleteAuthSession(ctx context.Context, id uuid.UUID) *errs.Error {
-	if err := db.R.Del(ctx, AuthSessionIDCacheKey(id)); err != nil {
+func DeleteAuthSession(ctx context.Context, session *AuthSession) *errs.Error {
+	if err := db.R.Del(ctx, AuthSessionIDCacheKey(session.ID)); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to delete auth session").AppendDetails("Redis 错误", "鉴权会话删除失败")
 	}
-	if err := db.R.Del(ctx, AuthSessionQQCacheKey(id.String())); err != nil {
-		return errs.CreateAndLogInternalError(err, "Failed to delete auth session by QQ").AppendDetails("Redis 错误", "鉴权会话删除失败")
+	if session.QQ.Valid {
+		if err := db.R.Del(ctx, AuthSessionQQCacheKey(session.QQ.String)); err != nil {
+			return errs.CreateAndLogInternalError(err, "Failed to delete auth session by QQ").AppendDetails("Redis 错误", "鉴权会话删除失败")
+		}
+	}
+	return nil
+}
+
+func GetAuthSessionAttempts(ctx context.Context, id uuid.UUID) (int64, *errs.Error) {
+	n, err := db.GetRedis[int64](ctx, AuthSessionAttemptsCacheKey(id))
+	if err != nil {
+		return 0, errs.CreateAndLogInternalError(err, "Failed to get auth session attempts").AppendDetails("Redis 错误", "二次验证失败")
+	} else if n == nil {
+		return 0, nil
+	}
+	return *n, nil
+}
+
+func IncreaseAuthSessionAttempts(ctx context.Context, id uuid.UUID) (int64, *errs.Error) {
+	key := AuthSessionAttemptsCacheKey(id)
+	n, err := db.R.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, errs.CreateAndLogInternalError(err, "Failed to increase auth session attempts").AppendDetails("Redis 错误", "二次验证失败")
+	}
+	if n == 1 {
+		if err := db.R.Expire(ctx, key, AuthSession2FACacheDuration).Err(); err != nil {
+			db.R.Del(ctx, key)
+			return 0, errs.CreateAndLogInternalError(err, "Failed to set auth session attempts expiration").AppendDetails("Redis 错误", "二次验证失败")
+		}
+	}
+	return n, nil
+}
+
+func ResetAuthSessionAttempts(ctx context.Context, id uuid.UUID) *errs.Error {
+	if err := db.R.Del(ctx, AuthSessionAttemptsCacheKey(id)).Err(); err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to reset auth session attempts").AppendDetails("Redis 错误", "二次验证失败")
 	}
 	return nil
 }

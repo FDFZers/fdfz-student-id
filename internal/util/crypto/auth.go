@@ -41,6 +41,8 @@ func GenerateTOTP(userID uint64) (string, error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "FDFZ Student ID",
 		AccountName: strconv.FormatUint(userID, 10),
+		Period:      30,
+		Digits:      otp.DigitsSix,
 		Algorithm:   otp.AlgorithmSHA512,
 	})
 	if err != nil {
@@ -50,9 +52,10 @@ func GenerateTOTP(userID uint64) (string, error) {
 }
 
 func VerifyTOTP(secret string, code string) (bool, error) {
-	c, err := totp.GenerateCode(secret, time.Now())
-	if err != nil {
-		return false, err
-	}
-	return c == code, nil
+	return totp.ValidateCustom(code, secret, time.Now(), totp.ValidateOpts{
+		Period:    30,
+		Skew:      1,
+		Digits:    otp.DigitsSix,
+		Algorithm: otp.AlgorithmSHA512,
+	})
 }

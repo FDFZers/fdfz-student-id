@@ -98,7 +98,7 @@ func (w *TempWriter) Commit() error {
 		if err := os.Remove(w.tmpPath); err != nil {
 			slog.Warn("Failed to remove temp file", "error", err)
 		}
-		return fmt.Errorf("%w: expected %s, got %s", ErrSHA512Mismatch, w.expectedHash, w.actualHash)
+		return fmt.Errorf("%w: expected %s, got %s", ErrSHA512Mismatch, *w.expectedHash, w.actualHash)
 	}
 
 	if err := w.tmpFile.Sync(); err != nil {

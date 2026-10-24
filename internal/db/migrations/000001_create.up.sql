@@ -30,7 +30,7 @@ CREATE TABLE users
     username     VARCHAR(32)  NOT NULL,
 
     type         user_type    NOT NULL DEFAULT 'student',
-    student_num  VARCHAR(8)           DEFAULT NULL,
+    student_num  VARCHAR(8)            DEFAULT NULL,
     real_name    VARCHAR(32)  NOT NULL,
     school       school       NOT NULL DEFAULT 'fdfz',
 
@@ -177,7 +177,7 @@ CREATE TABLE user_sessions
     uuid               UUID         NOT NULL PRIMARY KEY DEFAULT uuidv7(),
     user_id            BIGINT       NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 
-    session_token_hash VARCHAR(128) NOT NULL, -- argon2id
+    session_token_hash VARCHAR(128) NOT NULL, -- sha512
     is_temporary       BOOLEAN      NOT NULL             DEFAULT false,
 
     created_at         TIMESTAMPTZ  NOT NULL             DEFAULT now(),
@@ -221,21 +221,21 @@ CREATE TABLE register_requests
 (
     id               UUID                    NOT NULL PRIMARY KEY DEFAULT uuidv7(),
 
-    type             user_type               NOT NULL DEFAULT 'student',
-    student_num      VARCHAR(8)                      DEFAULT NULL,
+    type             user_type               NOT NULL             DEFAULT 'student',
+    student_num      VARCHAR(8)                                   DEFAULT NULL,
     real_name        VARCHAR(32)             NOT NULL,
-    school           school                  NOT NULL DEFAULT 'fdfz',
+    school           school                  NOT NULL             DEFAULT 'fdfz',
 
     username         VARCHAR(32)             NOT NULL,
-    nickname         VARCHAR(32)                      DEFAULT NULL,
+    nickname         VARCHAR(32)                                  DEFAULT NULL,
     password         VARCHAR(256)            NOT NULL, -- argon2id
 
-    created_at       TIMESTAMPTZ             NOT NULL DEFAULT now(),
-    status           register_request_status NOT NULL DEFAULT 'pending',
+    created_at       TIMESTAMPTZ             NOT NULL             DEFAULT now(),
+    status           register_request_status NOT NULL             DEFAULT 'pending',
     created_user_id  BIGINT REFERENCES users (id) ON DELETE RESTRICT,
-    review_comment   TEXT                    NOT NULL DEFAULT '',
+    review_comment   TEXT                    NOT NULL             DEFAULT '',
     reviewer_user_id BIGINT REFERENCES users (id) ON DELETE RESTRICT,
-    reviewed_at      TIMESTAMPTZ                      DEFAULT NULL,
+    reviewed_at      TIMESTAMPTZ                                  DEFAULT NULL,
 
     CHECK ((type = 'student' AND student_num IS NOT NULL) OR (type != 'student' AND student_num IS NULL))
 );
@@ -304,12 +304,13 @@ CREATE TABLE permissions
     description VARCHAR(256) NOT NULL DEFAULT '',
     parents     BIGINT[]     NOT NULL DEFAULT '{}', -- 父权限，递归包含这些权限
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT uq_permissions_app_value UNIQUE (app_id, value)
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_permissions_app_id
+CREATE UNIQUE INDEX idx_permissions_app_id
     ON permissions (app_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_permissions_value
+    ON permissions (value);
 
 CREATE TRIGGER trg_permissions_updated_at
     BEFORE UPDATE
