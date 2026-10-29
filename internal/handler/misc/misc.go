@@ -10,7 +10,7 @@ import (
 func InitRoutes(api, internal *gin.RouterGroup) {
 	api.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"message": "欢迎来到 FDFZ Student ID！",
+			"message": "欢迎来到 FDFZ Student ID，远道而来的旅行者！",
 		})
 	})
 

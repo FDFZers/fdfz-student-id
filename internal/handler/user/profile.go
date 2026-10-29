@@ -5,7 +5,6 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/user"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,10 +26,9 @@ func getUserProfileByUsernameHandler(c *gin.Context) {
 
 func getUserProfileByIDHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetIDStr := c.Param("id")
-	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
-	if err != nil {
-		errs.BadRequestError().AppendDetails("无效的用户 ID", "获取用户信息失败").Respond(c)
+	targetID, uErr := ResolveTargetID(c, claims.UserID)
+	if uErr != nil {
+		uErr.AppendDetails("获取用户信息失败").Respond(c)
 		return
 	}
 

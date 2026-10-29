@@ -29,6 +29,11 @@ func reviewRegisterHandler(c *gin.Context) {
 		return
 	}
 
+	if !req.Status.IsValid() || req.Status == model.RegisterRequestStatusPending {
+		errs.BadRequestError().AppendDetails("无效的审核状态", "注册请求审核失败").Respond(c)
+		return
+	}
+
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	if !perm.Contains(claims.Permissions, "student_id.register_requests.review") {
 		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)

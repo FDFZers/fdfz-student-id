@@ -14,14 +14,18 @@ import (
 func InitRoutes(api, internal *gin.RouterGroup) {
 	a := api.Group("/auth")
 	i := internal.Group("/auth")
+
 	i.POST("/register", middleware.LimitSize(5<<20), createRegisterHandler)
 	i.POST("/login/init", loginInitHandler)
 	i.POST("/login/finalize", loginFinalizeHandler)
 	i.POST("/verify/email/init", verifyEmailInitHandler)
 	i.POST("/verify/email/verify", verifyEmailHandler)
 	i.POST("/verify/totp", verifyTOTPHandler)
+	i.POST("/stepup/init", middleware.ParseToken(), middleware.RequireTokenType(model.TokenTypeUser), stepupInitHandler)
+	i.POST("/stepup/finalize", middleware.ParseToken(), middleware.RequireTokenType(model.TokenTypeUser), stepupFinalizeHandler)
 	i.POST("/refresh", refreshTokenHandler)
 	i.POST("/logout", middleware.ParseToken(), middleware.RequireTokenType(model.TokenTypeUser), logoutHandler)
+
 	a.GET("/jwks", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
 		c.String(http.StatusOK, crypto.JWKS)

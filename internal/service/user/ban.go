@@ -20,7 +20,6 @@ WITH disabled AS (
     UPDATE user_bans
     SET enabled = false
     WHERE user_id = $1 AND enabled = true
-    RETURNING id
 )
 INSERT INTO user_bans (user_id, reason, end_time, enabled)
 VALUES ($1, $2, $3, true)

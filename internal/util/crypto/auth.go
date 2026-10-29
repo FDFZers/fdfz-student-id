@@ -37,7 +37,7 @@ func GenerateCode(length int, charset string) (string, error) {
 // TOTP
 // ---------------------------------------------------------------------------
 
-func GenerateTOTP(userID uint64) (string, error) {
+func GenerateTOTP(userID uint64) (secret, url string, err error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "FDFZ Student ID",
 		AccountName: strconv.FormatUint(userID, 10),
@@ -46,9 +46,9 @@ func GenerateTOTP(userID uint64) (string, error) {
 		Algorithm:   otp.AlgorithmSHA512,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return key.Secret(), nil
+	return key.Secret(), key.URL(), nil
 }
 
 func VerifyTOTP(secret string, code string) (bool, error) {

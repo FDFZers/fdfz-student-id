@@ -2,6 +2,9 @@ package filestore
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fdfz-student-id/internal/cfg"
@@ -14,25 +17,103 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/guregu/null/v6"
 )
 
+const (
+	tokenSeparator = "."
+
+	uploadTimeout = 30 * time.Second
+)
+
+var httpClient = &http.Client{Timeout: uploadTimeout}
+
 type StoreFileReq struct {
-	Slug         string      `json:"slug,omitempty"`
-	FilePath     string      `json:"file_path,omitempty"`
-	FileName     string      `json:"file_name,omitempty"`
+	Slug         string      `json:"slug"`
+	FilePath     string      `json:"file_path"`
+	FileName     string      `json:"file_name"`
+	Description  string      `json:"description"`
 	ContentType  null.String `json:"content_type"`
 	SHA512       null.String `json:"sha512"`
-	IsPrivate    bool        `json:"is_private"`
 	ShouldUpsert bool        `json:"should_upsert"`
 	ShouldCopy   bool        `json:"should_copy"`
 	UserID       null.Int64  `json:"user_id"`
 	AppID        null.Int64  `json:"app_id"`
-	BanComment   null.String `json:"ban_comment"`
 }
 
+// ---------------------------------------------------------------------------
+// 令牌
+// ---------------------------------------------------------------------------
+
+func CreateToken(slug string) (string, *errs.Error) {
+	return CreateTokenAt(slug, time.Now())
+}
+
+func CreateTokenAt(slug string, t time.Time) (string, *errs.Error) {
+	timestamp := t.Unix()
+	return strconv.FormatInt(timestamp, 10) + tokenSeparator +
+		signSlugToken(cfg.C.FilestoreHMACSecret, slug, timestamp), nil
+}
+
+func signSlugToken(secret, slug string, timestamp int64) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(slug))
+	mac.Write([]byte("\n"))
+	mac.Write(strconv.AppendInt(nil, timestamp, 10))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func BuildFileUrl(slug string) (string, *errs.Error) {
+	return buildUrl(slug, "file")
+}
+
+func BuildInfoUrl(slug string) (string, *errs.Error) {
+	return buildUrl(slug, "info")
+}
+
+func buildUrl(slug, reqType string) (string, *errs.Error) {
+	if !strings.HasPrefix(slug, "/") {
+		return "", errs.BadRequestError().AppendDetails("无效的 Slug", "文件地址获取失败")
+	}
+
+	token, tokenErr := CreateToken(slug)
+	if tokenErr != nil {
+		return "", tokenErr.AppendDetails("文件地址获取失败")
+	}
+
+	endpoint, joinErr := url.JoinPath(cfg.C.FilestoreEndpoint, "/internal/v1/"+reqType, slug)
+	if joinErr != nil {
+		return "", errs.InternalError().AppendDetails("URL 路径拼接失败", "文件地址获取失败")
+	}
+
+	query := url.Values{"token": {token}}
+	return endpoint + "?" + query.Encode(), nil
+}
+
+// ---------------------------------------------------------------------------
+// 上传
+// ---------------------------------------------------------------------------
+
 func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.Error {
+	if request == nil {
+		return errs.InternalError().AppendDetails("未提供文件上传请求", "文件上传失败")
+	}
+	if !strings.HasPrefix(request.Slug, "/") {
+		return errs.BadRequestError().AppendDetails("无效的 Slug", "文件上传失败")
+	}
+	if fileHeader == nil {
+		return errs.InternalError().AppendDetails("未提供文件", "文件上传失败")
+	}
+
+	token, tokenErr := CreateToken(request.Slug)
+	if tokenErr != nil {
+		return tokenErr.AppendDetails("文件上传失败")
+	}
+
 	rel, dst, err := storage.UploadTempPath()
 	if err != nil {
 		return errs.InternalError().AppendDetails("临时文件路径获取失败")
@@ -41,6 +122,15 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 	if err != nil {
 		return errs.InternalError().AppendDetails("临时文件创建失败")
 	}
+	defer func() {
+		tempWriter.Abort()
+		if _, statErr := os.Stat(dst); errors.Is(statErr, os.ErrNotExist) {
+			return
+		}
+		if err := os.Remove(dst); err != nil {
+			slog.Warn("Failed to remove file", "error", err)
+		}
+	}()
 
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -59,27 +149,18 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 	if err := tempWriter.Commit(); err != nil {
 		return errs.InternalError().AppendDetails("临时文件写入完成失败")
 	}
-	defer func(name string) {
-		if _, err := os.Stat(name); errors.Is(err, os.ErrNotExist) {
-			return
-		}
-		if err := os.Remove(name); err != nil {
-			slog.Warn("Failed to remove file", "error", err)
-		}
-	}(dst)
 
 	jsonData, err := json.Marshal(&StoreFileReq{
 		Slug:         request.Slug,
 		FilePath:     rel,
 		FileName:     request.FileName,
+		Description:  request.Description,
 		ContentType:  request.ContentType,
 		SHA512:       null.StringFrom(tempWriter.SHA512Sum()),
-		IsPrivate:    request.IsPrivate,
 		ShouldUpsert: request.ShouldUpsert,
 		ShouldCopy:   request.ShouldCopy,
 		UserID:       request.UserID,
 		AppID:        request.AppID,
-		BanComment:   request.BanComment,
 	})
 	if err != nil {
 		return errs.InternalError().AppendDetails("请求序列化失败")
@@ -95,10 +176,9 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		return errs.InternalError().AppendDetails("文件上传请求创建失败")
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", cfg.C.APIKey)
+	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{}
-	res, err := client.Do(req)
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return errs.InternalError().AppendDetails("文件上传请求发送失败")
 	}
@@ -115,9 +195,10 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 	}
 	if res.StatusCode != http.StatusOK {
 		var errorInfo errs.ErrorInfo
-		err := json.Unmarshal(body, &errorInfo)
-		if err != nil {
-			return errs.InternalError().AppendDetails("错误信息解析失败")
+		if err := json.Unmarshal(body, &errorInfo); err != nil || errorInfo.Error == "" {
+			slog.Warn("Failed to parse filestore error response",
+				"status", res.StatusCode, "body", string(body))
+			return errs.CreateError(res.StatusCode, "filestore_error").AppendDetails("文件上传失败")
 		}
 		return &errs.Error{HTTPCode: res.StatusCode, Info: errorInfo}
 	}

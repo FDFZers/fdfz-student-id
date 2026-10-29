@@ -15,11 +15,13 @@ type Config struct {
 	PostgresURL         string
 	RedisURL            string
 	FilestoreEndpoint   string
+	FilestoreHMACSecret string
 	NapCatEndpoint      string
-	APIKey              string
 	AltchaHMACSecret    string
+	AltchaTimeout       time.Duration
 	JWTKeyID            string
 	AccessTokenTTL      time.Duration
+	StepupTokenTTL      time.Duration
 	TempSessionTokenTTL time.Duration
 	PermSessionTokenTTL time.Duration
 	CodeSendInterval    time.Duration
@@ -49,9 +51,14 @@ func LoadConfig() error {
 		return err
 	}
 
-	cfg.FilestoreEndpoint = env("FILESTORE_ENDPOINT", "https://static.fdfz.top/")
+	cfg.FilestoreEndpoint = env("FILESTORE_ENDPOINT", "https://filestore.fdfz.top/")
 	cfg.NapCatEndpoint = env("NAPCAT_ENDPOINT", "https://napcat.fdfz.top/")
+	cfg.AltchaTimeout = envDur("ALTCHA_TIMEOUT", 10*time.Second)
 	cfg.AccessTokenTTL = envDur("ACCESS_TOKEN_TTL", 10*time.Minute)
+	cfg.StepupTokenTTL = envDur("STEPUP_TOKEN_TTL", 5*time.Minute)
+	if cfg.StepupTokenTTL <= 0 {
+		return fmt.Errorf("stepup token ttl must be positive")
+	}
 	cfg.PermSessionTokenTTL = envDur("PERM_SESSION_TOKEN_TTL", 30*24*time.Hour)
 	cfg.TempSessionTokenTTL = envDur("TEMP_SESSION_TOKEN_TTL", 24*time.Hour)
 	cfg.CodeSendInterval = envDur("CODE_SEND_INTERVAL", 1*time.Minute)
@@ -74,10 +81,10 @@ func LoadConfig() error {
 		return fmt.Errorf("load env: invalid json SCHOOL_IPS: %w", err)
 	}
 
-	if cfg.APIKey, err = requireEnv("API_KEY"); err != nil {
+	if cfg.FilestoreHMACSecret, err = requireEnv("FILESTORE_HMAC_SECRET"); err != nil {
 		return err
-	} else if len(cfg.APIKey) == 0 {
-		return fmt.Errorf("API key not set")
+	} else if len(cfg.FilestoreHMACSecret) == 0 {
+		return fmt.Errorf("filestore HMAC secret not set")
 	}
 
 	if cfg.AltchaHMACSecret, err = requireEnv("ALTCHA_HMAC_SECRET"); err != nil {

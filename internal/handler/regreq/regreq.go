@@ -6,10 +6,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func InitRoutes(api *gin.RouterGroup) {
-	group := api.Group("/register_request")
-	group.GET("/status", registerRequestStatusHandler)
-	group.POST("/review", middleware.ParseToken(), middleware.RequireToken(), reviewRegisterHandler)
-	group.GET("/search/info", middleware.ParseToken(), middleware.RequireToken(), SearchInfoHandler)
-	group.POST("/search/query", middleware.ParseToken(), middleware.RequireToken(), SearchQueryHandler)
+func InitRoutes(api, internal *gin.RouterGroup) {
+	a := api.Group("/register_request")
+	i := internal.Group("/register_request")
+
+	a.GET("/status", registerRequestStatusHandler)
+	i.GET("/detail/:id", middleware.RequireToken(), getRegisterRequestHandler)
+	i.GET("/detail/:id/proof_image", middleware.RequireToken(), getRegisterRequestProofImageHandler)
+	i.POST("/review", middleware.RequireToken(), reviewRegisterHandler)
+	i.GET("/search/info", middleware.RequireToken(), SearchInfoHandler)
+	i.POST("/search/query", middleware.RequireToken(), SearchQueryHandler)
 }

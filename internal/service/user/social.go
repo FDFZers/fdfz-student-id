@@ -34,6 +34,25 @@ func GetUserEmail(ctx context.Context, userID int64) (*model.UserEmail, *errs.Er
 }
 
 // ---------------------------------------------------------------------------
+// 检查邮箱是否已被占用
+// ---------------------------------------------------------------------------
+
+const isEmailTakenSQL = `
+SELECT EXISTS (
+    SELECT 1 FROM user_emails
+    WHERE lower(email) = lower($1) AND deleted_at IS NULL
+)
+`
+
+func IsEmailTaken(ctx context.Context, email string) (bool, *errs.Error) {
+	var taken bool
+	if err := db.R.QueryRow(ctx, isEmailTakenSQL, email).Scan(&taken); err != nil {
+		return false, errs.CreatePGError(err, "邮箱", "Failed to check email existence").AppendDetails("邮箱占用信息查询失败")
+	}
+	return taken, nil
+}
+
+// ---------------------------------------------------------------------------
 // 设置邮箱
 // ---------------------------------------------------------------------------
 

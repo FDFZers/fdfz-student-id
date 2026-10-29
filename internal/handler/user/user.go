@@ -1,22 +1,56 @@
 package user
 
 import (
+	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-func InitRoutes(api *gin.RouterGroup) {
-	group := api.Group("/user")
-	group.GET("/profile/username/:username", middleware.ParseToken(), middleware.RequireToken(), getUserProfileByUsernameHandler)
-	group.GET("/profile/id/:id", middleware.ParseToken(), middleware.RequireToken(), getUserProfileByIDHandler)
-	group.GET("/ban/:id", middleware.ParseToken(), middleware.RequireToken(), getUserBanHandler)
-	group.PUT("/avatar", middleware.ParseToken(), middleware.RequireToken(), middleware.LimitSize(5<<20), setAvatarHandler)
-	group.PUT("/banner", middleware.ParseToken(), middleware.RequireToken(), middleware.LimitSize(5<<20), setBannerHandler)
-	group.GET("/search/info", middleware.ParseToken(), middleware.RequireToken(), SearchInfoHandler)
-	group.POST("/search/query", middleware.ParseToken(), middleware.RequireToken(), SearchQueryHandler)
+func InitRoutes(api, internal *gin.RouterGroup) {
+	a := api.Group("/user")
+	i := internal.Group("/user")
+
+	a.GET("/profile", middleware.RequireToken(), getUserProfileByIDHandler)
+	a.GET("/profile/id/:id", middleware.RequireToken(), getUserProfileByIDHandler)
+	a.GET("/profile/username/:username", middleware.RequireToken(), getUserProfileByUsernameHandler)
+
+	a.PATCH("/profile", middleware.RequireToken(), updateUserProfileHandler)
+	a.PATCH("/profile/id/:id", middleware.RequireToken(), updateUserProfileHandler)
+
+	a.GET("/avatar", middleware.RequireToken(), getAvatarHandler)
+	a.GET("/avatar/:id", middleware.RequireToken(), getAvatarHandler)
+
+	a.GET("/banner", middleware.RequireToken(), getBannerHandler)
+	a.GET("/banner/:id", middleware.RequireToken(), getBannerHandler)
+
+	a.PUT("/avatar", middleware.RequireToken(), middleware.LimitSize(5<<20), setAvatarHandler)
+	a.PUT("/avatar/:id", middleware.RequireToken(), middleware.LimitSize(5<<20), setAvatarHandler)
+
+	a.PUT("/banner", middleware.RequireToken(), middleware.LimitSize(5<<20), setBannerHandler)
+	a.PUT("/banner/:id", middleware.RequireToken(), middleware.LimitSize(5<<20), setBannerHandler)
+
+	a.GET("/search/info", middleware.RequireToken(), SearchInfoHandler)
+	a.POST("/search/query", middleware.RequireToken(), SearchQueryHandler)
+
+	i.GET("/ban/:id", middleware.RequireToken(), getUserBanHandler)
+	i.POST("/ban/:id", middleware.RequireToken(), banUserHandler)
+	i.DELETE("/ban/:id", middleware.RequireToken(), unbanUserHandler)
+}
+
+func ResolveTargetID(c *gin.Context, selfID int64) (int64, *errs.Error) {
+	targetStr := c.Param("id")
+	if targetStr == "" {
+		return selfID, nil
+	}
+	target, err := strconv.ParseInt(targetStr, 10, 64)
+	if err != nil {
+		return 0, errs.BadRequestError().AppendDetails("无效的用户 ID")
+	}
+	return target, nil
 }
 
 type profileEntry struct {

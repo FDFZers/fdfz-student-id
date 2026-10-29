@@ -134,10 +134,9 @@ func createRegisterHandler(c *gin.Context) {
 
 	// 上传佐证图片
 	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
-		Slug:      "/student_id/proof_images/" + r.ID.String(),
-		FileName:  r.ID.String() + strings.ToLower(path.Ext(fileHeader.Filename)),
-		IsPrivate: true,
-		AppID:     null.IntFrom(1),
+		Slug:     "/student_id/proof_images/" + r.ID.String(),
+		FileName: r.ID.String() + strings.ToLower(path.Ext(fileHeader.Filename)),
+		AppID:    null.IntFrom(1),
 	}); err != nil {
 		if err := user.DeleteRegisterRequest(c.Request.Context(), r.ID); err != nil {
 			err.AppendDetails("注册失败且回退失败，请联系管理员").Respond(c)

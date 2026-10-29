@@ -30,7 +30,7 @@ CREATE TABLE users
     username     VARCHAR(32)  NOT NULL,
 
     type         user_type    NOT NULL DEFAULT 'student',
-    student_num  VARCHAR(8)            DEFAULT NULL,
+    student_num  VARCHAR(16)           DEFAULT NULL,
     real_name    VARCHAR(32)  NOT NULL,
     school       school       NOT NULL DEFAULT 'fdfz',
 
@@ -38,7 +38,9 @@ CREATE TABLE users
     signature    VARCHAR(128) NOT NULL DEFAULT '',
     bio          TEXT         NOT NULL DEFAULT '',
 
-    visibilities JSONB        NOT NULL DEFAULT '{"real_name":"private"}',
+    visibilities JSONB        NOT NULL DEFAULT '{
+      "real_name": "private"
+    }',
 
     created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -222,7 +224,7 @@ CREATE TABLE register_requests
     id               UUID                    NOT NULL PRIMARY KEY DEFAULT uuidv7(),
 
     type             user_type               NOT NULL             DEFAULT 'student',
-    student_num      VARCHAR(8)                                   DEFAULT NULL,
+    student_num      VARCHAR(16)                                  DEFAULT NULL,
     real_name        VARCHAR(32)             NOT NULL,
     school           school                  NOT NULL             DEFAULT 'fdfz',
 
@@ -307,7 +309,7 @@ CREATE TABLE permissions
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX idx_permissions_app_id
+CREATE INDEX idx_permissions_app_id
     ON permissions (app_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_permissions_value
     ON permissions (value);

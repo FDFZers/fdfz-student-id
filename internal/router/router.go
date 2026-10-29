@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/handler/healthcheck"
 	"fdfz-student-id/internal/handler/misc"
 	"fdfz-student-id/internal/handler/regreq"
+	"fdfz-student-id/internal/handler/security"
 	"fdfz-student-id/internal/handler/user"
 	"strings"
 	"time"
@@ -31,7 +32,7 @@ func InitRouter(r *gin.Engine) {
 			return strings.HasPrefix(origin, "https://") && strings.HasSuffix(origin, ".fdfz.top")
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-Api-Key"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	})
@@ -50,8 +51,9 @@ func InitRouter(r *gin.Engine) {
 
 	misc.InitRoutes(v1, internal)
 	auth.InitRoutes(v1, internal)
-	regreq.InitRoutes(v1)
-	user.InitRoutes(v1)
+	regreq.InitRoutes(v1, internal)
+	user.InitRoutes(v1, internal)
+	security.InitRoutes(internal)
 }
 
 func InitHealthCheckRouter(r *gin.Engine) {

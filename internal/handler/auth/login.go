@@ -205,7 +205,7 @@ func loginFinalizeHandler(c *gin.Context) {
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),
 		IsTemporary: authSession.IsTemporary,
-	})
+	}, cfg.C.AccessTokenTTL)
 	if cErr != nil {
 		rollback(errs.CreateAndLogInternalError(cErr, "Failed to generate access token").AppendDetails("令牌生成失败")).Respond(c)
 		return
@@ -284,7 +284,7 @@ func refreshTokenHandler(c *gin.Context) {
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),
 		IsTemporary: session.IsTemporary,
-	})
+	}, cfg.C.AccessTokenTTL)
 	if cErr != nil {
 		errs.CreateAndLogInternalError(cErr, "Failed to generate access token").AppendDetails("令牌生成失败", "令牌刷新失败").Respond(c)
 		return
@@ -316,5 +316,6 @@ func logoutHandler(c *gin.Context) {
 	}
 
 	setTokenCookies(c, "", "", 0, 0)
+	setStepupCookie(c, "", -1)
 	c.JSON(http.StatusOK, gin.H{})
 }

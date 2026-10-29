@@ -68,7 +68,7 @@ func LoadJWTKeys() error {
 	return nil
 }
 
-func GenerateJWT(id uuid.UUID, claims *model.TokenClaims) (string, error) {
+func GenerateJWT(id uuid.UUID, claims *model.TokenClaims, ttl time.Duration) (string, error) {
 	now := time.Now()
 
 	claimsCopy := *claims
@@ -79,7 +79,7 @@ func GenerateJWT(id uuid.UUID, claims *model.TokenClaims) (string, error) {
 		TokenClaims: claimsCopy,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "fdfz-student-id",
-			ExpiresAt: jwt.NewNumericDate(now.Add(cfg.C.AccessTokenTTL)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 			NotBefore: jwt.NewNumericDate(now),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ID:        id.String(),

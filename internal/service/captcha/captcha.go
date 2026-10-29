@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/altcha-org/altcha-lib-go/v2"
 )
@@ -16,12 +17,14 @@ import (
 var AltchaError = errs.CreateError(http.StatusForbidden, "altcha")
 
 func CreateChallenge() (altcha.Challenge, error) {
+	expiresAt := time.Now().Add(cfg.C.AltchaTimeout)
 	return altcha.CreateChallenge(altcha.CreateChallengeOptions{
 		Algorithm:           "PBKDF2/SHA-256",
 		DeriveKey:           altcha.DeriveKeyPBKDF2(),
 		HMACSignatureSecret: cfg.C.AltchaHMACSecret,
-		Cost:                5000,
+		Cost:                16384,
 		KeyLength:           32,
+		ExpiresAt:           &expiresAt,
 	})
 }
 

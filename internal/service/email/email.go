@@ -16,7 +16,7 @@ import (
 var fs embed.FS
 
 func send(to, subject, htmlBody string) error {
-	auth := smtp.PlainAuth("", cfg.C.SMTP.Username, cfg.C.SMTP.Password, cfg.C.SMTP.Host)
+	a := smtp.PlainAuth("", cfg.C.SMTP.Username, cfg.C.SMTP.Password, cfg.C.SMTP.Host)
 
 	encodedSubject := mime.BEncoding.Encode("UTF-8", subject)
 
@@ -30,7 +30,7 @@ func send(to, subject, htmlBody string) error {
 	msg.WriteString("\r\n")
 	msg.WriteString(htmlBody)
 
-	return smtp.SendMail(cfg.C.SMTP.Host+":"+cfg.C.SMTP.Port, auth, cfg.C.SMTP.From, []string{to}, []byte(msg.String()))
+	return smtp.SendMail(cfg.C.SMTP.Host+":"+cfg.C.SMTP.Port, a, cfg.C.SMTP.From, []string{to}, []byte(msg.String()))
 }
 
 func SendCode(to, code string, typ auth.AuthSessionType) error {
@@ -76,4 +76,20 @@ func SendCode(to, code string, typ auth.AuthSessionType) error {
 		return fmt.Errorf("unknown auth session type: %v", typ)
 	}
 	return send(to, title+" - 复旦附中学生 ID", r.Replace(str))
+}
+
+func SendBindEmailCode(to, code string) error {
+	data, err := fs.ReadFile("templates/code.html")
+	if err != nil {
+		return err
+	}
+	r := strings.NewReplacer(
+		"{{TITLE}}", "邮箱绑定",
+		"{{CODE_NAME}}", "邮箱绑定验证码",
+		"{{ACTION}}", "绑定邮箱到复旦附中学生 ID",
+		"{{ACTION_NOT_SELF}}", "请立即检查你的账号安全",
+		"{{CODE}}", code,
+	)
+	slog.Info("Sending email binding code", "to", to)
+	return send(to, "邮箱绑定 - 复旦附中学生 ID", r.Replace(string(data)))
 }
