@@ -18,7 +18,21 @@ type School string
 type Visibility string
 
 type Visibilities struct {
-	RealName Visibility `json:"real_name"`
+	RealName  Visibility `json:"real_name"`
+	Followers Visibility `json:"followers"`
+	Following Visibility `json:"following"`
+}
+
+func (v *Visibilities) Normalize() {
+	if v.RealName == "" {
+		v.RealName = VisibilityPrivate
+	}
+	if v.Followers == "" {
+		v.Followers = VisibilityPrivate
+	}
+	if v.Following == "" {
+		v.Following = VisibilityPrivate
+	}
 }
 
 type User struct {

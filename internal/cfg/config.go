@@ -12,24 +12,25 @@ import (
 var C *Config
 
 type Config struct {
-	PostgresURL         string
-	RedisURL            string
-	FilestoreEndpoint   string
-	FilestoreHMACSecret string
-	NapCatEndpoint      string
-	AltchaHMACSecret    string
-	AltchaTimeout       time.Duration
-	JWTKeyID            string
-	AccessTokenTTL      time.Duration
-	StepupTokenTTL      time.Duration
-	TempSessionTokenTTL time.Duration
-	PermSessionTokenTTL time.Duration
-	CodeSendInterval    time.Duration
-	SMTP                SMTPConfig
-	SchoolIPs           map[string]model.School
-	TrustedProxies      []string
-	SharedDir           string
-	BypassCaptcha       bool
+	PostgresURL               string
+	RedisURL                  string
+	FilestorePublicEndpoint   string
+	FilestoreInternalEndpoint string
+	FilestoreHMACSecret       string
+	NapCatEndpoint            string
+	AltchaHMACSecret          string
+	AltchaTimeout             time.Duration
+	JWTKeyID                  string
+	AccessTokenTTL            time.Duration
+	StepupTokenTTL            time.Duration
+	TempSessionTokenTTL       time.Duration
+	PermSessionTokenTTL       time.Duration
+	CodeSendInterval          time.Duration
+	SMTP                      SMTPConfig
+	SchoolIPs                 map[string]model.School
+	TrustedProxies            []string
+	SharedDir                 string
+	BypassCaptcha             bool
 }
 
 type SMTPConfig struct {
@@ -51,7 +52,8 @@ func LoadConfig() error {
 		return err
 	}
 
-	cfg.FilestoreEndpoint = env("FILESTORE_ENDPOINT", "https://filestore.fdfz.top/")
+	cfg.FilestorePublicEndpoint = env("FILESTORE_PUBLIC_ENDPOINT", "https://filestore.fdfz.top/")
+	cfg.FilestoreInternalEndpoint = env("FILESTORE_INTERNAL_ENDPOINT", "https://filestore.fdfz.top/")
 	cfg.NapCatEndpoint = env("NAPCAT_ENDPOINT", "https://napcat.fdfz.top/")
 	cfg.AltchaTimeout = envDur("ALTCHA_TIMEOUT", 10*time.Second)
 	cfg.AccessTokenTTL = envDur("ACCESS_TOKEN_TTL", 10*time.Minute)

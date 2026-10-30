@@ -5,6 +5,7 @@ import (
 	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
+	"fdfz-student-id/internal/service/user"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -39,6 +40,16 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.GET("/ban/:id", middleware.RequireToken(), getUserBanHandler)
 	i.POST("/ban/:id", middleware.RequireToken(), banUserHandler)
 	i.DELETE("/ban/:id", middleware.RequireToken(), unbanUserHandler)
+
+	a.POST("/follow/:id", middleware.RequireToken(), followUserHandler)
+	a.DELETE("/follow/:id", middleware.RequireToken(), unfollowUserHandler)
+	a.GET("/follow/:id", middleware.RequireToken(), getFollowStatusHandler)
+	a.GET("/followers", middleware.RequireToken(), getFollowersHandler)
+	a.GET("/followers/:id", middleware.RequireToken(), getFollowersHandler)
+	a.GET("/following", middleware.RequireToken(), getFollowingHandler)
+	a.GET("/following/:id", middleware.RequireToken(), getFollowingHandler)
+	a.GET("/friends", middleware.RequireToken(), getFriendsHandler)
+	a.GET("/friends/:id", middleware.RequireToken(), getFriendsHandler)
 }
 
 func ResolveTargetID(c *gin.Context, selfID int64) (int64, *errs.Error) {
@@ -51,6 +62,16 @@ func ResolveTargetID(c *gin.Context, selfID int64) (int64, *errs.Error) {
 		return 0, errs.BadRequestError().AppendDetails("无效的用户 ID")
 	}
 	return target, nil
+}
+
+func EnsureUserExists(userID int64) *errs.Error {
+	target, err := user.GetUserByID(c.Request.Context(), userID)
+	if err != nil {
+		return err
+	} else if target == nil {
+		return errs.NotFoundError().AppendDetails("用户不存在")
+	}
+	return nil
 }
 
 type profileEntry struct {
@@ -69,6 +90,7 @@ func filterProfiles(claims *model.RegisteredTokenClaims, targetUsers ...*model.U
 	fieldKeys := [...]string{
 		"id", "username", "nickname", "real_name",
 		"school", "student_num", "bio", "signature", "type", "deleted",
+		"visibilities",
 	}
 	var permCache [len(fieldKeys)]fieldPerm
 	for i, key := range fieldKeys {
@@ -94,6 +116,7 @@ func filterProfiles(claims *model.RegisteredTokenClaims, targetUsers ...*model.U
 			{"signature", true, targetUser.Signature},
 			{"type", true, targetUser.Type},
 			{"deleted", true, targetUser.DeletedAt.Valid},
+			{"visibilities", false, targetUser.Visibilities},
 		}
 
 		res := make(gin.H, len(values))

@@ -50,5 +50,8 @@ func SearchQueryHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, filterProfiles(claims, users.Data...))
+	c.JSON(http.StatusOK, gin.H{
+		"count": users.Count,
+		"data":  filterProfiles(claims, users.Data...),
+	})
 }

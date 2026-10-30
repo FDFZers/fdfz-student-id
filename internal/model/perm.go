@@ -7,6 +7,7 @@ type PermissionInfo struct {
 	AppID       int64     `json:"app_id" db:"app_id"`
 	Value       string    `json:"value" db:"value"`
 	Description string    `json:"description" db:"description"`
+	Public      bool      `json:"public" db:"public"`   // 是否允许 OAuth 应用申请此权限
 	Parents     []int64   `json:"parents" db:"parents"` // 父权限，递归包含这些权限
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`

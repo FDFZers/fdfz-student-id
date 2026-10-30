@@ -10,6 +10,7 @@ import (
 )
 
 type PermissionDef struct {
+	Public       bool
 	Nodes        []string
 	Placeholders []string
 	Parents      []*PermissionDef
@@ -20,7 +21,7 @@ var (
 )
 
 const getAllPermsSQL = `
-SELECT id, value, parents
+SELECT id, value, parents, public
 FROM permissions
 `
 
@@ -28,6 +29,7 @@ type rawDef struct {
 	ID        int64
 	Value     string
 	ParentIDs []int64
+	Public    bool
 }
 
 func LoadDefinitions(ctx context.Context) *errs.Error {
@@ -38,7 +40,7 @@ func LoadDefinitions(ctx context.Context) *errs.Error {
 
 	raws, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*rawDef, error) {
 		var raw rawDef
-		if err := row.Scan(&raw.ID, &raw.Value, &raw.ParentIDs); err != nil {
+		if err := row.Scan(&raw.ID, &raw.Value, &raw.ParentIDs, &raw.Public); err != nil {
 			return nil, err
 		}
 		return &raw, nil
@@ -58,7 +60,7 @@ func LoadDefinitions(ctx context.Context) *errs.Error {
 			return errs.InternalError().AppendDetails("存在无效权限", "权限加载失败")
 		}
 		nodes := GetNodes(raw.Value)
-		defMap[raw.ID] = &PermissionDef{Nodes: nodes, Placeholders: GetPlaceholders(nodes)}
+		defMap[raw.ID] = &PermissionDef{Nodes: nodes, Placeholders: GetPlaceholders(nodes), Public: raw.Public}
 		parentIDsMap[raw.ID] = raw.ParentIDs
 	}
 

@@ -66,6 +66,7 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 			return errs.ConflictError().AppendDetails("该学校学号已被注册或正在审核中", "用户创建失败")
 		}
 	}
+	u.Visibilities.Normalize()
 	vis, err := json.Marshal(u.Visibilities)
 	if err != nil {
 		return errs.InternalError().AppendDetails("序列化错误", "用户创建失败")
@@ -153,6 +154,7 @@ func GetUserByID(
 			if err := json.Unmarshal(vis, &u.Visibilities); err != nil {
 				return nil, err
 			}
+			u.Visibilities.Normalize()
 			return &u, nil
 		},
 	)

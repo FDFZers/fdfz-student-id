@@ -5,7 +5,6 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/filestore"
 	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/validation"
 	"net/http"
 	"path"
@@ -127,12 +126,8 @@ func serveProfileImage(c *gin.Context, kind profileImageKind) {
 		return
 	}
 
-	target, uErr := user.GetUserByID(c.Request.Context(), targetID)
-	if uErr != nil {
-		uErr.AppendDetails(failMsg).Respond(c)
-		return
-	} else if target == nil {
-		errs.NotFoundError().AppendDetails("用户不存在", failMsg).Respond(c)
+	if err := EnsureUserExists(targetID); err != nil {
+		err.AppendDetails(failMsg).Respond(c)
 		return
 	}
 

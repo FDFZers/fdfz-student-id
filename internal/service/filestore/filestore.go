@@ -85,7 +85,7 @@ func buildUrl(slug, reqType string) (string, *errs.Error) {
 		return "", tokenErr.AppendDetails("文件地址获取失败")
 	}
 
-	endpoint, joinErr := url.JoinPath(cfg.C.FilestoreEndpoint, "/internal/v1/"+reqType, slug)
+	endpoint, joinErr := url.JoinPath(cfg.C.FilestorePublicEndpoint, "/internal/v1/"+reqType, slug)
 	if joinErr != nil {
 		return "", errs.InternalError().AppendDetails("URL 路径拼接失败", "文件地址获取失败")
 	}
@@ -166,7 +166,7 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		return errs.InternalError().AppendDetails("请求序列化失败")
 	}
 
-	endpoint, err := url.JoinPath(cfg.C.FilestoreEndpoint, "/api/internal/upload/store")
+	endpoint, err := url.JoinPath(cfg.C.FilestoreInternalEndpoint, "/api/internal/upload/store")
 	if err != nil {
 		return errs.InternalError().AppendDetails("URL 路径拼接失败")
 	}

@@ -59,9 +59,9 @@ type banUserReq struct {
 
 func banUserHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	targetID, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		errs.BadRequestError().AppendDetails("无效的用户 ID", "用户封禁失败").Respond(c)
+		err.AppendDetails("用户封禁失败").Respond(c)
 		return
 	}
 	if targetID == claims.UserID {
@@ -87,11 +87,8 @@ func banUserHandler(c *gin.Context) {
 		return
 	}
 
-	if target, uErr := user.GetUserByID(c.Request.Context(), targetID); uErr != nil {
-		uErr.AppendDetails("用户封禁失败").Respond(c)
-		return
-	} else if target == nil {
-		errs.NotFoundError().AppendDetails("用户不存在", "用户封禁失败").Respond(c)
+	if err := EnsureUserExists(targetID); err != nil {
+		err.AppendDetails("用户封禁失败").Respond(c)
 		return
 	}
 
@@ -110,9 +107,9 @@ func banUserHandler(c *gin.Context) {
 
 func unbanUserHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	targetID, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		errs.BadRequestError().AppendDetails("无效的用户 ID", "用户解封失败").Respond(c)
+		err.AppendDetails("用户解封失败").Respond(c)
 		return
 	}
 	if !perm.Contains(claims.Permissions, "student_id.users.ban.delete") {
@@ -120,11 +117,8 @@ func unbanUserHandler(c *gin.Context) {
 		return
 	}
 
-	if target, uErr := user.GetUserByID(c.Request.Context(), targetID); uErr != nil {
-		uErr.AppendDetails("用户解封失败").Respond(c)
-		return
-	} else if target == nil {
-		errs.NotFoundError().AppendDetails("用户不存在", "用户解封失败").Respond(c)
+	if err := EnsureUserExists(targetID); err != nil {
+		err.AppendDetails("用户解封失败").Respond(c)
 		return
 	}
 

@@ -21,10 +21,10 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/verify/email/init", verifyEmailInitHandler)
 	i.POST("/verify/email/verify", verifyEmailHandler)
 	i.POST("/verify/totp", verifyTOTPHandler)
-	i.POST("/stepup/init", middleware.ParseToken(), middleware.RequireTokenType(model.TokenTypeUser), stepupInitHandler)
-	i.POST("/stepup/finalize", middleware.ParseToken(), middleware.RequireTokenType(model.TokenTypeUser), stepupFinalizeHandler)
+	i.POST("/stepup/init", middleware.RequireTokenType(model.TokenTypeUser), stepupInitHandler)
+	i.POST("/stepup/finalize", middleware.RequireTokenType(model.TokenTypeUser), stepupFinalizeHandler)
 	i.POST("/refresh", refreshTokenHandler)
-	i.POST("/logout", middleware.ParseToken(), middleware.RequireTokenType(model.TokenTypeUser), logoutHandler)
+	i.POST("/logout", middleware.RequireTokenType(model.TokenTypeUser), logoutHandler)
 
 	a.GET("/jwks", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")

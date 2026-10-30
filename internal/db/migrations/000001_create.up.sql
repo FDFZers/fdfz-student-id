@@ -38,9 +38,7 @@ CREATE TABLE users
     signature    VARCHAR(128) NOT NULL DEFAULT '',
     bio          TEXT         NOT NULL DEFAULT '',
 
-    visibilities JSONB        NOT NULL DEFAULT '{
-      "real_name": "private"
-    }',
+    visibilities JSONB        NOT NULL DEFAULT '{"real_name":"private","followers":"private","following":"private"}',
 
     created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -94,6 +92,25 @@ CREATE UNIQUE INDEX idx_user_bans_user_id_active
     WHERE enabled = true;
 CREATE INDEX idx_user_bans_enabled_end_time
     ON user_bans (enabled, end_time);
+
+-- =============================================
+-- 用户关注关系 user_follows
+-- =============================================
+CREATE TABLE user_follows
+(
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    follower_id  BIGINT      NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    following_id BIGINT      NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_user_follows UNIQUE (follower_id, following_id),
+    CONSTRAINT chk_user_follows_not_self CHECK (follower_id <> following_id)
+);
+
+CREATE INDEX idx_user_follows_following_id
+    ON user_follows (following_id);
+CREATE INDEX idx_user_follows_created_at
+    ON user_follows (created_at);
 
 -- =============================================
 -- 用户密码 user_passwords
@@ -304,6 +321,7 @@ CREATE TABLE permissions
     app_id      BIGINT       NOT NULL REFERENCES oauth_apps (id) ON DELETE RESTRICT,
     value       VARCHAR(128) NOT NULL,
     description VARCHAR(256) NOT NULL DEFAULT '',
+    public      BOOLEAN      NOT NULL DEFAULT true,
     parents     BIGINT[]     NOT NULL DEFAULT '{}', -- 父权限，递归包含这些权限
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
