@@ -14,7 +14,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w \
         -X fdfz-student-id/internal/cfg.Commit=${COMMIT} \
-        -X fdfz-student-id/internal/config.BuildTime=${BUILD_TIME}" \
+        -X fdfz-student-id/internal/cfg.BuildTime=${BUILD_TIME}" \
     -trimpath \
     -o ./server \
     ./cmd/server/main.go
