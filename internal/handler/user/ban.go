@@ -17,8 +17,8 @@ import (
 func getUserBanHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	targetIDStr := c.Param("id")
-	targetID, err := strconv.ParseInt(targetIDStr, 10, 64)
-	if err != nil {
+	targetID, error := strconv.ParseInt(targetIDStr, 10, 64)
+	if error != nil {
 		errs.BadRequestError().AppendDetails("无效的用户 ID", "获取用户封禁信息失败").Respond(c)
 		return
 	}
@@ -34,9 +34,9 @@ func getUserBanHandler(c *gin.Context) {
 		return
 	}
 
-	ban, uErr := user.GetUserBan(c.Request.Context(), targetID)
-	if uErr != nil {
-		uErr.AppendDetails("用户封禁信息获取失败").Respond(c)
+	ban, err := user.GetUserBan(c.Request.Context(), targetID)
+	if err != nil {
+		err.AppendDetails("用户封禁信息获取失败").Respond(c)
 		return
 	} else if ban == nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -87,7 +87,7 @@ func banUserHandler(c *gin.Context) {
 		return
 	}
 
-	if err := EnsureUserExists(targetID); err != nil {
+	if err := EnsureUserExists(c, targetID); err != nil {
 		err.AppendDetails("用户封禁失败").Respond(c)
 		return
 	}
@@ -117,7 +117,7 @@ func unbanUserHandler(c *gin.Context) {
 		return
 	}
 
-	if err := EnsureUserExists(targetID); err != nil {
+	if err := EnsureUserExists(c, targetID); err != nil {
 		err.AppendDetails("用户解封失败").Respond(c)
 		return
 	}

@@ -54,16 +54,16 @@ func getBannerHandler(c *gin.Context) { serveProfileImage(c, bannerImage) }
 func setProfileImageHandler(c *gin.Context, kind profileImageKind) {
 	failMsg := kind.Item + "设置失败"
 
-	form, err := c.MultipartForm()
-	if err != nil {
+	form, error := c.MultipartForm()
+	if error != nil {
 		errs.BadRequestError().AppendDetails("请求解析失败", failMsg).Respond(c)
 		return
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	target, uErr := ResolveTargetID(c, claims.UserID)
-	if uErr != nil {
-		uErr.AppendDetails(failMsg).Respond(c)
+	target, err := ResolveTargetID(c, claims.UserID)
+	if err != nil {
+		err.AppendDetails(failMsg).Respond(c)
 		return
 	}
 	targetStr := strconv.FormatInt(target, 10)
@@ -111,9 +111,9 @@ func serveProfileImage(c *gin.Context, kind profileImageKind) {
 	failMsg := kind.Item + "获取失败"
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
-	targetID, uErr := ResolveTargetID(c, claims.UserID)
-	if uErr != nil {
-		uErr.AppendDetails(failMsg).Respond(c)
+	targetID, err := ResolveTargetID(c, claims.UserID)
+	if err != nil {
+		err.AppendDetails(failMsg).Respond(c)
 		return
 	}
 
@@ -126,15 +126,15 @@ func serveProfileImage(c *gin.Context, kind profileImageKind) {
 		return
 	}
 
-	if err := EnsureUserExists(targetID); err != nil {
+	if err := EnsureUserExists(c, targetID); err != nil {
 		err.AppendDetails(failMsg).Respond(c)
 		return
 	}
 
 	slug := "/student_id/" + kind.Slug + "/" + strconv.FormatInt(targetID, 10)
-	fileURL, fErr := filestore.BuildFileUrl(slug)
-	if fErr != nil {
-		fErr.AppendDetails(failMsg).Respond(c)
+	fileURL, err := filestore.BuildFileUrl(slug)
+	if err != nil {
+		err.AppendDetails(failMsg).Respond(c)
 		return
 	}
 

@@ -27,9 +27,9 @@ func stepupInitHandler(c *gin.Context) {
 		return
 	}
 
-	ban, bErr := user.GetUserBan(c.Request.Context(), claims.UserID)
-	if bErr != nil {
-		bErr.AppendDetails("二次验证初始化失败").Respond(c)
+	ban, err := user.GetUserBan(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("二次验证初始化失败").Respond(c)
 		return
 	}
 	if ban != nil {
@@ -37,9 +37,9 @@ func stepupInitHandler(c *gin.Context) {
 		return
 	}
 
-	session, sErr := auth.CreateAuthSession(c.Request.Context(), auth.AuthSessionTypeStepup, false, claims.UserID, false)
-	if sErr != nil {
-		sErr.AppendDetails("二次验证初始化失败").Respond(c)
+	session, err := auth.CreateAuthSession(c.Request.Context(), auth.AuthSessionTypeStepup, false, claims.UserID, false)
+	if err != nil {
+		err.AppendDetails("二次验证初始化失败").Respond(c)
 		return
 	}
 
@@ -78,9 +78,9 @@ func stepupFinalizeHandler(c *gin.Context) {
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
-	session, sErr := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
-	if sErr != nil {
-		sErr.AppendDetails("二次验证失败").Respond(c)
+	session, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
+	if err != nil {
+		err.AppendDetails("二次验证失败").Respond(c)
 		return
 	} else if session == nil {
 		errs.NotFoundError().AppendDetails("鉴权会话不存在", "二次验证失败").Respond(c)
@@ -100,17 +100,17 @@ func stepupFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	stepupToken, gErr := crypto2.GenerateJWT(uuid.New(), &model.TokenClaims{
+	stepupToken, error := crypto2.GenerateJWT(uuid.New(), &model.TokenClaims{
 		UserID:    claims.UserID,
 		TokenType: model.TokenTypeStepup,
 	}, cfg.C.StepupTokenTTL)
-	if gErr != nil {
-		errs.CreateAndLogInternalError(gErr, "Failed to generate stepup token").AppendDetails("令牌生成失败", "二次验证失败").Respond(c)
+	if error != nil {
+		errs.CreateAndLogInternalError(error, "Failed to generate stepup token").AppendDetails("令牌生成失败", "二次验证失败").Respond(c)
 		return
 	}
 
-	if dErr := auth.DeleteAuthSession(c.Request.Context(), session); dErr != nil {
-		slog.Warn("Failed to delete stepup auth session", "error", dErr.Info.Error, "session_id", session.ID)
+	if err := auth.DeleteAuthSession(c.Request.Context(), session); err != nil {
+		slog.Warn("Failed to delete stepup auth session", "error", err.Info.Error, "session_id", session.ID)
 	}
 
 	maxAge := int(cfg.C.StepupTokenTTL.Seconds())

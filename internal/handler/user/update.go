@@ -42,9 +42,9 @@ func (r *updateProfileReq) empty() bool {
 
 func updateUserProfileHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetID, uErr := ResolveTargetID(c, claims.UserID)
-	if uErr != nil {
-		uErr.AppendDetails("用户信息修改失败").Respond(c)
+	targetID, err := ResolveTargetID(c, claims.UserID)
+	if err != nil {
+		err.AppendDetails("用户信息修改失败").Respond(c)
 		return
 	}
 
@@ -58,9 +58,9 @@ func updateUserProfileHandler(c *gin.Context) {
 		return
 	}
 
-	target, uErr := user.GetUserByID(c.Request.Context(), targetID)
-	if uErr != nil {
-		uErr.AppendDetails("用户信息修改失败").Respond(c)
+	target, err := user.GetUserByID(c.Request.Context(), targetID)
+	if err != nil {
+		err.AppendDetails("用户信息修改失败").Respond(c)
 		return
 	} else if target == nil {
 		errs.NotFoundError().AppendDetails("用户不存在", "用户信息修改失败").Respond(c)

@@ -33,9 +33,9 @@ func emailBindInitHandler(c *gin.Context) {
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
-	current, uErr := user.GetUserEmail(c.Request.Context(), claims.UserID)
-	if uErr != nil {
-		uErr.AppendDetails("邮箱绑定失败").Respond(c)
+	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("邮箱绑定失败").Respond(c)
 		return
 	}
 	if current != nil && strings.EqualFold(current.Email, req.Email) {
@@ -43,9 +43,9 @@ func emailBindInitHandler(c *gin.Context) {
 		return
 	}
 
-	taken, tErr := user.IsEmailTaken(c.Request.Context(), req.Email)
-	if tErr != nil {
-		tErr.AppendDetails("邮箱绑定失败").Respond(c)
+	taken, err := user.IsEmailTaken(c.Request.Context(), req.Email)
+	if err != nil {
+		err.AppendDetails("邮箱绑定失败").Respond(c)
 		return
 	}
 	if taken {
@@ -58,9 +58,9 @@ func emailBindInitHandler(c *gin.Context) {
 		return
 	}
 
-	code, cErr := cryptoutil.GenerateCode(6, cryptoutil.CodeCharset)
-	if cErr != nil {
-		errs.CreateAndLogInternalError(cErr, "Failed to generate email bind code").
+	code, error := cryptoutil.GenerateCode(6, cryptoutil.CodeCharset)
+	if error != nil {
+		errs.CreateAndLogInternalError(error, "Failed to generate email bind code").
 			AppendDetails("验证码生成失败", "邮箱绑定失败").Respond(c)
 		return
 	}
@@ -70,9 +70,9 @@ func emailBindInitHandler(c *gin.Context) {
 		return
 	}
 
-	if sErr := email.SendBindEmailCode(req.Email, code); sErr != nil {
+	if err := email.SendBindEmailCode(req.Email, code); err != nil {
 		auth.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
-		errs.CreateAndLogInternalError(sErr, "Failed to send email bind code").
+		errs.CreateAndLogInternalError(err, "Failed to send email bind code").
 			AppendDetails("邮件发送失败", "邮箱绑定失败").Respond(c)
 		return
 	}
@@ -104,9 +104,9 @@ func emailBindVerifyHandler(c *gin.Context) {
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
-	pending, pErr := auth.GetPendingEmailBind(c.Request.Context(), claims.UserID)
-	if pErr != nil {
-		pErr.AppendDetails("邮箱绑定失败").Respond(c)
+	pending, err := auth.GetPendingEmailBind(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("邮箱绑定失败").Respond(c)
 		return
 	} else if pending == nil {
 		errs.IllegalStateError().AppendDetails("邮箱绑定未发起或已过期", "邮箱绑定失败").Respond(c)
@@ -145,9 +145,9 @@ func emailBindVerifyHandler(c *gin.Context) {
 
 func emailUnbindHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	current, uErr := user.GetUserEmail(c.Request.Context(), claims.UserID)
-	if uErr != nil {
-		uErr.AppendDetails("邮箱解绑失败").Respond(c)
+	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("邮箱解绑失败").Respond(c)
 		return
 	} else if current == nil {
 		errs.NotFoundError().AppendDetails("未绑定邮箱", "邮箱解绑失败").Respond(c)
@@ -164,18 +164,18 @@ func emailUnbindHandler(c *gin.Context) {
 
 func totpBindInitHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	existing, uErr := user.GetUserTOTP(c.Request.Context(), claims.UserID)
-	if uErr != nil {
-		uErr.AppendDetails("TOTP 绑定失败").Respond(c)
+	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("TOTP 绑定失败").Respond(c)
 		return
 	} else if existing != nil {
 		errs.ConflictError().AppendDetails("已绑定 TOTP", "TOTP 绑定失败").Respond(c)
 		return
 	}
 
-	secret, otpauthURL, gErr := cryptoutil.GenerateTOTP(uint64(claims.UserID))
-	if gErr != nil {
-		errs.CreateAndLogInternalError(gErr, "Failed to generate TOTP secret").
+	secret, otpauthURL, error := cryptoutil.GenerateTOTP(uint64(claims.UserID))
+	if error != nil {
+		errs.CreateAndLogInternalError(error, "Failed to generate TOTP secret").
 			AppendDetails("TOTP 密钥生成失败", "TOTP 绑定失败").Respond(c)
 		return
 	}
@@ -208,9 +208,9 @@ func totpBindVerifyHandler(c *gin.Context) {
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
-	pending, pErr := auth.GetPendingTOTPBind(c.Request.Context(), claims.UserID)
-	if pErr != nil {
-		pErr.AppendDetails("TOTP 绑定失败").Respond(c)
+	pending, err := auth.GetPendingTOTPBind(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("TOTP 绑定失败").Respond(c)
 		return
 	} else if pending == nil {
 		errs.IllegalStateError().AppendDetails("TOTP 绑定未发起或已过期", "TOTP 绑定失败").Respond(c)
@@ -221,9 +221,9 @@ func totpBindVerifyHandler(c *gin.Context) {
 		return
 	}
 
-	ok2, vErr := cryptoutil.VerifyTOTP(pending.Secret, req.Code)
-	if vErr != nil {
-		errs.CreateAndLogInternalError(vErr, "Failed to verify TOTP code").
+	ok2, error := cryptoutil.VerifyTOTP(pending.Secret, req.Code)
+	if error != nil {
+		errs.CreateAndLogInternalError(error, "Failed to verify TOTP code").
 			AppendDetails("TOTP 校验失败", "TOTP 绑定失败").Respond(c)
 		return
 	}
@@ -251,9 +251,9 @@ func totpBindVerifyHandler(c *gin.Context) {
 
 func totpUnbindHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	existing, uErr := user.GetUserTOTP(c.Request.Context(), claims.UserID)
-	if uErr != nil {
-		uErr.AppendDetails("TOTP 解绑失败").Respond(c)
+	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("TOTP 解绑失败").Respond(c)
 		return
 	} else if existing == nil {
 		errs.NotFoundError().AppendDetails("未绑定 TOTP", "TOTP 解绑失败").Respond(c)
@@ -281,9 +281,9 @@ func bindingValidateClaims() gin.HandlerFunc {
 			return
 		}
 
-		ban, bErr := user.GetUserBan(c.Request.Context(), claims.UserID)
-		if bErr != nil {
-			bErr.AppendDetails("鉴权失败").Abort(c)
+		ban, err := user.GetUserBan(c.Request.Context(), claims.UserID)
+		if err != nil {
+			err.AppendDetails("鉴权失败").Abort(c)
 			return
 		}
 		if ban != nil {

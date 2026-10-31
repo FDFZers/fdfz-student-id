@@ -152,9 +152,9 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	ban, bErr := user.GetUserBan(c.Request.Context(), authSession.UserID)
-	if bErr != nil {
-		bErr.AppendDetails("登录失败").Respond(c)
+	ban, err := user.GetUserBan(c.Request.Context(), authSession.UserID)
+	if err != nil {
+		err.AppendDetails("登录失败").Respond(c)
 		return
 	}
 	if ban != nil {
@@ -162,9 +162,9 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	sessionToken, cErr := crypto2.GenerateCode(128, crypto2.TokenCharset)
-	if cErr != nil {
-		errs.CreateAndLogInternalError(cErr, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
+	sessionToken, error := crypto2.GenerateCode(128, crypto2.TokenCharset)
+	if error != nil {
+		errs.CreateAndLogInternalError(error, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
 	sessionTokenHash := crypto2.HashSHA512(sessionToken)
@@ -187,11 +187,11 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	rollback := func(error *errs.Error) *errs.Error {
-		if err := auth.DeleteSession(c.Request.Context(), session.UUID); err != nil {
-			return error.AppendDetails("登录失败且回退失败，请联系管理员").AppendDetails(err.Info.Details...)
+	rollback := func(err *errs.Error) *errs.Error {
+		if deleteErr := auth.DeleteSession(c.Request.Context(), session.UUID); deleteErr != nil {
+			return err.AppendDetails("登录失败且回退失败，请联系管理员").AppendDetails(deleteErr.Info.Details...)
 		}
-		return error.AppendDetails("登录失败")
+		return err.AppendDetails("登录失败")
 	}
 
 	perms, err := user.GetUserPerms(c.Request.Context(), authSession.UserID)
@@ -200,14 +200,14 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	accessToken, cErr := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
+	accessToken, error := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      authSession.UserID,
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),
 		IsTemporary: authSession.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
-	if cErr != nil {
-		rollback(errs.CreateAndLogInternalError(cErr, "Failed to generate access token").AppendDetails("令牌生成失败")).Respond(c)
+	if error != nil {
+		rollback(errs.CreateAndLogInternalError(error, "Failed to generate access token").AppendDetails("令牌生成失败")).Respond(c)
 		return
 	}
 
@@ -217,8 +217,8 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	if dErr := auth.DeleteAuthSession(c.Request.Context(), authSession); dErr != nil {
-		slog.Warn("Failed to delete auth session after login", "error", dErr.Info.Error, "session_id", authSession.ID)
+	if err := auth.DeleteAuthSession(c.Request.Context(), authSession); err != nil {
+		slog.Warn("Failed to delete auth session after login", "error", err.Info.Error, "session_id", authSession.ID)
 	}
 
 	setTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
@@ -227,38 +227,38 @@ func loginFinalizeHandler(c *gin.Context) {
 }
 
 func refreshTokenHandler(c *gin.Context) {
-	sessionToken, err := c.Cookie("session_token")
-	if errors.Is(err, http.ErrNoCookie) {
+	sessionToken, error := c.Cookie("session_token")
+	if errors.Is(error, http.ErrNoCookie) {
 		errs.NotFoundError().AppendDetails("会话令牌不存在").Respond(c)
 		return
-	} else if err != nil {
-		errs.CreateAndLogInternalError(err, "Failed to get session token cookie").AppendDetails("会话令牌获取失败", "令牌刷新失败").Respond(c)
+	} else if error != nil {
+		errs.CreateAndLogInternalError(error, "Failed to get session token cookie").AppendDetails("会话令牌获取失败", "令牌刷新失败").Respond(c)
 		return
 	}
 
 	hash := crypto2.HashSHA512(sessionToken)
 
-	session, sErr := auth.GetSessionByTokenHash(c.Request.Context(), hash)
-	if sErr != nil {
-		errs.CreateAndLogInternalError(sErr, "Failed to get session by token hash").AppendDetails("会话获取失败", "令牌刷新失败").Respond(c)
+	session, err := auth.GetSessionByTokenHash(c.Request.Context(), hash)
+	if err != nil {
+		errs.CreateAndLogInternalError(err, "Failed to get session by token hash").AppendDetails("会话获取失败", "令牌刷新失败").Respond(c)
 		return
 	} else if session == nil {
 		errs.NotFoundError().AppendDetails("会话不存在或已过期", "令牌刷新失败").Respond(c)
 		return
 	}
 
-	usr, uErr := user.GetUserByID(c.Request.Context(), session.UserID)
-	if uErr != nil {
-		uErr.AppendDetails("令牌刷新失败").Respond(c)
+	usr, err := user.GetUserByID(c.Request.Context(), session.UserID)
+	if err != nil {
+		err.AppendDetails("令牌刷新失败").Respond(c)
 		return
 	} else if usr == nil {
 		errs.NotFoundError().AppendDetails("用户不存在", "令牌刷新失败").Respond(c)
 		return
 	}
 
-	ban, uErr := user.GetUserBan(c.Request.Context(), usr.ID)
-	if uErr != nil {
-		uErr.AppendDetails("令牌刷新失败").Respond(c)
+	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
+	if err != nil {
+		err.AppendDetails("令牌刷新失败").Respond(c)
 		return
 	}
 	if ban != nil {
@@ -266,33 +266,33 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	sessionToken, cErr := crypto2.GenerateCode(128, crypto2.TokenCharset)
-	if cErr != nil {
-		errs.CreateAndLogInternalError(cErr, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
+	sessionToken, error = crypto2.GenerateCode(128, crypto2.TokenCharset)
+	if error != nil {
+		errs.CreateAndLogInternalError(error, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
 	sessionTokenHash := crypto2.HashSHA512(sessionToken)
 
-	perms, uErr := user.GetUserPerms(c.Request.Context(), session.UserID)
-	if uErr != nil {
-		uErr.AppendDetails("令牌刷新失败").Respond(c)
+	perms, err := user.GetUserPerms(c.Request.Context(), session.UserID)
+	if err != nil {
+		err.AppendDetails("令牌刷新失败").Respond(c)
 		return
 	}
 
-	accessToken, cErr := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
+	accessToken, error := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      session.UserID,
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),
 		IsTemporary: session.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
-	if cErr != nil {
-		errs.CreateAndLogInternalError(cErr, "Failed to generate access token").AppendDetails("令牌生成失败", "令牌刷新失败").Respond(c)
+	if error != nil {
+		errs.CreateAndLogInternalError(error, "Failed to generate access token").AppendDetails("令牌生成失败", "令牌刷新失败").Respond(c)
 		return
 	}
 
-	exp, aErr := auth.UpdateSessionClient(c, session.UUID, sessionTokenHash)
-	if aErr != nil {
-		aErr.AppendDetails("令牌刷新失败").Respond(c)
+	exp, err := auth.UpdateSessionClient(c, session.UUID, sessionTokenHash)
+	if err != nil {
+		err.AppendDetails("令牌刷新失败").Respond(c)
 		return
 	}
 

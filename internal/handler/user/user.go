@@ -64,7 +64,7 @@ func ResolveTargetID(c *gin.Context, selfID int64) (int64, *errs.Error) {
 	return target, nil
 }
 
-func EnsureUserExists(userID int64) *errs.Error {
+func EnsureUserExists(c *gin.Context, userID int64) *errs.Error {
 	target, err := user.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
 		return err

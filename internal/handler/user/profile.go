@@ -26,15 +26,15 @@ func getUserProfileByUsernameHandler(c *gin.Context) {
 
 func getUserProfileByIDHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetID, uErr := ResolveTargetID(c, claims.UserID)
-	if uErr != nil {
-		uErr.AppendDetails("获取用户信息失败").Respond(c)
+	targetID, err := ResolveTargetID(c, claims.UserID)
+	if err != nil {
+		err.AppendDetails("获取用户信息失败").Respond(c)
 		return
 	}
 
-	targetUser, uErr := user.GetUserByID(c.Request.Context(), targetID)
-	if uErr != nil {
-		uErr.AppendDetails("获取用户信息失败").Respond(c)
+	targetUser, err := user.GetUserByID(c.Request.Context(), targetID)
+	if err != nil {
+		err.AppendDetails("获取用户信息失败").Respond(c)
 		return
 	} else if targetUser == nil {
 		errs.NotFoundError().AppendDetails("用户不存在", "获取用户信息失败").Respond(c)

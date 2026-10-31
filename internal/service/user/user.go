@@ -210,14 +210,14 @@ RETURNING updated_at
 `
 
 func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
-	vis, err := json.Marshal(u.Visibilities)
-	if err != nil {
+	vis, error := json.Marshal(u.Visibilities)
+	if error != nil {
 		return errs.InternalError().AppendDetails("序列化错误", "用户更新失败")
 	}
 
-	oldUser, getErr := GetUserByID(ctx, u.ID)
-	if getErr != nil {
-		return getErr.AppendDetails("用户更新失败")
+	oldUser, err := GetUserByID(ctx, u.ID)
+	if err != nil {
+		return err.AppendDetails("用户更新失败")
 	}
 
 	if !strings.EqualFold(oldUser.Username, u.Username) {
@@ -239,7 +239,7 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 		}
 	}
 
-	err = db.R.QueryRow(ctx, updateUserSQL,
+	error = db.R.QueryRow(ctx, updateUserSQL,
 		u.ID,
 		u.Username,
 		u.StudentNum,
@@ -250,8 +250,8 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 		u.Bio,
 		vis,
 	).Scan(&u.UpdatedAt)
-	if err != nil {
-		return errs.CreatePGError(err, "用户", "Failed to update user").AppendDetails("用户更新失败")
+	if error != nil {
+		return errs.CreatePGError(error, "用户", "Failed to update user").AppendDetails("用户更新失败")
 	}
 
 	if oldUser.Username != u.Username {

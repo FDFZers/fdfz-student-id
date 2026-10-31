@@ -40,7 +40,7 @@ func followUserHandler(c *gin.Context) {
 		return
 	}
 
-	if err := EnsureUserExists(targetID); err != nil {
+	if err := EnsureUserExists(c, targetID); err != nil {
 		err.AppendDetails("关注失败").Respond(c)
 		return
 	}
@@ -49,9 +49,9 @@ func followUserHandler(c *gin.Context) {
 		err.AppendDetails("关注失败").Respond(c)
 		return
 	}
-	rel, rErr := user.GetFollowRelationship(c.Request.Context(), claims.UserID, targetID)
-	if rErr != nil {
-		rErr.AppendDetails("关注失败").Respond(c)
+	rel, err := user.GetFollowRelationship(c.Request.Context(), claims.UserID, targetID)
+	if err != nil {
+		err.AppendDetails("关注失败").Respond(c)
 		return
 	}
 
@@ -72,7 +72,7 @@ func unfollowUserHandler(c *gin.Context) {
 		return
 	}
 
-	if err := EnsureUserExists(targetID); err != nil {
+	if err := EnsureUserExists(c, targetID); err != nil {
 		err.AppendDetails("取消关注失败").Respond(c)
 		return
 	}
@@ -82,9 +82,9 @@ func unfollowUserHandler(c *gin.Context) {
 		return
 	}
 
-	rel, rErr := user.GetFollowRelationship(c.Request.Context(), claims.UserID, targetID)
-	if rErr != nil {
-		rErr.AppendDetails("取消关注失败").Respond(c)
+	rel, err := user.GetFollowRelationship(c.Request.Context(), claims.UserID, targetID)
+	if err != nil {
+		err.AppendDetails("取消关注失败").Respond(c)
 		return
 	}
 
@@ -101,14 +101,14 @@ func getFollowStatusHandler(c *gin.Context) {
 		return
 	}
 
-	if err := EnsureUserExists(targetID); err != nil {
+	if err := EnsureUserExists(c, targetID); err != nil {
 		err.AppendDetails("关注关系获取失败").Respond(c)
 		return
 	}
 
-	rel, rErr := user.GetFollowRelationship(c.Request.Context(), claims.UserID, targetID)
-	if rErr != nil {
-		rErr.AppendDetails("关注关系获取失败").Respond(c)
+	rel, err := user.GetFollowRelationship(c.Request.Context(), claims.UserID, targetID)
+	if err != nil {
+		err.AppendDetails("关注关系获取失败").Respond(c)
 		return
 	}
 
@@ -154,23 +154,20 @@ func serveFollowList(c *gin.Context, rel model.FollowRelationship) {
 		return
 	}
 
-	var (
-		list *model.FollowList
-		lErr *errs.Error
-	)
+	var list *model.FollowList
 	switch rel {
 	case model.FollowRelationshipFollowed:
-		list, lErr = user.ListFollowers(c.Request.Context(), target.ID, limit, offset)
+		list, err = user.ListFollowers(c.Request.Context(), target.ID, limit, offset)
 	case model.FollowRelationshipFollowing:
-		list, lErr = user.ListFollowing(c.Request.Context(), target.ID, limit, offset)
+		list, err = user.ListFollowing(c.Request.Context(), target.ID, limit, offset)
 	case model.FollowRelationshipFriends:
-		list, lErr = user.ListFriends(c.Request.Context(), target.ID, limit, offset)
+		list, err = user.ListFriends(c.Request.Context(), target.ID, limit, offset)
 	default:
 		list = &model.FollowList{}
-		lErr = errs.InternalError().AppendDetails("未知的关注列表类型")
+		err = errs.InternalError().AppendDetails("未知的关注列表类型")
 	}
-	if lErr != nil {
-		lErr.AppendDetails(errMsg).Respond(c)
+	if err != nil {
+		err.AppendDetails(errMsg).Respond(c)
 		return
 	}
 

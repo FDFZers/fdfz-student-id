@@ -19,15 +19,15 @@ func getRegisterRequestHandler(c *gin.Context) {
 		return
 	}
 
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
+	id, error := uuid.Parse(c.Param("id"))
+	if error != nil {
 		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册申请获取失败").Respond(c)
 		return
 	}
 
-	request, rErr := user.GetRegisterRequestByID(c.Request.Context(), id)
-	if rErr != nil {
-		rErr.AppendDetails("注册申请获取失败").Respond(c)
+	request, err := user.GetRegisterRequestByID(c.Request.Context(), id)
+	if err != nil {
+		err.AppendDetails("注册申请获取失败").Respond(c)
 		return
 	} else if request == nil {
 		errs.NotFoundError().AppendDetails("注册请求不存在", "注册申请获取失败").Respond(c)
@@ -58,24 +58,24 @@ func getRegisterRequestProofImageHandler(c *gin.Context) {
 		return
 	}
 
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
+	id, error := uuid.Parse(c.Param("id"))
+	if error != nil {
 		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "佐证图片获取失败").Respond(c)
 		return
 	}
 
-	request, rErr := user.GetRegisterRequestByID(c.Request.Context(), id)
-	if rErr != nil {
-		rErr.AppendDetails("佐证图片获取失败").Respond(c)
+	request, err := user.GetRegisterRequestByID(c.Request.Context(), id)
+	if err != nil {
+		err.AppendDetails("佐证图片获取失败").Respond(c)
 		return
 	} else if request == nil {
 		errs.NotFoundError().AppendDetails("注册请求不存在", "佐证图片获取失败").Respond(c)
 		return
 	}
 
-	fileURL, fErr := filestore.BuildFileUrl("/student_id/proof_images/" + request.ID.String())
-	if fErr != nil {
-		fErr.AppendDetails("佐证图片获取失败").Respond(c)
+	fileURL, err := filestore.BuildFileUrl("/student_id/proof_images/" + request.ID.String())
+	if err != nil {
+		err.AppendDetails("佐证图片获取失败").Respond(c)
 		return
 	}
 

@@ -16,15 +16,15 @@ func registerRequestStatusHandler(c *gin.Context) {
 		return
 	}
 
-	id, err := uuid.Parse(c.Query("id"))
-	if err != nil {
+	id, error := uuid.Parse(c.Query("id"))
+	if error != nil {
 		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册请求状态查询失败").Respond(c)
 		return
 	}
 
-	req, getErr := user.GetRegisterRequestByID(c.Request.Context(), id)
-	if getErr != nil {
-		getErr.AppendDetails("注册请求状态查询失败").Respond(c)
+	req, err := user.GetRegisterRequestByID(c.Request.Context(), id)
+	if err != nil {
+		err.AppendDetails("注册请求状态查询失败").Respond(c)
 		return
 	}
 	if req == nil {

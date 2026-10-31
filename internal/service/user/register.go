@@ -165,9 +165,9 @@ func ReviewRegisterRequest(
 		return errs.BadRequestError().AppendDetails("不能将注册请求标记为待审核", "注册请求审核失败")
 	}
 
-	err := db.R.QueryRow(ctx, reviewRegisterRequestSQL, id, status, reviewerID, reviewComment).Scan(&username, &reviewedAt)
-	if err != nil {
-		return errs.CreatePGError(err, "注册请求", "Failed to review register request").AppendDetails("注册请求审核失败")
+	error := db.R.QueryRow(ctx, reviewRegisterRequestSQL, id, status, reviewerID, reviewComment).Scan(&username, &reviewedAt)
+	if error != nil {
+		return errs.CreatePGError(error, "注册请求", "Failed to review register request").AppendDetails("注册请求审核失败")
 	}
 
 	db.R.Del(ctx, RegisterRequestCacheKey(id))
@@ -178,17 +178,17 @@ func ReviewRegisterRequest(
 	}
 
 	// 创建用户
-	rollback := func(error *errs.Error) *errs.Error {
-		if _, err := db.R.Exec(ctx, rollbackReviewSQL, id); err != nil {
-			details := errs.CreatePGError(err, "注册请求", "Failed to rollback review").Info.Details
-			return error.AppendDetails("注册请求通过失败且回退失败，请联系管理员").AppendDetails(details...)
+	rollback := func(err *errs.Error) *errs.Error {
+		if _, deleteErr := db.R.Exec(ctx, rollbackReviewSQL, id); deleteErr != nil {
+			details := errs.CreatePGError(deleteErr, "注册请求", "Failed to rollback review").Info.Details
+			return err.AppendDetails("注册请求通过失败且回退失败，请联系管理员").AppendDetails(details...)
 		}
-		return error.AppendDetails("注册请求通过失败")
+		return err.AppendDetails("注册请求通过失败")
 	}
 
-	req, getErr := GetRegisterRequestByID(ctx, id)
-	if getErr != nil {
-		return rollback(getErr)
+	req, err := GetRegisterRequestByID(ctx, id)
+	if err != nil {
+		return rollback(err)
 	}
 	u := &model.User{
 		Username:   req.Username,
@@ -201,8 +201,8 @@ func ReviewRegisterRequest(
 	pwd := &model.UserPassword{
 		Password: req.Password,
 	}
-	if createErr := CreateUser(ctx, u, pwd); createErr != nil {
-		return rollback(createErr)
+	if err := CreateUser(ctx, u, pwd); err != nil {
+		return rollback(err)
 	}
 
 	if _, err := db.R.Exec(ctx, setRegisterRequestCreatedUserSQL, id, u.ID); err != nil {
