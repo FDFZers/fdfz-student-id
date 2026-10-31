@@ -9,9 +9,8 @@ import (
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
-	crypto2 "fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/validation"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -31,20 +30,6 @@ func setTokenCookies(c *gin.Context, accessToken, sessionToken string, accessMax
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("access_token", accessToken, accessMaxAge, "/", cookieDomain(), cfg.IsProd, false)
 	c.SetCookie("session_token", sessionToken, sessionMaxAge, "/", cookieDomain(), cfg.IsProd, true)
-}
-
-func respondBanned(c *gin.Context, ban *model.UserBan, item string) {
-	if ban.EndTime.Valid {
-		errs.PermissionDeniedError().AppendDetails(
-			fmt.Sprintf("用户已封禁：%s（%s）", ban.Reason, ban.EndTime.Time.Format("2006-01-02 15:04:05")),
-			item,
-		).Respond(c)
-	} else {
-		errs.PermissionDeniedError().AppendDetails(
-			fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
-			item,
-		).Respond(c)
-	}
 }
 
 type loginInitRequestReq struct {
@@ -120,6 +105,7 @@ func loginInitHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"session_id": session.ID,
 		"2fa":        methods,
+		"passed":     session.Passed2FA,
 	})
 }
 
@@ -162,12 +148,12 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	sessionToken, e := crypto2.GenerateCode(128, crypto2.TokenCharset)
+	sessionToken, e := crypto.GenerateCode(128, crypto.TokenCharset)
 	if e != nil {
 		errs.CreateAndLogInternalError(e, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
-	sessionTokenHash := crypto2.HashSHA512(sessionToken)
+	sessionTokenHash := crypto.HashSHA512(sessionToken)
 
 	var dur time.Duration
 	if authSession.IsTemporary {
@@ -200,7 +186,7 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	accessToken, e := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
+	accessToken, e := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      authSession.UserID,
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),
@@ -218,7 +204,7 @@ func loginFinalizeHandler(c *gin.Context) {
 	}
 
 	if err := auth.DeleteAuthSession(c.Request.Context(), authSession); err != nil {
-		slog.Warn("Failed to delete auth session after login", "error", err.Info.Error, "session_id", authSession.ID)
+		slog.Warn("Failed to delete login auth session", "error", err.Info.Error, "session_id", authSession.ID)
 	}
 
 	setTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
@@ -236,7 +222,7 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	hash := crypto2.HashSHA512(sessionToken)
+	hash := crypto.HashSHA512(sessionToken)
 
 	session, err := auth.GetSessionByTokenHash(c.Request.Context(), hash)
 	if err != nil {
@@ -266,12 +252,12 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	sessionToken, e = crypto2.GenerateCode(128, crypto2.TokenCharset)
+	sessionToken, e = crypto.GenerateCode(128, crypto.TokenCharset)
 	if e != nil {
 		errs.CreateAndLogInternalError(e, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
-	sessionTokenHash := crypto2.HashSHA512(sessionToken)
+	sessionTokenHash := crypto.HashSHA512(sessionToken)
 
 	perms, err := user.GetUserPerms(c.Request.Context(), session.UserID)
 	if err != nil {
@@ -279,7 +265,7 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	accessToken, e := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
+	accessToken, e := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      session.UserID,
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),

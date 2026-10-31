@@ -34,6 +34,31 @@ func GetUserEmail(ctx context.Context, userID int64) (*model.UserEmail, *errs.Er
 }
 
 // ---------------------------------------------------------------------------
+// 通过 QQ 获取用户
+// ---------------------------------------------------------------------------
+
+const getUserIDByQQSQL = `
+SELECT u.id
+FROM users u
+JOIN user_qqs q ON q.user_id = u.id
+WHERE q.qq = $1
+  AND q.deleted_at IS NULL
+  AND u.deleted_at IS NULL
+`
+
+func GetUserByQQ(ctx context.Context, qq string) (*model.User, *errs.Error) {
+	var id int64
+	err := db.R.QueryRow(ctx, getUserIDByQQSQL, qq).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, errs.CreatePGError(err, "用户", "Failed to get user by QQ").AppendDetails("用户获取失败")
+	}
+	return GetUserByID(ctx, id)
+}
+
+// ---------------------------------------------------------------------------
 // 检查邮箱是否已被占用
 // ---------------------------------------------------------------------------
 
@@ -50,6 +75,31 @@ func IsEmailTaken(ctx context.Context, email string) (bool, *errs.Error) {
 		return false, errs.CreatePGError(err, "邮箱", "Failed to check email existence").AppendDetails("邮箱占用信息查询失败")
 	}
 	return taken, nil
+}
+
+// ---------------------------------------------------------------------------
+// 通过邮箱获取用户
+// ---------------------------------------------------------------------------
+
+const getUserIDByEmailSQL = `
+SELECT u.id
+FROM users u
+JOIN user_emails e ON e.user_id = u.id
+WHERE lower(e.email) = lower($1)
+  AND e.deleted_at IS NULL
+  AND u.deleted_at IS NULL
+`
+
+func GetUserByEmail(ctx context.Context, email string) (*model.User, *errs.Error) {
+	var id int64
+	err := db.R.QueryRow(ctx, getUserIDByEmailSQL, email).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, errs.CreatePGError(err, "用户", "Failed to get user by email").AppendDetails("用户获取失败")
+	}
+	return GetUserByID(ctx, id)
 }
 
 // ---------------------------------------------------------------------------

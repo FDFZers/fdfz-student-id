@@ -18,6 +18,8 @@ import (
 const (
 	AuthSessionCacheDuration    = 2 * time.Minute
 	AuthSession2FACacheDuration = 10 * time.Minute
+	QQPullRateLimit             = 4 * time.Second
+	QQPullTimeout               = 3 * time.Second
 	MaxAuthSessionAttempts      = 5
 )
 
@@ -41,15 +43,11 @@ func AuthSessionIDCacheKey(id uuid.UUID) string {
 	return fmt.Sprintf("student_id:auth:session:info:%s", id)
 }
 
-func AuthSessionQQCacheKey(qq string) string {
-	return fmt.Sprintf("student_id:auth:session:id_by_qq:%s", qq)
-}
-
-func EmailLastSentAtCacheKey(email string) string {
+func EmailRateLimitCacheKey(email string) string {
 	return fmt.Sprintf("student_id:auth:rate_limit:email:%s", email)
 }
 
-func QQLastSentAtCacheKey(qq string) string {
+func QQRateLimitCacheKey(qq string) string {
 	return fmt.Sprintf("student_id:auth:rate_limit:qq:%s", qq)
 }
 
@@ -73,36 +71,22 @@ func ValidateUserPassword(ctx context.Context, userID int64, password string) *e
 	return nil
 }
 
-func ValidateEmailRateLimit(ctx context.Context, email string) *errs.Error {
-	lastSentAt, err := db.GetRedis[time.Time](ctx, EmailLastSentAtCacheKey(email))
+func TryAcquireEmailRateLimit(ctx context.Context, email string) *errs.Error {
+	ok, err := db.R.SetNX(ctx, EmailRateLimitCacheKey(email), true, cfg.C.CodeSendInterval).Result()
 	if err != nil {
-		return err.AppendDetails("邮箱发送频率限制查询失败")
-	} else if lastSentAt != nil && time.Since(*lastSentAt) < cfg.C.CodeSendInterval {
+		return errs.CreateAndLogInternalError(err, "Failed to acquire email rate limit").AppendDetails("Redis 错误", "邮箱发送频率限制查询失败")
+	} else if !ok {
 		return errs.RateLimitExceededError().AppendDetails("邮箱发送频率过快")
 	}
 	return nil
 }
 
-func ValidateQQRateLimit(ctx context.Context, qq string) *errs.Error {
-	lastSentAt, err := db.GetRedis[time.Time](ctx, QQLastSentAtCacheKey(qq))
+func TryAcquireQQRateLimit(ctx context.Context, qq string) *errs.Error {
+	ok, err := db.R.SetNX(ctx, QQRateLimitCacheKey(qq), true, QQPullRateLimit).Result()
 	if err != nil {
-		return err.AppendDetails("QQ 发送频率限制查询失败")
-	} else if lastSentAt != nil && time.Since(*lastSentAt) < cfg.C.CodeSendInterval {
-		return errs.RateLimitExceededError().AppendDetails("QQ 发送频率过快")
-	}
-	return nil
-}
-
-func UpdateEmailLastSentAt(ctx context.Context, email string) *errs.Error {
-	if err := db.SetRedis(ctx, EmailLastSentAtCacheKey(email), time.Now(), AuthSession2FACacheDuration); err != nil {
-		return err.AppendDetails("邮箱发送频率限制更新失败")
-	}
-	return nil
-}
-
-func UpdateQQLastSentAt(ctx context.Context, qq string) *errs.Error {
-	if err := db.SetRedis(ctx, QQLastSentAtCacheKey(qq), time.Now(), AuthSession2FACacheDuration); err != nil {
-		return err.AppendDetails("QQ 发送频率限制更新失败")
+		return errs.CreateAndLogInternalError(err, "Failed to acquire QQ rate limit").AppendDetails("Redis 错误", "QQ 接收频率限制查询失败")
+	} else if !ok {
+		return errs.RateLimitExceededError().AppendDetails("QQ 接收频率过快")
 	}
 	return nil
 }
@@ -110,18 +94,32 @@ func UpdateQQLastSentAt(ctx context.Context, qq string) *errs.Error {
 func CreateAuthSession(ctx context.Context, typ AuthSessionType, isSchoolIp bool, userID int64, isTemporary bool) (*AuthSession, *errs.Error) {
 	id := uuid.New()
 
+	var useQQ, useEmail, useTOTP bool
+	switch typ {
+	case AuthSessionTypeLogin:
+		useQQ, useEmail, useTOTP = !isSchoolIp, !isSchoolIp, !isSchoolIp
+	case AuthSessionTypeStepup:
+		useQQ, useEmail, useTOTP = true, true, true
+	case AuthSessionTypeResetPassword:
+		useEmail, useQQ = true, true
+	}
+
 	var qq, email, totp null.String
-	if typ != AuthSessionTypeLogin || !isSchoolIp {
+	if useQQ {
 		if qqInfo, err := user.GetUserQQ(ctx, userID); err != nil {
 			return nil, err.AppendDetails("鉴权会话创建失败")
 		} else if qqInfo != nil {
 			qq = null.StringFrom(qqInfo.QQ)
 		}
+	}
+	if useEmail {
 		if emailInfo, err := user.GetUserEmail(ctx, userID); err != nil {
 			return nil, err.AppendDetails("鉴权会话创建失败")
 		} else if emailInfo != nil {
 			email = null.StringFrom(emailInfo.Email)
 		}
+	}
+	if useTOTP {
 		if totpInfo, err := user.GetUserTOTP(ctx, userID); err != nil {
 			return nil, err.AppendDetails("鉴权会话创建失败")
 		} else if totpInfo != nil {
@@ -143,11 +141,6 @@ func CreateAuthSession(ctx context.Context, typ AuthSessionType, isSchoolIp bool
 	if err := db.SetRedis(ctx, AuthSessionIDCacheKey(id), session, AuthSessionCacheDuration); err != nil {
 		return nil, errs.CreateAndLogInternalError(err, "Failed to set auth session").AppendDetails("Redis 错误", "鉴权会话创建失败")
 	}
-	if qq.Valid {
-		if err := db.SetRedis(ctx, AuthSessionQQCacheKey(qq.String), id, AuthSessionCacheDuration); err != nil {
-			return nil, errs.CreateAndLogInternalError(err, "Failed to set auth session by QQ").AppendDetails("Redis 错误", "鉴权会话创建失败")
-		}
-	}
 	return session, nil
 }
 
@@ -159,16 +152,6 @@ func GetAuthSessionByID(ctx context.Context, id uuid.UUID) (*AuthSession, *errs.
 	}
 }
 
-func GetAuthSessionByQQ(ctx context.Context, qq string) (*AuthSession, *errs.Error) {
-	id, err := db.GetRedis[uuid.UUID](ctx, AuthSessionQQCacheKey(qq))
-	if err != nil {
-		return nil, err.AppendDetails("鉴权会话获取失败")
-	} else if id == nil {
-		return nil, errs.NotFoundError().AppendDetails("鉴权会话不存在")
-	}
-	return GetAuthSessionByID(ctx, *id)
-}
-
 func UpdateAuthSession(ctx context.Context, session *AuthSession, codeSent bool) *errs.Error {
 	dur := AuthSessionCacheDuration
 	if codeSent {
@@ -177,22 +160,12 @@ func UpdateAuthSession(ctx context.Context, session *AuthSession, codeSent bool)
 	if err := db.SetRedis(ctx, AuthSessionIDCacheKey(session.ID), session, dur); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to set auth session").AppendDetails("Redis 错误", "鉴权会话更新失败")
 	}
-	if session.QQ.Valid {
-		if err := db.SetRedis(ctx, AuthSessionQQCacheKey(session.QQ.String), session.ID, dur); err != nil {
-			return errs.CreateAndLogInternalError(err, "Failed to set auth session by QQ").AppendDetails("Redis 错误", "鉴权会话更新失败")
-		}
-	}
 	return nil
 }
 
 func DeleteAuthSession(ctx context.Context, session *AuthSession) *errs.Error {
-	if err := db.R.Del(ctx, AuthSessionIDCacheKey(session.ID)); err != nil {
+	if err := db.R.Del(ctx, AuthSessionIDCacheKey(session.ID)).Err(); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to delete auth session").AppendDetails("Redis 错误", "鉴权会话删除失败")
-	}
-	if session.QQ.Valid {
-		if err := db.R.Del(ctx, AuthSessionQQCacheKey(session.QQ.String)); err != nil {
-			return errs.CreateAndLogInternalError(err, "Failed to delete auth session by QQ").AppendDetails("Redis 错误", "鉴权会话删除失败")
-		}
 	}
 	return nil
 }

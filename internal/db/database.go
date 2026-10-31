@@ -78,8 +78,8 @@ func GetCached[T any](
 	}
 
 	// 数据为空，回源查询
-	data, error := queryFn()
-	if error == nil {
+	data, e := queryFn()
+	if e == nil {
 		// 查询成功，缓存数据，无论是否成功
 		if data == nil {
 			R.Set(ctx, key, RedisEmptyMark, duration)
@@ -87,9 +87,9 @@ func GetCached[T any](
 		}
 		SetRedis(ctx, key, data, duration)
 		return data, nil
-	} else if !errors.Is(error, pgx.ErrNoRows) {
+	} else if !errors.Is(e, pgx.ErrNoRows) {
 		// 数据库错误
-		return nil, errs.CreatePGError(error, item, "Failed to query database")
+		return nil, errs.CreatePGError(e, item, "Failed to query database")
 	}
 
 	// 数据库无数据，缓存空值标记，无论是否成功

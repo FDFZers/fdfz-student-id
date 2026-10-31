@@ -2,8 +2,10 @@ package perm
 
 import (
 	"context"
+	"errors"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
+	"fmt"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
@@ -53,11 +55,11 @@ func LoadDefinitions(ctx context.Context) *errs.Error {
 	parentIDsMap := make(map[int64][]int64, len(raws))
 	for _, raw := range raws {
 		if ok, err := RegexPermDefinition.MatchString(raw.Value); err != nil {
-			slog.Warn("Failed to validate permission definition", "error", err, "id", raw.ID, "value", raw.Value)
-			return errs.InternalError().AppendDetails("权限校验失败", "权限加载失败")
+			return errs.CreateAndLogInternalError(err, "Failed to validate permission definition", "id", raw.ID, "value", raw.Value).
+				AppendDetails("权限校验失败", "权限加载失败")
 		} else if !ok {
-			slog.Error("Invalid permission definition", "id", raw.ID, "value", raw.Value)
-			return errs.InternalError().AppendDetails("存在无效权限", "权限加载失败")
+			return errs.CreateAndLogInternalError(errors.New("invalid permission definition"), "Invalid permission definition", "id", raw.ID, "value", raw.Value).
+				AppendDetails("存在无效权限", "权限加载失败")
 		}
 		nodes := GetNodes(raw.Value)
 		defMap[raw.ID] = &PermissionDef{Nodes: nodes, Placeholders: GetPlaceholders(nodes), Public: raw.Public}
@@ -73,8 +75,8 @@ func LoadDefinitions(ctx context.Context) *errs.Error {
 			}
 			parent, ok := defMap[pid]
 			if !ok {
-				slog.Warn("Parent permission not found", "id", id, "parentID", pid)
-				return errs.InternalError().AppendDetails("存在未知父权限", "权限加载失败")
+				return errs.CreateAndLogInternalError(fmt.Errorf("parent permission %d not found", pid), "Parent permission not found", "id", id, "parentID", pid).
+					AppendDetails("存在未知父权限", "权限加载失败")
 			}
 			def.Parents = append(def.Parents, parent)
 		}

@@ -53,14 +53,14 @@ func emailBindInitHandler(c *gin.Context) {
 		return
 	}
 
-	if err := auth.ValidateEmailRateLimit(c.Request.Context(), req.Email); err != nil {
+	if err := auth.TryAcquireEmailRateLimit(c.Request.Context(), req.Email); err != nil {
 		err.AppendDetails("邮箱绑定失败").Respond(c)
 		return
 	}
 
-	code, error := cryptoutil.GenerateCode(6, cryptoutil.CodeCharset)
-	if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to generate email bind code").
+	code, e := cryptoutil.GenerateCode(6, cryptoutil.CodeCharset)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to generate email bind code").
 			AppendDetails("验证码生成失败", "邮箱绑定失败").Respond(c)
 		return
 	}
@@ -76,8 +76,6 @@ func emailBindInitHandler(c *gin.Context) {
 			AppendDetails("邮件发送失败", "邮箱绑定失败").Respond(c)
 		return
 	}
-
-	auth.UpdateEmailLastSentAt(c.Request.Context(), req.Email)
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -173,9 +171,9 @@ func totpBindInitHandler(c *gin.Context) {
 		return
 	}
 
-	secret, otpauthURL, error := cryptoutil.GenerateTOTP(uint64(claims.UserID))
-	if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to generate TOTP secret").
+	secret, otpAuthURL, e := cryptoutil.GenerateTOTP(uint64(claims.UserID))
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to generate TOTP secret").
 			AppendDetails("TOTP 密钥生成失败", "TOTP 绑定失败").Respond(c)
 		return
 	}
@@ -187,7 +185,7 @@ func totpBindInitHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"secret": secret,
-		"url":    otpauthURL,
+		"url":    otpAuthURL,
 	})
 }
 
@@ -221,9 +219,9 @@ func totpBindVerifyHandler(c *gin.Context) {
 		return
 	}
 
-	ok2, error := cryptoutil.VerifyTOTP(pending.Secret, req.Code)
-	if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to verify TOTP code").
+	ok2, e := cryptoutil.VerifyTOTP(pending.Secret, req.Code)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to verify TOTP code").
 			AppendDetails("TOTP 校验失败", "TOTP 绑定失败").Respond(c)
 		return
 	}

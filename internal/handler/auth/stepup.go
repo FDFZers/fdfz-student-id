@@ -6,7 +6,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/user"
-	crypto2 "fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/crypto"
 	"log/slog"
 	"net/http"
 
@@ -100,7 +100,7 @@ func stepupFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	stepupToken, e := crypto2.GenerateJWT(uuid.New(), &model.TokenClaims{
+	stepupToken, e := crypto.GenerateJWT(uuid.New(), &model.TokenClaims{
 		UserID:    claims.UserID,
 		TokenType: model.TokenTypeStepup,
 	}, cfg.C.StepupTokenTTL)

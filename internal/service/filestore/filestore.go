@@ -87,7 +87,7 @@ func buildUrl(slug, reqType string) (string, *errs.Error) {
 
 	endpoint, e := url.JoinPath(cfg.C.FilestorePublicEndpoint, "/internal/v1/"+reqType, slug)
 	if e != nil {
-		return "", errs.InternalError().AppendDetails("URL 路径拼接失败", "文件地址获取失败")
+		return "", errs.CreateAndLogInternalError(e, "Failed to build file URL").AppendDetails("URL 路径拼接失败", "文件地址获取失败")
 	}
 
 	query := url.Values{"token": {token}}
@@ -100,13 +100,13 @@ func buildUrl(slug, reqType string) (string, *errs.Error) {
 
 func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.Error {
 	if request == nil {
-		return errs.InternalError().AppendDetails("未提供文件上传请求", "文件上传失败")
+		return errs.CreateAndLogInternalError(errors.New("nil upload request"), "File upload request is nil").AppendDetails("未提供文件上传请求", "文件上传失败")
 	}
 	if !strings.HasPrefix(request.Slug, "/") {
 		return errs.BadRequestError().AppendDetails("无效的 Slug", "文件上传失败")
 	}
 	if fileHeader == nil {
-		return errs.InternalError().AppendDetails("未提供文件", "文件上传失败")
+		return errs.CreateAndLogInternalError(errors.New("nil file header"), "File header is nil").AppendDetails("未提供文件", "文件上传失败")
 	}
 
 	token, err := CreateToken(request.Slug)
@@ -116,11 +116,11 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 
 	rel, dst, e := storage.UploadTempPath()
 	if e != nil {
-		return errs.InternalError().AppendDetails("临时文件路径获取失败")
+		return errs.CreateAndLogInternalError(e, "Failed to get temp file path").AppendDetails("临时文件路径获取失败")
 	}
 	tempWriter, e := fileutils.NewTempWriter(dst, nil)
 	if e != nil {
-		return errs.InternalError().AppendDetails("临时文件创建失败")
+		return errs.CreateAndLogInternalError(e, "Failed to create temp file").AppendDetails("临时文件创建失败")
 	}
 	defer func() {
 		tempWriter.Abort()
@@ -134,7 +134,7 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 
 	file, e := fileHeader.Open()
 	if e != nil {
-		return errs.InternalError().AppendDetails("请求体文件打开失败")
+		return errs.CreateAndLogInternalError(e, "Failed to open request file").AppendDetails("请求体文件打开失败")
 	}
 	defer func(file multipart.File) {
 		err := file.Close()
@@ -144,10 +144,10 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 	}(file)
 
 	if _, err := tempWriter.WriteFrom(file); err != nil {
-		return errs.InternalError().AppendDetails("临时文件写入失败")
+		return errs.CreateAndLogInternalError(err, "Failed to write temp file").AppendDetails("临时文件写入失败")
 	}
 	if err := tempWriter.Commit(); err != nil {
-		return errs.InternalError().AppendDetails("临时文件写入完成失败")
+		return errs.CreateAndLogInternalError(err, "Failed to commit temp file").AppendDetails("临时文件写入完成失败")
 	}
 
 	jsonData, e := json.Marshal(&StoreFileReq{
@@ -163,24 +163,24 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		AppID:        request.AppID,
 	})
 	if e != nil {
-		return errs.InternalError().AppendDetails("请求序列化失败")
+		return errs.CreateAndLogInternalError(e, "Failed to marshal upload request").AppendDetails("请求序列化失败")
 	}
 
 	endpoint, e := url.JoinPath(cfg.C.FilestoreInternalEndpoint, "/api/internal/upload/store")
 	if e != nil {
-		return errs.InternalError().AppendDetails("URL 路径拼接失败")
+		return errs.CreateAndLogInternalError(e, "Failed to build upload URL").AppendDetails("URL 路径拼接失败")
 	}
 
 	req, e := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
 	if e != nil {
-		return errs.InternalError().AppendDetails("文件上传请求创建失败")
+		return errs.CreateAndLogInternalError(e, "Failed to create upload request").AppendDetails("文件上传请求创建失败")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	res, e := httpClient.Do(req)
 	if e != nil {
-		return errs.InternalError().AppendDetails("文件上传请求发送失败")
+		return errs.CreateAndLogInternalError(e, "Failed to send upload request").AppendDetails("文件上传请求发送失败")
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
@@ -191,7 +191,7 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 
 	body, e := io.ReadAll(res.Body)
 	if e != nil {
-		return errs.InternalError().AppendDetails("读取响应失败")
+		return errs.CreateAndLogInternalError(e, "Failed to read response body").AppendDetails("读取响应失败")
 	}
 	if res.StatusCode != http.StatusOK {
 		var errorInfo errs.ErrorInfo

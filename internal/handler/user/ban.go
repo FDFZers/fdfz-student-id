@@ -17,8 +17,8 @@ import (
 func getUserBanHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	targetIDStr := c.Param("id")
-	targetID, error := strconv.ParseInt(targetIDStr, 10, 64)
-	if error != nil {
+	targetID, e := strconv.ParseInt(targetIDStr, 10, 64)
+	if e != nil {
 		errs.BadRequestError().AppendDetails("无效的用户 ID", "获取用户封禁信息失败").Respond(c)
 		return
 	}

@@ -2,6 +2,7 @@
 package user
 
 import (
+	"errors"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
@@ -164,7 +165,7 @@ func serveFollowList(c *gin.Context, rel model.FollowRelationship) {
 		list, err = user.ListFriends(c.Request.Context(), target.ID, limit, offset)
 	default:
 		list = &model.FollowList{}
-		err = errs.InternalError().AppendDetails("未知的关注列表类型")
+		err = errs.CreateAndLogInternalError(errors.New("unknown follow list type"), "Unknown follow list type").AppendDetails("未知的关注列表类型")
 	}
 	if err != nil {
 		err.AppendDetails(errMsg).Respond(c)
@@ -256,7 +257,7 @@ func canViewFollowList(
 	case model.FollowRelationshipFollowing:
 		visibility = target.Visibilities.Following
 	default:
-		return errs.InternalError().AppendDetails("未知的关注关系类型")
+		return errs.CreateAndLogInternalError(errors.New("unknown follow relationship type"), "Unknown follow relationship type").AppendDetails("未知的关注关系类型")
 	}
 
 	switch visibility {

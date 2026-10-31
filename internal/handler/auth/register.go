@@ -102,7 +102,7 @@ func createRegisterHandler(c *gin.Context) {
 
 	// 查询用户名占用信息
 	if taken, err := user.IsUsernameTaken(c.Request.Context(), req.Username); err != nil {
-		errs.InternalError().AppendDetails("用户名占用信息查询失败", "注册失败").Respond(c)
+		errs.CreateAndLogInternalError(err, "Failed to check username availability").AppendDetails("用户名占用信息查询失败", "注册失败").Respond(c)
 		return
 	} else if taken {
 		errs.ConflictError().AppendDetails("用户名已存在", "注册失败").Respond(c)
@@ -112,7 +112,7 @@ func createRegisterHandler(c *gin.Context) {
 	// 密码哈希
 	pwdHash, err := crypto.HashArgon2ID(req.Password)
 	if err != nil {
-		errs.InternalError().AppendDetails("密码哈希失败", "注册失败").Respond(c)
+		errs.CreateAndLogInternalError(err, "Failed to hash password").AppendDetails("密码哈希失败", "注册失败").Respond(c)
 		return
 	}
 

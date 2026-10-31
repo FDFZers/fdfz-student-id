@@ -54,8 +54,8 @@ func getBannerHandler(c *gin.Context) { serveProfileImage(c, bannerImage) }
 func setProfileImageHandler(c *gin.Context, kind profileImageKind) {
 	failMsg := kind.Item + "设置失败"
 
-	form, error := c.MultipartForm()
-	if error != nil {
+	form, e := c.MultipartForm()
+	if e != nil {
 		errs.BadRequestError().AppendDetails("请求解析失败", failMsg).Respond(c)
 		return
 	}

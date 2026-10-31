@@ -69,7 +69,7 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 	u.Visibilities.Normalize()
 	vis, err := json.Marshal(u.Visibilities)
 	if err != nil {
-		return errs.InternalError().AppendDetails("序列化错误", "用户创建失败")
+		return errs.CreateAndLogInternalError(err, "Failed to marshal user visibilities").AppendDetails("序列化错误", "用户创建失败")
 	}
 
 	err = db.R.QueryRow(ctx, createUserWithPasswordSQL,
@@ -212,7 +212,7 @@ RETURNING updated_at
 func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 	vis, e := json.Marshal(u.Visibilities)
 	if e != nil {
-		return errs.InternalError().AppendDetails("序列化错误", "用户更新失败")
+		return errs.CreateAndLogInternalError(e, "Failed to marshal user visibilities").AppendDetails("序列化错误", "用户更新失败")
 	}
 
 	oldUser, err := GetUserByID(ctx, u.ID)

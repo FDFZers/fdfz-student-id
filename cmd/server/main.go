@@ -98,7 +98,6 @@ func main() {
 
 	// 加载权限
 	if err := perm.LoadDefinitions(context.Background()); err != nil {
-		slog.Error("Error loading permissions", "error", err)
 		os.Exit(1)
 	}
 
