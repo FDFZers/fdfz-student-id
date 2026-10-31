@@ -165,9 +165,9 @@ func ReviewRegisterRequest(
 		return errs.BadRequestError().AppendDetails("不能将注册请求标记为待审核", "注册请求审核失败")
 	}
 
-	error := db.R.QueryRow(ctx, reviewRegisterRequestSQL, id, status, reviewerID, reviewComment).Scan(&username, &reviewedAt)
-	if error != nil {
-		return errs.CreatePGError(error, "注册请求", "Failed to review register request").AppendDetails("注册请求审核失败")
+	e := db.R.QueryRow(ctx, reviewRegisterRequestSQL, id, status, reviewerID, reviewComment).Scan(&username, &reviewedAt)
+	if e != nil {
+		return errs.CreatePGError(e, "注册请求", "Failed to review register request").AppendDetails("注册请求审核失败")
 	}
 
 	db.R.Del(ctx, RegisterRequestCacheKey(id))

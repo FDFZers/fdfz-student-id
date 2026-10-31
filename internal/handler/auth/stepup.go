@@ -100,12 +100,12 @@ func stepupFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	stepupToken, error := crypto2.GenerateJWT(uuid.New(), &model.TokenClaims{
+	stepupToken, e := crypto2.GenerateJWT(uuid.New(), &model.TokenClaims{
 		UserID:    claims.UserID,
 		TokenType: model.TokenTypeStepup,
 	}, cfg.C.StepupTokenTTL)
-	if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to generate stepup token").AppendDetails("令牌生成失败", "二次验证失败").Respond(c)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to generate stepup token").AppendDetails("令牌生成失败", "二次验证失败").Respond(c)
 		return
 	}
 

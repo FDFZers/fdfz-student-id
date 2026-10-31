@@ -1,0 +1,48 @@
+when:
+  branch: main
+  event: [ push, manual ]
+
+steps:
+  set-version:
+    image: alpine
+    commands:
+      - |
+        echo "REL_VERSION=${CI_COMMIT_SHA:0:8}" > .env
+
+  build:
+    image: docker
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - |
+        . .env
+
+        docker build \
+          --build-arg COMMIT=${CI_COMMIT_SHA} \
+          --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+          -t fdfzers/fdfz-student-id:latest \
+          -t fdfzers/fdfz-student-id:$REL_VERSION \
+          -f Dockerfile .
+        docker images fdfzers/fdfz-student-id
+
+  deploy:
+    image: docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/compose:/opt/compose
+    commands:
+      - |
+        . .env
+
+        COMPOSE_FILE="/opt/compose/fdfz-student-id.yml"
+        IMAGE_NAME="fdfzers/fdfz-student-id:$REL_VERSION"
+
+        sed -i "s|image:.*|image: $IMAGE_NAME|" $COMPOSE_FILE
+
+        cd $(dirname $COMPOSE_FILE)
+        DC="docker compose -f $COMPOSE_FILE"
+        $DC pull 2>/dev/null || true
+        $DC up -d --force-recreate
+        $DC ps
+        $DC logs --tail=20

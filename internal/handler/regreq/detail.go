@@ -19,8 +19,8 @@ func getRegisterRequestHandler(c *gin.Context) {
 		return
 	}
 
-	id, error := uuid.Parse(c.Param("id"))
-	if error != nil {
+	id, e := uuid.Parse(c.Param("id"))
+	if e != nil {
 		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册申请获取失败").Respond(c)
 		return
 	}
@@ -58,8 +58,8 @@ func getRegisterRequestProofImageHandler(c *gin.Context) {
 		return
 	}
 
-	id, error := uuid.Parse(c.Param("id"))
-	if error != nil {
+	id, e := uuid.Parse(c.Param("id"))
+	if e != nil {
 		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "佐证图片获取失败").Respond(c)
 		return
 	}

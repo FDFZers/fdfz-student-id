@@ -162,9 +162,9 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	sessionToken, error := crypto2.GenerateCode(128, crypto2.TokenCharset)
-	if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
+	sessionToken, e := crypto2.GenerateCode(128, crypto2.TokenCharset)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
 	sessionTokenHash := crypto2.HashSHA512(sessionToken)
@@ -200,14 +200,14 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
-	accessToken, error := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
+	accessToken, e := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      authSession.UserID,
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),
 		IsTemporary: authSession.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
-	if error != nil {
-		rollback(errs.CreateAndLogInternalError(error, "Failed to generate access token").AppendDetails("令牌生成失败")).Respond(c)
+	if e != nil {
+		rollback(errs.CreateAndLogInternalError(e, "Failed to generate access token").AppendDetails("令牌生成失败")).Respond(c)
 		return
 	}
 
@@ -227,12 +227,12 @@ func loginFinalizeHandler(c *gin.Context) {
 }
 
 func refreshTokenHandler(c *gin.Context) {
-	sessionToken, error := c.Cookie("session_token")
-	if errors.Is(error, http.ErrNoCookie) {
+	sessionToken, e := c.Cookie("session_token")
+	if errors.Is(e, http.ErrNoCookie) {
 		errs.NotFoundError().AppendDetails("会话令牌不存在").Respond(c)
 		return
-	} else if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to get session token cookie").AppendDetails("会话令牌获取失败", "令牌刷新失败").Respond(c)
+	} else if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to get session token cookie").AppendDetails("会话令牌获取失败", "令牌刷新失败").Respond(c)
 		return
 	}
 
@@ -266,9 +266,9 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	sessionToken, error = crypto2.GenerateCode(128, crypto2.TokenCharset)
-	if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
+	sessionToken, e = crypto2.GenerateCode(128, crypto2.TokenCharset)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)
 		return
 	}
 	sessionTokenHash := crypto2.HashSHA512(sessionToken)
@@ -279,14 +279,14 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	accessToken, error := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
+	accessToken, e := crypto2.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      session.UserID,
 		TokenType:   model.TokenTypeUser,
 		Permissions: perm.MatchAll(perms),
 		IsTemporary: session.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
-	if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to generate access token").AppendDetails("令牌生成失败", "令牌刷新失败").Respond(c)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to generate access token").AppendDetails("令牌生成失败", "令牌刷新失败").Respond(c)
 		return
 	}
 

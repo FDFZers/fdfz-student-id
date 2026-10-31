@@ -16,8 +16,8 @@ func registerRequestStatusHandler(c *gin.Context) {
 		return
 	}
 
-	id, error := uuid.Parse(c.Query("id"))
-	if error != nil {
+	id, e := uuid.Parse(c.Query("id"))
+	if e != nil {
 		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册请求状态查询失败").Respond(c)
 		return
 	}

@@ -38,9 +38,9 @@ func listFollows(
 		return nil, errs.CreatePGError(err, item, "Failed to count follow list").AppendDetails(item + "获取失败")
 	}
 
-	rows, error := db.R.Query(ctx, listSQL, userID, limit, offset)
-	if error != nil {
-		return nil, errs.CreatePGError(error, item, "Failed to query follow list").AppendDetails(item + "获取失败")
+	rows, e := db.R.Query(ctx, listSQL, userID, limit, offset)
+	if e != nil {
+		return nil, errs.CreatePGError(e, item, "Failed to query follow list").AppendDetails(item + "获取失败")
 	}
 
 	users, err := collectFollowUsers(rows, item)

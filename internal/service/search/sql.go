@@ -50,13 +50,13 @@ func ExecSearch[T any](ctx context.Context, cfg *SearchConfig, req *SearchReques
 	if err := db.R.QueryRow(ctx, query.Count.SQL, query.Count.Args...).Scan(&count); err != nil {
 		return nil, errs.CreatePGError(err, cfg.Item, "Failed to execute search count query")
 	}
-	rows, error := db.R.Query(ctx, query.Data.SQL, query.Data.Args...)
-	if error != nil {
-		return nil, errs.CreatePGError(error, cfg.Item, "Failed to execute search data query")
+	rows, e := db.R.Query(ctx, query.Data.SQL, query.Data.Args...)
+	if e != nil {
+		return nil, errs.CreatePGError(e, cfg.Item, "Failed to execute search data query")
 	}
-	data, error := pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[T])
-	if error != nil {
-		return nil, errs.CreatePGError(error, cfg.Item, "Failed to collect search data")
+	data, e := pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[T])
+	if e != nil {
+		return nil, errs.CreatePGError(e, cfg.Item, "Failed to collect search data")
 	}
 	return &SearchResult[T]{
 		Count: count,

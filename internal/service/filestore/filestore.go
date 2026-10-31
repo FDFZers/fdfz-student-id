@@ -85,8 +85,8 @@ func buildUrl(slug, reqType string) (string, *errs.Error) {
 		return "", err.AppendDetails("文件地址获取失败")
 	}
 
-	endpoint, error := url.JoinPath(cfg.C.FilestorePublicEndpoint, "/internal/v1/"+reqType, slug)
-	if error != nil {
+	endpoint, e := url.JoinPath(cfg.C.FilestorePublicEndpoint, "/internal/v1/"+reqType, slug)
+	if e != nil {
 		return "", errs.InternalError().AppendDetails("URL 路径拼接失败", "文件地址获取失败")
 	}
 
@@ -114,12 +114,12 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		return err.AppendDetails("文件上传失败")
 	}
 
-	rel, dst, error := storage.UploadTempPath()
-	if error != nil {
+	rel, dst, e := storage.UploadTempPath()
+	if e != nil {
 		return errs.InternalError().AppendDetails("临时文件路径获取失败")
 	}
-	tempWriter, error := fileutils.NewTempWriter(dst, nil)
-	if error != nil {
+	tempWriter, e := fileutils.NewTempWriter(dst, nil)
+	if e != nil {
 		return errs.InternalError().AppendDetails("临时文件创建失败")
 	}
 	defer func() {
@@ -132,8 +132,8 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		}
 	}()
 
-	file, error := fileHeader.Open()
-	if error != nil {
+	file, e := fileHeader.Open()
+	if e != nil {
 		return errs.InternalError().AppendDetails("请求体文件打开失败")
 	}
 	defer func(file multipart.File) {
@@ -150,7 +150,7 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		return errs.InternalError().AppendDetails("临时文件写入完成失败")
 	}
 
-	jsonData, error := json.Marshal(&StoreFileReq{
+	jsonData, e := json.Marshal(&StoreFileReq{
 		Slug:         request.Slug,
 		FilePath:     rel,
 		FileName:     request.FileName,
@@ -162,24 +162,24 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		UserID:       request.UserID,
 		AppID:        request.AppID,
 	})
-	if error != nil {
+	if e != nil {
 		return errs.InternalError().AppendDetails("请求序列化失败")
 	}
 
-	endpoint, error := url.JoinPath(cfg.C.FilestoreInternalEndpoint, "/api/internal/upload/store")
-	if error != nil {
+	endpoint, e := url.JoinPath(cfg.C.FilestoreInternalEndpoint, "/api/internal/upload/store")
+	if e != nil {
 		return errs.InternalError().AppendDetails("URL 路径拼接失败")
 	}
 
-	req, error := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
-	if error != nil {
+	req, e := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(jsonData))
+	if e != nil {
 		return errs.InternalError().AppendDetails("文件上传请求创建失败")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	res, error := httpClient.Do(req)
-	if error != nil {
+	res, e := httpClient.Do(req)
+	if e != nil {
 		return errs.InternalError().AppendDetails("文件上传请求发送失败")
 	}
 	defer func(Body io.ReadCloser) {
@@ -189,8 +189,8 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		}
 	}(res.Body)
 
-	body, error := io.ReadAll(res.Body)
-	if error != nil {
+	body, e := io.ReadAll(res.Body)
+	if e != nil {
 		return errs.InternalError().AppendDetails("读取响应失败")
 	}
 	if res.StatusCode != http.StatusOK {

@@ -210,8 +210,8 @@ RETURNING updated_at
 `
 
 func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
-	vis, error := json.Marshal(u.Visibilities)
-	if error != nil {
+	vis, e := json.Marshal(u.Visibilities)
+	if e != nil {
 		return errs.InternalError().AppendDetails("序列化错误", "用户更新失败")
 	}
 
@@ -239,7 +239,7 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 		}
 	}
 
-	error = db.R.QueryRow(ctx, updateUserSQL,
+	e = db.R.QueryRow(ctx, updateUserSQL,
 		u.ID,
 		u.Username,
 		u.StudentNum,
@@ -250,8 +250,8 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 		u.Bio,
 		vis,
 	).Scan(&u.UpdatedAt)
-	if error != nil {
-		return errs.CreatePGError(error, "用户", "Failed to update user").AppendDetails("用户更新失败")
+	if e != nil {
+		return errs.CreatePGError(e, "用户", "Failed to update user").AppendDetails("用户更新失败")
 	}
 
 	if oldUser.Username != u.Username {

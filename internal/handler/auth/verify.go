@@ -81,9 +81,9 @@ func verifyEmailInitHandler(c *gin.Context) {
 		return
 	}
 
-	code, error := crypto.GenerateCode(6, crypto.CodeCharset)
-	if error != nil {
-		errs.CreateAndLogInternalError(error, "Failed to generate code").AppendDetails("验证码生成失败", "邮箱验证码发送失败").Respond(c)
+	code, e := crypto.GenerateCode(6, crypto.CodeCharset)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to generate code").AppendDetails("验证码生成失败", "邮箱验证码发送失败").Respond(c)
 		return
 	}
 
