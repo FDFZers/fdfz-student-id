@@ -34,6 +34,12 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	a.PUT("/banner", middleware.RequireToken(), middleware.LimitSize(5<<20), setBannerHandler)
 	a.PUT("/banner/:id", middleware.RequireToken(), middleware.LimitSize(5<<20), setBannerHandler)
 
+	a.DELETE("/avatar", middleware.RequireToken(), deleteAvatarHandler)
+	a.DELETE("/avatar/:id", middleware.RequireToken(), deleteAvatarHandler)
+
+	a.DELETE("/banner", middleware.RequireToken(), deleteBannerHandler)
+	a.DELETE("/banner/:id", middleware.RequireToken(), deleteBannerHandler)
+
 	a.GET("/search/info", middleware.RequireToken(), SearchInfoHandler)
 	a.POST("/search/query", middleware.RequireToken(), SearchQueryHandler)
 

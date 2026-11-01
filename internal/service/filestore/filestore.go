@@ -205,3 +205,56 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// 删除
+// ---------------------------------------------------------------------------
+
+func DeleteFile(slug string) *errs.Error {
+	if !strings.HasPrefix(slug, "/") {
+		return errs.BadRequestError().AppendDetails("无效的 Slug", "文件删除失败")
+	}
+
+	token, err := CreateToken(slug)
+	if err != nil {
+		return err.AppendDetails("文件删除失败")
+	}
+
+	endpoint, e := url.JoinPath(cfg.C.FilestoreInternalEndpoint, "/api/internal/file", slug)
+	if e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to build delete URL").AppendDetails("URL 路径拼接失败", "文件删除失败")
+	}
+
+	req, e := http.NewRequest(http.MethodDelete, endpoint, nil)
+	if e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to create delete request").AppendDetails("文件删除请求创建失败")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	res, e := httpClient.Do(req)
+	if e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to send delete request").AppendDetails("文件删除请求发送失败")
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			slog.Warn("Failed to close response body", "error", err)
+		}
+	}(res.Body)
+
+	body, e := io.ReadAll(res.Body)
+	if e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to read response body").AppendDetails("读取响应失败")
+	}
+	if res.StatusCode != http.StatusOK {
+		var errorInfo errs.ErrorInfo
+		if err := json.Unmarshal(body, &errorInfo); err != nil || errorInfo.Error == "" {
+			slog.Warn("Failed to parse filestore error response",
+				"status", res.StatusCode, "body", string(body))
+			return errs.CreateError(res.StatusCode, "filestore_error").AppendDetails("文件删除失败")
+		}
+		return &errs.Error{HTTPCode: res.StatusCode, Info: errorInfo}
+	}
+
+	return nil
+}

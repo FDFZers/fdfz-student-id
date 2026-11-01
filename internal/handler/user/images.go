@@ -46,10 +46,12 @@ var (
 	}
 )
 
-func setAvatarHandler(c *gin.Context) { setProfileImageHandler(c, avatarImage) }
-func setBannerHandler(c *gin.Context) { setProfileImageHandler(c, bannerImage) }
-func getAvatarHandler(c *gin.Context) { serveProfileImage(c, avatarImage) }
-func getBannerHandler(c *gin.Context) { serveProfileImage(c, bannerImage) }
+func setAvatarHandler(c *gin.Context)    { setProfileImageHandler(c, avatarImage) }
+func setBannerHandler(c *gin.Context)    { setProfileImageHandler(c, bannerImage) }
+func getAvatarHandler(c *gin.Context)    { serveProfileImage(c, avatarImage) }
+func getBannerHandler(c *gin.Context)    { serveProfileImage(c, bannerImage) }
+func deleteAvatarHandler(c *gin.Context) { deleteProfileImageHandler(c, avatarImage) }
+func deleteBannerHandler(c *gin.Context) { deleteProfileImageHandler(c, bannerImage) }
 
 func setProfileImageHandler(c *gin.Context, kind profileImageKind) {
 	failMsg := kind.Item + "设置失败"
@@ -139,4 +141,39 @@ func serveProfileImage(c *gin.Context, kind profileImageKind) {
 	}
 
 	c.Redirect(http.StatusFound, fileURL)
+}
+
+func deleteProfileImageHandler(c *gin.Context, kind profileImageKind) {
+	failMsg := kind.Item + "删除失败"
+	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+
+	target, err := ResolveTargetID(c, claims.UserID)
+	if err != nil {
+		err.AppendDetails(failMsg).Respond(c)
+		return
+	}
+
+	hasAdmin := perm.Contains(claims.Permissions, kind.AdminWritePerm)
+	hasSelf := target == claims.UserID && perm.Contains(claims.Permissions, kind.SelfWritePerm)
+	if !hasAdmin && !hasSelf {
+		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
+		return
+	}
+
+	if err := EnsureUserExists(c, target); err != nil {
+		err.AppendDetails(failMsg).Respond(c)
+		return
+	}
+
+	slug := "/student_id/" + kind.Slug + "/" + strconv.FormatInt(target, 10)
+	if err := filestore.DeleteFile(slug); err != nil {
+		if err.HTTPCode == http.StatusNotFound {
+			errs.NotFoundError().AppendDetails("未设置"+kind.Item, failMsg).Respond(c)
+		} else {
+			err.AppendDetails(failMsg).Respond(c)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{})
 }
