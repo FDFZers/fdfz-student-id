@@ -7,6 +7,7 @@ import (
 const (
 	bindEmailAttemptsKind = "email"
 	bindTOTPAttemptsKind  = "totp"
+	bindQQAttemptsKind    = "qq"
 )
 
 func InitRoutes(internal *gin.RouterGroup) {
@@ -18,4 +19,7 @@ func InitRoutes(internal *gin.RouterGroup) {
 	group.POST("/totp/init", bindingValidateClaims(), totpBindInitHandler)
 	group.POST("/totp/verify", bindingValidateClaims(), totpBindVerifyHandler)
 	group.DELETE("/totp", bindingValidateClaims(), totpUnbindHandler)
+	group.POST("/qq/init", bindingValidateClaims(), qqBindInitHandler)
+	group.POST("/qq/verify", bindingValidateClaims(), qqBindVerifyHandler)
+	group.DELETE("/qq", bindingValidateClaims(), qqUnbindHandler)
 }

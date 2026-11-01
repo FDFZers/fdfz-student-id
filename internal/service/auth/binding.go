@@ -80,6 +80,39 @@ func DeletePendingTOTPBind(ctx context.Context, userID int64) {
 }
 
 // ---------------------------------------------------------------------------
+// 待绑定的 QQ
+// ---------------------------------------------------------------------------
+
+func PendingQQBindCacheKey(userID int64) string {
+	return fmt.Sprintf("student_id:auth:bind:qq:%d", userID)
+}
+
+type PendingQQBind struct {
+	QQ   string `json:"qq"`
+	Code string `json:"code"`
+}
+
+func SetPendingQQBind(ctx context.Context, userID int64, qq, code string) *errs.Error {
+	pending := &PendingQQBind{QQ: qq, Code: code}
+	if err := db.SetRedis(ctx, PendingQQBindCacheKey(userID), pending, PendingBindDuration); err != nil {
+		return err.AppendDetails("QQ 绑定请求保存失败")
+	}
+	return nil
+}
+
+func GetPendingQQBind(ctx context.Context, userID int64) (*PendingQQBind, *errs.Error) {
+	pending, err := db.GetRedis[PendingQQBind](ctx, PendingQQBindCacheKey(userID))
+	if err != nil {
+		return nil, err.AppendDetails("QQ 绑定请求获取失败")
+	}
+	return pending, nil
+}
+
+func DeletePendingQQBind(ctx context.Context, userID int64) {
+	db.R.Del(ctx, PendingQQBindCacheKey(userID))
+}
+
+// ---------------------------------------------------------------------------
 // 绑定验证码错误次数限制
 // ---------------------------------------------------------------------------
 

@@ -6,7 +6,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/email"
-	qqservice "fdfz-student-id/internal/service/qq"
+	"fdfz-student-id/internal/service/qq"
 	"fdfz-student-id/internal/util/crypto"
 	"log/slog"
 	"net/http"
@@ -41,6 +41,7 @@ func record2FAFailure(c *gin.Context, session *auth.AuthSession, item string) bo
 func complete2FA(c *gin.Context, session *auth.AuthSession, item string) bool {
 	session.Passed2FA = true
 	session.EmailCode = null.String{}
+	session.QQCode = null.String{}
 	if err := auth.UpdateAuthSession(c.Request.Context(), session, false); err != nil {
 		errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证通过失败", item).Respond(c)
 		return false
@@ -231,7 +232,9 @@ func verifyQQInitHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	c.JSON(http.StatusOK, gin.H{
+		"code": code,
+	})
 }
 
 type verifyQQReq struct {
@@ -266,7 +269,7 @@ func verifyQQHandler(c *gin.Context) {
 		err.AppendDetails("QQ 验证码发送失败").Respond(c)
 		return
 	}
-	if !session.Email.Valid {
+	if !session.QQ.Valid {
 		if session.Type == auth.AuthSessionTypeResetPassword {
 			// 重置密码模糊错误防止账号枚举
 			if !record2FAFailure(c, session, "QQ 验证失败") {
@@ -278,7 +281,7 @@ func verifyQQHandler(c *gin.Context) {
 		errs.IllegalStateError().AppendDetails("不支持 QQ 验证", "QQ 验证失败").Respond(c)
 		return
 	}
-	if !session.EmailCode.Valid {
+	if !session.QQCode.Valid {
 		if session.Type == auth.AuthSessionTypeResetPassword {
 			if !record2FAFailure(c, session, "QQ 验证失败") {
 				return
@@ -293,7 +296,7 @@ func verifyQQHandler(c *gin.Context) {
 	pullCtx, cancel := context.WithTimeout(c.Request.Context(), auth.QQPullTimeout)
 	defer cancel()
 
-	messages, e := qqservice.GetFriendMsgHistory(pullCtx, session.QQ.String, 20)
+	messages, e := qq.GetFriendMsgHistory(pullCtx, session.QQ.String, 20)
 	if e != nil {
 		errs.CreateAndLogInternalError(e, "Failed to pull QQ messages from NapCat").AppendDetails("NapCat 错误", "QQ 验证失败").Respond(c)
 		return

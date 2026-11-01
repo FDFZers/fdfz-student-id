@@ -1,17 +1,20 @@
 package security
 
 import (
+	"context"
 	"crypto/subtle"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/email"
+	"fdfz-student-id/internal/service/qq"
 	"fdfz-student-id/internal/service/user"
-	cryptoutil "fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/validation"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -58,7 +61,7 @@ func emailBindInitHandler(c *gin.Context) {
 		return
 	}
 
-	code, e := cryptoutil.GenerateCode(6, cryptoutil.CodeCharset)
+	code, e := crypto.GenerateCode(6, crypto.CodeCharset)
 	if e != nil {
 		errs.CreateAndLogInternalError(e, "Failed to generate email bind code").
 			AppendDetails("验证码生成失败", "邮箱绑定失败").Respond(c)
@@ -171,7 +174,7 @@ func totpBindInitHandler(c *gin.Context) {
 		return
 	}
 
-	secret, otpAuthURL, e := cryptoutil.GenerateTOTP(uint64(claims.UserID))
+	secret, otpAuthURL, e := crypto.GenerateTOTP(uint64(claims.UserID))
 	if e != nil {
 		errs.CreateAndLogInternalError(e, "Failed to generate TOTP secret").
 			AppendDetails("TOTP 密钥生成失败", "TOTP 绑定失败").Respond(c)
@@ -219,7 +222,7 @@ func totpBindVerifyHandler(c *gin.Context) {
 		return
 	}
 
-	ok2, e := cryptoutil.VerifyTOTP(pending.Secret, req.Code)
+	ok2, e := crypto.VerifyTOTP(pending.Secret, req.Code)
 	if e != nil {
 		errs.CreateAndLogInternalError(e, "Failed to verify TOTP code").
 			AppendDetails("TOTP 校验失败", "TOTP 绑定失败").Respond(c)
@@ -260,6 +263,164 @@ func totpUnbindHandler(c *gin.Context) {
 
 	if err := user.DeleteUserTotp(c.Request.Context(), claims.UserID); err != nil {
 		err.AppendDetails("TOTP 解绑失败").Respond(c)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{})
+}
+
+type qqBindInitReq struct {
+	QQ string `json:"qq"`
+}
+
+func qqBindInitHandler(c *gin.Context) {
+	var req qqBindInitReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errs.BadRequestError().AppendDetails("请求解析失败", "QQ 绑定失败").Respond(c)
+		return
+	}
+	if err := validation.ValidateQQ(req.QQ); err != nil {
+		err.AppendDetails("QQ 绑定失败").Respond(c)
+		return
+	}
+
+	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+
+	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("QQ 绑定失败").Respond(c)
+		return
+	}
+	if current != nil && current.QQ == req.QQ {
+		errs.ConflictError().AppendDetails("该 QQ 已绑定", "QQ 绑定失败").Respond(c)
+		return
+	}
+
+	taken, err := user.IsQQTaken(c.Request.Context(), req.QQ)
+	if err != nil {
+		err.AppendDetails("QQ 绑定失败").Respond(c)
+		return
+	}
+	if taken {
+		errs.ConflictError().AppendDetails("该 QQ 已被其他用户绑定", "QQ 绑定失败").Respond(c)
+		return
+	}
+
+	code, e := crypto.GenerateCode(6, crypto.CodeCharset)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to generate QQ bind code").
+			AppendDetails("验证码生成失败", "QQ 绑定失败").Respond(c)
+		return
+	}
+
+	if err := auth.SetPendingQQBind(c.Request.Context(), claims.UserID, req.QQ, code); err != nil {
+		err.AppendDetails("QQ 绑定失败").Respond(c)
+		return
+	}
+
+	// 验证码由用户使用待绑定的 QQ 主动发送给机器人，服务端拉取好友消息进行校验
+	c.JSON(http.StatusOK, gin.H{
+		"code": code,
+	})
+}
+
+type qqBindVerifyReq struct {
+	QQ string `json:"qq"`
+}
+
+func qqBindVerifyHandler(c *gin.Context) {
+	var req qqBindVerifyReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errs.BadRequestError().AppendDetails("请求解析失败", "QQ 绑定失败").Respond(c)
+		return
+	}
+	if err := validation.ValidateQQ(req.QQ); err != nil {
+		err.AppendDetails("QQ 绑定失败").Respond(c)
+		return
+	}
+
+	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+
+	pending, err := auth.GetPendingQQBind(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("QQ 绑定失败").Respond(c)
+		return
+	} else if pending == nil {
+		errs.IllegalStateError().AppendDetails("QQ 绑定未发起或已过期", "QQ 绑定失败").Respond(c)
+		return
+	}
+	if pending.QQ != req.QQ {
+		errs.BadRequestError().AppendDetails("QQ 与绑定请求不一致", "QQ 绑定失败").Respond(c)
+		return
+	}
+
+	if !checkBindAttempts(c, bindQQAttemptsKind, claims.UserID) {
+		return
+	}
+
+	if err := auth.TryAcquireQQRateLimit(c.Request.Context(), pending.QQ); err != nil {
+		err.AppendDetails("QQ 绑定失败").Respond(c)
+		return
+	}
+
+	pullCtx, cancel := context.WithTimeout(c.Request.Context(), auth.QQPullTimeout)
+	defer cancel()
+
+	messages, e := qq.GetFriendMsgHistory(pullCtx, pending.QQ, 20)
+	if e != nil {
+		errs.CreateAndLogInternalError(e, "Failed to pull QQ messages from NapCat").
+			AppendDetails("NapCat 错误", "QQ 绑定失败").Respond(c)
+		return
+	}
+
+	cutoff := time.Now().Add(-auth.PendingBindDuration).Unix()
+	matched := false
+	for _, msg := range messages {
+		if msg.Time < cutoff {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(msg.Text), []byte(pending.Code)) == 1 {
+			matched = true
+			break
+		}
+	}
+
+	if !matched {
+		if !recordBindFailure(c, bindQQAttemptsKind, claims.UserID) {
+			return
+		}
+		errs.ForbiddenError().
+			AppendDetails("未识别到验证码，请使用该 QQ 向机器人发送验证码", "QQ 绑定失败").Respond(c)
+		return
+	}
+
+	if err := user.SetUserQQ(c.Request.Context(), &model.UserQQ{
+		UserID: claims.UserID,
+		QQ:     pending.QQ,
+	}); err != nil {
+		err.AppendDetails("QQ 绑定失败").Respond(c)
+		return
+	}
+
+	auth.DeletePendingQQBind(c.Request.Context(), claims.UserID)
+	auth.ResetBindAttempts(c.Request.Context(), bindQQAttemptsKind, claims.UserID)
+
+	c.JSON(http.StatusOK, gin.H{})
+}
+
+func qqUnbindHandler(c *gin.Context) {
+	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
+	if err != nil {
+		err.AppendDetails("QQ 解绑失败").Respond(c)
+		return
+	} else if current == nil {
+		errs.NotFoundError().AppendDetails("未绑定 QQ", "QQ 解绑失败").Respond(c)
+		return
+	}
+
+	if err := user.DeleteUserQQ(c.Request.Context(), claims.UserID); err != nil {
+		err.AppendDetails("QQ 解绑失败").Respond(c)
 		return
 	}
 

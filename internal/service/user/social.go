@@ -78,6 +78,25 @@ func IsEmailTaken(ctx context.Context, email string) (bool, *errs.Error) {
 }
 
 // ---------------------------------------------------------------------------
+// 检查 QQ 是否已被占用
+// ---------------------------------------------------------------------------
+
+const isQQTakenSQL = `
+SELECT EXISTS (
+    SELECT 1 FROM user_qqs
+    WHERE qq = $1 AND deleted_at IS NULL
+)
+`
+
+func IsQQTaken(ctx context.Context, qq string) (bool, *errs.Error) {
+	var taken bool
+	if err := db.R.QueryRow(ctx, isQQTakenSQL, qq).Scan(&taken); err != nil {
+		return false, errs.CreatePGError(err, "QQ", "Failed to check QQ existence").AppendDetails("QQ 占用信息查询失败")
+	}
+	return taken, nil
+}
+
+// ---------------------------------------------------------------------------
 // 通过邮箱获取用户
 // ---------------------------------------------------------------------------
 
