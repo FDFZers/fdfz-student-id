@@ -32,6 +32,11 @@ func setTokenCookies(c *gin.Context, accessToken, sessionToken string, accessMax
 	c.SetCookie("session_token", sessionToken, sessionMaxAge, "/", cookieDomain(), cfg.IsProd, true)
 }
 
+func clearSessionCookies(c *gin.Context) {
+	setTokenCookies(c, "", "", 0, 0)
+	setStepupCookie(c, "", -1)
+}
+
 type loginInitRequestReq struct {
 	Username      string `json:"username"`
 	Password      string `json:"password"`
@@ -301,7 +306,6 @@ func logoutHandler(c *gin.Context) {
 		return
 	}
 
-	setTokenCookies(c, "", "", 0, 0)
-	setStepupCookie(c, "", -1)
+	clearSessionCookies(c)
 	c.JSON(http.StatusOK, gin.H{})
 }

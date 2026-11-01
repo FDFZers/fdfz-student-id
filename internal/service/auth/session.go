@@ -50,7 +50,7 @@ func CreateSession(ctx context.Context, s *model.UserSession) *errs.Error {
 const getSessionByUUIDSQL = `
 SELECT uuid, user_id, session_token_hash, is_temporary,
     created_at, updated_at, expires_at, last_used_at, revoked_at,
-    last_ip, last_user_agent
+    host(last_ip) AS last_ip, last_user_agent
 FROM user_sessions
 WHERE uuid = $1
 `
@@ -58,7 +58,7 @@ WHERE uuid = $1
 const getSessionByTokenHashSQL = `
 SELECT uuid, user_id, session_token_hash, is_temporary,
     created_at, updated_at, expires_at, last_used_at, revoked_at,
-    last_ip, last_user_agent
+    host(last_ip) AS last_ip, last_user_agent
 FROM user_sessions
 WHERE session_token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
 `
@@ -118,7 +118,7 @@ func GetSessionByTokenHash(
 const listUserSessionsSQL = `
 SELECT uuid, user_id, session_token_hash, is_temporary,
     created_at, updated_at, expires_at, last_used_at, revoked_at,
-    last_ip, last_user_agent
+    host(last_ip) AS last_ip, last_user_agent
 FROM user_sessions
 WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()
 ORDER BY last_used_at DESC NULLS LAST, created_at DESC
