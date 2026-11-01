@@ -1,6 +1,8 @@
 package security
 
 import (
+	"fdfz-student-id/internal/middleware"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,4 +24,9 @@ func InitRoutes(internal *gin.RouterGroup) {
 	group.POST("/qq/init", bindingValidateClaims(), qqBindInitHandler)
 	group.POST("/qq/verify", bindingValidateClaims(), qqBindVerifyHandler)
 	group.DELETE("/qq", bindingValidateClaims(), qqUnbindHandler)
+
+	group.POST("/password/change", middleware.RequireStepupToken(), changePasswordHandler)
+	group.GET("/sessions", middleware.RequireToken(), listSessionsHandler)
+	group.DELETE("/sessions", middleware.RequireStepupToken(), revokeAllSessionsHandler)
+	group.DELETE("/sessions/:id", middleware.RequireStepupToken(), revokeSessionHandler)
 }

@@ -5,7 +5,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
-	"fdfz-student-id/internal/util/validation"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -130,7 +130,7 @@ func updateUserProfileHandler(c *gin.Context) {
 		if *req.Nickname == "" {
 			target.Nickname = null.String{}
 		} else {
-			if err := validation.ValidateNickname(*req.Nickname); err != nil {
+			if err := handling.ValidateNickname(*req.Nickname); err != nil {
 				respondErr(err)
 				return
 			}
@@ -138,14 +138,14 @@ func updateUserProfileHandler(c *gin.Context) {
 		}
 	}
 	if req.Signature != nil {
-		if err := validation.ValidateSignature(*req.Signature); err != nil {
+		if err := handling.ValidateSignature(*req.Signature); err != nil {
 			respondErr(err)
 			return
 		}
 		target.Signature = *req.Signature
 	}
 	if req.Bio != nil {
-		if err := validation.ValidateBio(*req.Bio); err != nil {
+		if err := handling.ValidateBio(*req.Bio); err != nil {
 			respondErr(err)
 			return
 		}
@@ -163,7 +163,7 @@ func updateUserProfileHandler(c *gin.Context) {
 			if field.Value == nil {
 				continue
 			}
-			if err := validation.ValidateVisibility(*field.Value); err != nil {
+			if err := handling.ValidateVisibility(*field.Value); err != nil {
 				respondErr(err)
 				return
 			}
@@ -171,21 +171,21 @@ func updateUserProfileHandler(c *gin.Context) {
 		}
 	}
 	if req.Username != nil && *req.Username != target.Username {
-		if err := validation.ValidateUsername(*req.Username); err != nil {
+		if err := handling.ValidateUsername(*req.Username); err != nil {
 			respondErr(err)
 			return
 		}
 		target.Username = *req.Username
 	}
 	if req.RealName != nil && *req.RealName != target.RealName {
-		if err := validation.ValidateRealName(*req.RealName); err != nil {
+		if err := handling.ValidateRealName(*req.RealName); err != nil {
 			respondErr(err)
 			return
 		}
 		target.RealName = *req.RealName
 	}
 	if req.School != nil {
-		if err := validation.ValidateSchool(*req.School); err != nil {
+		if err := handling.ValidateSchool(*req.School); err != nil {
 			respondErr(err)
 			return
 		}
@@ -195,7 +195,7 @@ func updateUserProfileHandler(c *gin.Context) {
 		if *req.StudentNum == "" {
 			target.StudentNum = null.String{}
 		} else {
-			if err := validation.ValidateStudentNum(*req.StudentNum); err != nil {
+			if err := handling.ValidateStudentNum(*req.StudentNum); err != nil {
 				respondErr(err)
 				return
 			}

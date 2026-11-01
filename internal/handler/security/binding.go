@@ -11,7 +11,7 @@ import (
 	"fdfz-student-id/internal/service/qq"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
-	"fdfz-student-id/internal/util/validation"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"strings"
 	"time"
@@ -29,7 +29,7 @@ func emailBindInitHandler(c *gin.Context) {
 		errs.BadRequestError().AppendDetails("请求解析失败", "邮箱绑定失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateEmail(req.Email); err != nil {
+	if err := handling.ValidateEmail(req.Email); err != nil {
 		err.AppendDetails("邮箱绑定失败").Respond(c)
 		return
 	}
@@ -94,7 +94,7 @@ func emailBindVerifyHandler(c *gin.Context) {
 		errs.BadRequestError().AppendDetails("请求解析失败", "邮箱绑定失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateEmail(req.Email); err != nil {
+	if err := handling.ValidateEmail(req.Email); err != nil {
 		err.AppendDetails("邮箱绑定失败").Respond(c)
 		return
 	}
@@ -202,7 +202,7 @@ func totpBindVerifyHandler(c *gin.Context) {
 		errs.BadRequestError().AppendDetails("请求解析失败", "TOTP 绑定失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateTOTPCode(req.Code); err != nil {
+	if err := handling.ValidateTOTPCode(req.Code); err != nil {
 		err.AppendDetails("TOTP 绑定失败").Respond(c)
 		return
 	}
@@ -279,7 +279,7 @@ func qqBindInitHandler(c *gin.Context) {
 		errs.BadRequestError().AppendDetails("请求解析失败", "QQ 绑定失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateQQ(req.QQ); err != nil {
+	if err := handling.ValidateQQ(req.QQ); err != nil {
 		err.AppendDetails("QQ 绑定失败").Respond(c)
 		return
 	}
@@ -334,7 +334,7 @@ func qqBindVerifyHandler(c *gin.Context) {
 		errs.BadRequestError().AppendDetails("请求解析失败", "QQ 绑定失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateQQ(req.QQ); err != nil {
+	if err := handling.ValidateQQ(req.QQ); err != nil {
 		err.AppendDetails("QQ 绑定失败").Respond(c)
 		return
 	}

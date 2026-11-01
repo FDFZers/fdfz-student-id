@@ -5,7 +5,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/filestore"
 	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/util/validation"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"path"
 	"strconv"
@@ -88,7 +88,7 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) {
 	}
 	fileHeader := fileHeaders[0]
 
-	if err := validation.ValidateMIMEType(fileHeader, map[string]struct{}{
+	if err := handling.ValidateMIMEType(fileHeader, map[string]struct{}{
 		"image/jpeg": {},
 		"image/png":  {},
 		"image/webp": {},

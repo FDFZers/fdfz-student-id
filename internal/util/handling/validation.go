@@ -1,4 +1,4 @@
-package validation
+package handling
 
 import (
 	"fdfz-student-id/internal/errs"

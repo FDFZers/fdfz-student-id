@@ -5,7 +5,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
-	"fdfz-student-id/internal/util/validation"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"strconv"
 	"time"
@@ -78,7 +78,7 @@ func banUserHandler(c *gin.Context) {
 		errs.BadRequestError().AppendDetails("请求解析失败", "用户封禁失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateBanReason(req.Reason); err != nil {
+	if err := handling.ValidateBanReason(req.Reason); err != nil {
 		err.AppendDetails("用户封禁失败").Respond(c)
 		return
 	}

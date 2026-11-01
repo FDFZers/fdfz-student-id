@@ -6,7 +6,6 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/util/crypto"
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -35,10 +34,6 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/stepup/init", middleware.RequireTokenType(model.TokenTypeUser), stepupInitHandler)
 	i.POST("/stepup/finalize", middleware.RequireTokenType(model.TokenTypeUser), stepupFinalizeHandler)
 
-	i.GET("/sessions", middleware.RequireToken(), listSessionsHandler)
-	i.DELETE("/sessions", middleware.RequireStepupToken(), revokeAllSessionsHandler)
-	i.DELETE("/sessions/:id", middleware.RequireStepupToken(), revokeSessionHandler)
-
 	a.GET("/jwks", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
 		c.String(http.StatusOK, crypto.JWKS)
@@ -51,18 +46,4 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 		}
 		c.JSON(http.StatusOK, challenge)
 	})
-}
-
-func respondBanned(c *gin.Context, ban *model.UserBan, item string) {
-	if ban.EndTime.Valid {
-		errs.PermissionDeniedError().AppendDetails(
-			fmt.Sprintf("用户已封禁：%s（%s）", ban.Reason, ban.EndTime.Time.Format("2006-01-02 15:04:05")),
-			item,
-		).Respond(c)
-	} else {
-		errs.PermissionDeniedError().AppendDetails(
-			fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
-			item,
-		).Respond(c)
-	}
 }

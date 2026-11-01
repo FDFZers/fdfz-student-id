@@ -8,7 +8,7 @@ import (
 	"fdfz-student-id/internal/service/filestore"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
-	"fdfz-student-id/internal/util/validation"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"path"
 	"strings"
@@ -68,37 +68,37 @@ func createRegisterHandler(c *gin.Context) {
 			errs.BadRequestError().AppendDetails("学生账号需提供学号", "注册失败").Respond(c)
 			return
 		}
-		if err := validation.ValidateStudentNum(studentNum.String); err != nil {
+		if err := handling.ValidateStudentNum(studentNum.String); err != nil {
 			err.AppendDetails("注册失败").Respond(c)
 			return
 		}
 	}
 
-	if err := validation.ValidateUsername(req.Username); err != nil {
+	if err := handling.ValidateUsername(req.Username); err != nil {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateNickname(req.Nickname); err != nil {
+	if err := handling.ValidateNickname(req.Nickname); err != nil {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateRealName(req.RealName); err != nil {
+	if err := handling.ValidateRealName(req.RealName); err != nil {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}
-	if err := validation.ValidatePassword(req.Password); err != nil {
+	if err := handling.ValidatePassword(req.Password); err != nil {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateSchool(req.School); err != nil {
+	if err := handling.ValidateSchool(req.School); err != nil {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateUserType(req.Type); err != nil {
+	if err := handling.ValidateUserType(req.Type); err != nil {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}
-	if err := validation.ValidateMIMEType(fileHeader, map[string]struct{}{
+	if err := handling.ValidateMIMEType(fileHeader, map[string]struct{}{
 		"image/jpeg": {},
 		"image/png":  {},
 		"image/webp": {},

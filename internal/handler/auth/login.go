@@ -10,7 +10,7 @@ import (
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
-	"fdfz-student-id/internal/util/validation"
+	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
 	"time"
@@ -18,24 +18,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
-
-func cookieDomain() string {
-	if cfg.IsProd {
-		return ".fdfz.top"
-	}
-	return ".ffhub.localhost"
-}
-
-func setTokenCookies(c *gin.Context, accessToken, sessionToken string, accessMaxAge, sessionMaxAge int) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("access_token", accessToken, accessMaxAge, "/", cookieDomain(), cfg.IsProd, false)
-	c.SetCookie("session_token", sessionToken, sessionMaxAge, "/", cookieDomain(), cfg.IsProd, true)
-}
-
-func clearSessionCookies(c *gin.Context) {
-	setTokenCookies(c, "", "", 0, 0)
-	setStepupCookie(c, "", -1)
-}
 
 type loginInitRequestReq struct {
 	Username      string `json:"username"`
@@ -56,11 +38,11 @@ func loginInitHandler(c *gin.Context) {
 		return
 	}
 
-	if err := validation.ValidateUsername(req.Username); err != nil {
+	if err := handling.ValidateUsername(req.Username); err != nil {
 		err.AppendDetails("登录失败").Respond(c)
 		return
 	}
-	if err := validation.ValidatePassword(req.Password); err != nil {
+	if err := handling.ValidatePassword(req.Password); err != nil {
 		err.AppendDetails("登录失败").Respond(c)
 		return
 	}
@@ -85,7 +67,7 @@ func loginInitHandler(c *gin.Context) {
 		return
 	}
 	if ban != nil {
-		respondBanned(c, ban, "登录失败")
+		handling.RespondBanned(c, ban, "登录失败")
 		return
 	}
 
@@ -149,7 +131,7 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 	if ban != nil {
-		respondBanned(c, ban, "登录失败")
+		handling.RespondBanned(c, ban, "登录失败")
 		return
 	}
 
@@ -212,7 +194,7 @@ func loginFinalizeHandler(c *gin.Context) {
 		slog.Warn("Failed to delete login auth session", "error", err.Info.Error, "session_id", authSession.ID)
 	}
 
-	setTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
+	handling.SetTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -253,7 +235,7 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 	if ban != nil {
-		respondBanned(c, ban, "令牌刷新失败")
+		handling.RespondBanned(c, ban, "令牌刷新失败")
 		return
 	}
 
@@ -287,7 +269,7 @@ func refreshTokenHandler(c *gin.Context) {
 		return
 	}
 
-	setTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
+	handling.SetTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -306,6 +288,6 @@ func logoutHandler(c *gin.Context) {
 		return
 	}
 
-	clearSessionCookies(c)
+	handling.ClearSessionCookies(c)
 	c.JSON(http.StatusOK, gin.H{})
 }

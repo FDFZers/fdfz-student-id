@@ -1,9 +1,10 @@
-package auth
+package security
 
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/auth"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"time"
 
@@ -106,7 +107,7 @@ func revokeSessionHandler(c *gin.Context) {
 	}
 
 	if isCurrent {
-		clearSessionCookies(c)
+		handling.ClearSessionCookies(c)
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
@@ -120,7 +121,7 @@ func revokeAllSessionsHandler(c *gin.Context) {
 		return
 	}
 
-	clearSessionCookies(c)
+	handling.ClearSessionCookies(c)
 
 	c.JSON(http.StatusOK, gin.H{})
 }

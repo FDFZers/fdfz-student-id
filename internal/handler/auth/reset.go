@@ -8,6 +8,7 @@ import (
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
 
@@ -194,7 +195,7 @@ func resetPasswordFinalizeHandler(c *gin.Context) {
 		return
 	}
 	if ban != nil {
-		respondBanned(c, ban, "密码重置失败")
+		handling.RespondBanned(c, ban, "密码重置失败")
 		return
 	}
 

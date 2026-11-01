@@ -7,17 +7,13 @@ import (
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
-
-func setStepupCookie(c *gin.Context, token string, maxAge int) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("stepup_token", token, maxAge, "/", cookieDomain(), true, true)
-}
 
 func stepupInitHandler(c *gin.Context) {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
@@ -33,7 +29,7 @@ func stepupInitHandler(c *gin.Context) {
 		return
 	}
 	if ban != nil {
-		respondBanned(c, ban, "二次验证初始化失败")
+		handling.RespondBanned(c, ban, "二次验证初始化失败")
 		return
 	}
 
@@ -114,7 +110,7 @@ func stepupFinalizeHandler(c *gin.Context) {
 	}
 
 	maxAge := int(cfg.C.StepupTokenTTL.Seconds())
-	setStepupCookie(c, stepupToken, maxAge)
+	handling.SetStepupCookie(c, stepupToken, maxAge)
 
 	c.JSON(http.StatusOK, gin.H{})
 }
