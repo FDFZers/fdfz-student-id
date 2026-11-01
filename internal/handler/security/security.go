@@ -26,6 +26,8 @@ func InitRoutes(internal *gin.RouterGroup) {
 	group.DELETE("/qq", bindingValidateClaims(), qqUnbindHandler)
 
 	group.POST("/password/change", middleware.RequireStepupToken(), changePasswordHandler)
+	group.DELETE("/account", middleware.RequireStepupToken(), deleteAccountHandler)
+
 	group.GET("/sessions", middleware.RequireToken(), listSessionsHandler)
 	group.DELETE("/sessions", middleware.RequireStepupToken(), revokeAllSessionsHandler)
 	group.DELETE("/sessions/:id", middleware.RequireStepupToken(), revokeSessionHandler)

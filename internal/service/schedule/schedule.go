@@ -22,10 +22,20 @@ func ScheduleCron() (*cron.Cron, error) {
 		return nil, err
 	}
 
-	_, err = c.AddFunc("0 */4 * * *", func() {
+	_, err = c.AddFunc("*/10 * * * *", func() {
 		_, err := user.CleanupExpiredBans(context.Background())
 		if err != nil {
 			slog.Error("Failed to cleanup expired bans", "error", err.Info)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = c.AddFunc("*/10 * * * *", func() {
+		_, err := user.FinalizeDueAccountDeletions(context.Background())
+		if err != nil {
+			slog.Error("Failed to finalize scheduled account deletions", "error", err.Info)
 		}
 	})
 	if err != nil {

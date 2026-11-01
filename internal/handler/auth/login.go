@@ -135,6 +135,24 @@ func loginFinalizeHandler(c *gin.Context) {
 		return
 	}
 
+	// 冷静期内重新登录取消账号注销
+	cancelled, err := user.CancelPendingAccountDeletion(c.Request.Context(), authSession.UserID)
+	if err != nil {
+		err.AppendDetails("登录失败").Respond(c)
+		return
+	} else if cancelled {
+		slog.Info("Cancelled scheduled account deletion on login", "user_id", authSession.UserID)
+	}
+	// 可能注销已到期
+	finalized, err := user.FinalizeOverdueAccountDeletion(c.Request.Context(), authSession.UserID)
+	if err != nil {
+		err.AppendDetails("登录失败").Respond(c)
+		return
+	} else if finalized {
+		errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败").Respond(c)
+		return
+	}
+
 	sessionToken, e := crypto.GenerateCode(128, crypto.TokenCharset)
 	if e != nil {
 		errs.CreateAndLogInternalError(e, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Respond(c)

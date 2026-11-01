@@ -26,23 +26,24 @@ $$ LANGUAGE plpgsql;
 -- =============================================
 CREATE TABLE users
 (
-    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    username     VARCHAR(32)  NOT NULL,
+    id                    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username              VARCHAR(32)  NOT NULL,
 
-    type         user_type    NOT NULL DEFAULT 'student',
-    student_num  VARCHAR(16)           DEFAULT NULL,
-    real_name    VARCHAR(32)  NOT NULL,
-    school       school       NOT NULL DEFAULT 'fdfz',
+    type                  user_type    NOT NULL DEFAULT 'student',
+    student_num           VARCHAR(16)           DEFAULT NULL,
+    real_name             VARCHAR(32)  NOT NULL,
+    school                school       NOT NULL DEFAULT 'fdfz',
 
-    nickname     VARCHAR(32)           DEFAULT NULL,
-    signature    VARCHAR(128) NOT NULL DEFAULT '',
-    bio          TEXT         NOT NULL DEFAULT '',
+    nickname              VARCHAR(32)           DEFAULT NULL,
+    signature             VARCHAR(128) NOT NULL DEFAULT '',
+    bio                   TEXT         NOT NULL DEFAULT '',
 
-    visibilities JSONB        NOT NULL DEFAULT '{"real_name":"private","followers":"private","following":"private"}',
+    visibilities          JSONB        NOT NULL DEFAULT '{"real_name":"private","followers":"private","following":"private"}',
 
-    created_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    deleted_at   TIMESTAMPTZ           DEFAULT NULL,
+    created_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    deleted_at            TIMESTAMPTZ           DEFAULT NULL,
+    deletion_scheduled_at TIMESTAMPTZ           DEFAULT NULL,
 
     CHECK ((type = 'student' AND student_num IS NOT NULL) OR (type != 'student' AND student_num IS NULL))
 );
@@ -67,6 +68,9 @@ CREATE INDEX idx_users_updated_at
     ON users (updated_at);
 CREATE INDEX idx_users_deleted_at
     ON users (deleted_at);
+CREATE INDEX idx_users_deletion_scheduled
+    ON users (deletion_scheduled_at)
+    WHERE deletion_scheduled_at IS NOT NULL AND deleted_at IS NULL;
 
 CREATE TRIGGER trg_users_updated_at
     BEFORE UPDATE
