@@ -80,7 +80,7 @@ func resetPasswordEmailInitHandler(c *gin.Context) {
 		}
 	}
 
-	if session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.StringFrom(req.Email), null.String{}); err != nil {
+	if session, err := createPasswordResetAuthSession(c.Request.Context(), usr.ID, null.StringFrom(req.Email), null.String{}); err != nil {
 		err.Respond(c)
 		return
 	} else {
@@ -142,7 +142,7 @@ func resetPasswordQQInitHandler(c *gin.Context) {
 		}
 	}
 
-	if session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.StringFrom(req.QQ)); err != nil {
+	if session, err := createPasswordResetAuthSession(c.Request.Context(), usr.ID, null.String{}, null.StringFrom(req.QQ)); err != nil {
 		err.Respond(c)
 		return
 	} else {
@@ -181,6 +181,10 @@ func resetPasswordFinalizeHandler(c *gin.Context) {
 	}
 	if !session.Passed2FA {
 		errs.IllegalStateError().AppendDetails("二次验证未通过", "密码重置失败").Respond(c)
+		return
+	}
+	if session.UserID == 0 {
+		c.JSON(http.StatusOK, gin.H{})
 		return
 	}
 

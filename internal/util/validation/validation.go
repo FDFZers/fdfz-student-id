@@ -15,7 +15,7 @@ var regexUsername = regexp2.MustCompile(`\A[a-zA-Z0-9_-]{4,32}\z`, regexp2.None)
 var regexNickname = regexp2.MustCompile(`\A.{1,32}\z`, regexp2.None)
 var regexRealName = regexp2.MustCompile(`\A[\u4e00-\u9fff\u00b7]{1,4}\z`, regexp2.None)
 var regexStudentNum = regexp2.MustCompile(`\A(?:\d{8}|\d{6}0\d{2})\z`, regexp2.None) // 青分学号9位
-var regexEmail = regexp2.MustCompile(`\A([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\"(\[\]!#-[^-~ \t]|(\\[\t -~]))+\")@([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\[[\t -Z^-~]*])\z`, regexp2.None)
+var regexEmail = regexp2.MustCompile(`\A(?=[\s\S]{1,254}\z)([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\"(\[\]!#-[^-~ \t]|(\\[\t -~]))+\")@([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\[[\t -Z^-~]*])\z`, regexp2.None)
 var regexPassword = regexp2.MustCompile(`\A(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?\x60~]{8,32}\z`, regexp2.None)
 var regexTOTPCode = regexp2.MustCompile(`\A\d{6}\z`, regexp2.None)
 var regexQQ = regexp2.MustCompile(`\A[1-9]\d{4,11}\z`, regexp2.None) // 5-12 位非 0 开头数字
@@ -59,13 +59,7 @@ func ValidateStudentNum(studentNum string) *errs.Error {
 	return nil
 }
 
-// MaxEmailLength 是 RFC 5321 规定的邮箱地址最大长度。
-const MaxEmailLength = 254
-
 func ValidateEmail(email string) *errs.Error {
-	if len(email) > MaxEmailLength {
-		return errs.BadRequestError().AppendDetails("无效的邮箱")
-	}
 	if ok, err := regexEmail.MatchString(email); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate email").AppendDetails("邮箱校验失败")
 	} else if !ok {
@@ -127,6 +121,13 @@ func ValidateMIMEType(fileHeader *multipart.FileHeader, allowedTypes map[string]
 func ValidateSchool(school model.School) *errs.Error {
 	if !school.IsValid() {
 		return errs.BadRequestError().AppendDetails("无效的学校")
+	}
+	return nil
+}
+
+func ValidateUserType(typ model.UserType) *errs.Error {
+	if !typ.IsValid() {
+		return errs.BadRequestError().AppendDetails("无效的用户类型")
 	}
 	return nil
 }

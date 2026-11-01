@@ -78,11 +78,23 @@ func createRegisterHandler(c *gin.Context) {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}
+	if err := validation.ValidateNickname(req.Nickname); err != nil {
+		err.AppendDetails("注册失败").Respond(c)
+		return
+	}
 	if err := validation.ValidateRealName(req.RealName); err != nil {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}
 	if err := validation.ValidatePassword(req.Password); err != nil {
+		err.AppendDetails("注册失败").Respond(c)
+		return
+	}
+	if err := validation.ValidateSchool(req.School); err != nil {
+		err.AppendDetails("注册失败").Respond(c)
+		return
+	}
+	if err := validation.ValidateUserType(req.Type); err != nil {
 		err.AppendDetails("注册失败").Respond(c)
 		return
 	}

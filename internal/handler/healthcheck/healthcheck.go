@@ -22,7 +22,7 @@ type Check struct {
 	Duration string `json:"duration,omitempty"`
 }
 
-var timeout = time.Second * 10
+var timeout = 2 * time.Second
 
 func check(ctx context.Context) HealthStatus {
 	ctx, cancel := context.WithTimeout(ctx, timeout)

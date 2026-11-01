@@ -13,7 +13,13 @@ import (
 )
 
 type updateVisibilitiesReq struct {
-	RealName *model.Visibility `json:"real_name"`
+	RealName  *model.Visibility `json:"real_name"`
+	Followers *model.Visibility `json:"followers"`
+	Following *model.Visibility `json:"following"`
+}
+
+func (r *updateVisibilitiesReq) empty() bool {
+	return r == nil || (r.RealName == nil && r.Followers == nil && r.Following == nil)
 }
 
 type updateProfileReq struct {
@@ -33,7 +39,7 @@ func (r *updateProfileReq) empty() bool {
 	return r.Nickname == nil &&
 		r.Signature == nil &&
 		r.Bio == nil &&
-		(r.Visibilities == nil || r.Visibilities.RealName == nil) &&
+		(r.Visibilities == nil || r.Visibilities.empty()) &&
 		r.Username == nil &&
 		r.RealName == nil &&
 		r.School == nil &&
@@ -87,7 +93,7 @@ func updateUserProfileHandler(c *gin.Context) {
 		{"nickname", req.Nickname != nil},
 		{"signature", req.Signature != nil},
 		{"bio", req.Bio != nil},
-		{"visibilities", req.Visibilities != nil && req.Visibilities.RealName != nil},
+		{"visibilities", req.Visibilities != nil && !req.Visibilities.empty()},
 	}
 	for _, f := range selfFields {
 		if f.Present && !hasWritePerm(f.Field) {
@@ -145,12 +151,24 @@ func updateUserProfileHandler(c *gin.Context) {
 		}
 		target.Bio = *req.Bio
 	}
-	if req.Visibilities != nil && req.Visibilities.RealName != nil {
-		if err := validation.ValidateVisibility(*req.Visibilities.RealName); err != nil {
-			respondErr(err)
-			return
+	if req.Visibilities != nil {
+		for _, field := range []struct {
+			Value *model.Visibility
+			Dest  *model.Visibility
+		}{
+			{req.Visibilities.RealName, &target.Visibilities.RealName},
+			{req.Visibilities.Followers, &target.Visibilities.Followers},
+			{req.Visibilities.Following, &target.Visibilities.Following},
+		} {
+			if field.Value == nil {
+				continue
+			}
+			if err := validation.ValidateVisibility(*field.Value); err != nil {
+				respondErr(err)
+				return
+			}
+			*field.Dest = *field.Value
 		}
-		target.Visibilities.RealName = *req.Visibilities.RealName
 	}
 	if req.Username != nil && *req.Username != target.Username {
 		if err := validation.ValidateUsername(*req.Username); err != nil {

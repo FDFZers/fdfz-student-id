@@ -429,7 +429,7 @@ func qqUnbindHandler(c *gin.Context) {
 
 func bindingValidateClaims() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		middleware.RequireTokenType(model.TokenTypeStepup)(c)
+		middleware.RequireStepupToken()(c)
 		if c.IsAborted() {
 			return
 		}

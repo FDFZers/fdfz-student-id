@@ -7,6 +7,8 @@ import (
 	"fdfz-student-id/internal/model"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const UserBanCacheDuration = 1 * time.Minute
@@ -85,4 +87,35 @@ func GetUserBan(ctx context.Context, userID int64) (*model.UserBan, *errs.Error)
 		return nil, nil
 	}
 	return ban, nil
+}
+
+const cleanupExpiredBansSQL = `
+UPDATE user_bans
+SET enabled = false
+WHERE enabled = true AND end_time IS NOT NULL AND end_time <= now()
+RETURNING user_id
+`
+
+func CleanupExpiredBans(ctx context.Context) (int64, *errs.Error) {
+	rows, err := db.R.Pool.Query(ctx, cleanupExpiredBansSQL)
+	if err != nil {
+		return 0, errs.CreatePGError(err, "封禁信息", "Failed to cleanup expired bans").
+			AppendDetails("过期封禁清理失败")
+	}
+
+	userIDs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (int64, error) {
+		var userID int64
+		err := row.Scan(&userID)
+		return userID, err
+	})
+	if err != nil {
+		return 0, errs.CreatePGError(err, "封禁信息", "Failed to collect expired bans").
+			AppendDetails("过期封禁清理失败")
+	}
+
+	for _, userID := range userIDs {
+		db.R.Del(ctx, UserBanCacheKey(userID))
+	}
+
+	return int64(len(userIDs)), nil
 }

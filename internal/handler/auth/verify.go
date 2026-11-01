@@ -211,12 +211,9 @@ func verifyQQInitHandler(c *gin.Context) {
 		return
 	}
 	if session.QQCode.Valid {
-		if session.Type == auth.AuthSessionTypeResetPassword {
-			// 重置密码静默成功防止账号枚举
-			c.JSON(http.StatusOK, gin.H{})
-			return
-		}
-		errs.IllegalStateError().AppendDetails("QQ 验证已初始化", "QQ 验证码初始化失败").Respond(c)
+		c.JSON(http.StatusOK, gin.H{
+			"code": session.QQCode.String,
+		})
 		return
 	}
 

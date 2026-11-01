@@ -43,7 +43,7 @@ func SendCode(to, code string, typ auth.AuthSessionType) error {
 	var title string
 	switch typ {
 	case auth.AuthSessionTypeLogin:
-		slog.Info("Sending login verification code", "to", to, "code", code)
+		slog.Info("Sending login verification code", "to", to)
 		r = strings.NewReplacer(
 			"{{TITLE}}", "登录验证",
 			"{{CODE_NAME}}", "登录验证码",
@@ -53,7 +53,7 @@ func SendCode(to, code string, typ auth.AuthSessionType) error {
 		)
 		title = "登录验证"
 	case auth.AuthSessionTypeResetPassword:
-		slog.Info("Sending password reset code", "to", to, "code", code)
+		slog.Info("Sending password reset code", "to", to)
 		r = strings.NewReplacer(
 			"{{TITLE}}", "密码重置",
 			"{{CODE_NAME}}", "密码重置验证码",
@@ -63,7 +63,7 @@ func SendCode(to, code string, typ auth.AuthSessionType) error {
 		)
 		title = "密码重置"
 	case auth.AuthSessionTypeStepup:
-		slog.Info("Sending stepup code", "to", to, "code", code)
+		slog.Info("Sending stepup code", "to", to)
 		r = strings.NewReplacer(
 			"{{TITLE}}", "二次验证",
 			"{{CODE_NAME}}", "二次验证码",

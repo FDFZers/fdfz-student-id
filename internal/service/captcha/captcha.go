@@ -14,7 +14,7 @@ import (
 	"github.com/altcha-org/altcha-lib-go/v2"
 )
 
-var AltchaError = errs.CreateError(http.StatusForbidden, "altcha")
+var AltchaError = errs.CreateError(http.StatusForbidden, "altcha_error")
 
 func CreateChallenge() (altcha.Challenge, error) {
 	expiresAt := time.Now().Add(cfg.C.AltchaTimeout)

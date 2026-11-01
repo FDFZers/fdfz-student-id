@@ -16,7 +16,7 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	a := api.Group("/auth")
 	i := internal.Group("/auth")
 
-	i.POST("/register", middleware.LimitSize(5<<20), createRegisterHandler)
+	i.POST("/register", createRegisterHandler)
 	i.POST("/login/init", loginInitHandler)
 	i.POST("/login/finalize", loginFinalizeHandler)
 	i.POST("/verify/email/init", verifyEmailInitHandler)

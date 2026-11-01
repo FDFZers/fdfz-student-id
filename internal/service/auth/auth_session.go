@@ -9,6 +9,7 @@ import (
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,7 +45,7 @@ func AuthSessionIDCacheKey(id uuid.UUID) string {
 }
 
 func EmailRateLimitCacheKey(email string) string {
-	return fmt.Sprintf("student_id:auth:rate_limit:email:%s", email)
+	return fmt.Sprintf("student_id:auth:rate_limit:email:%s", strings.ToLower(strings.TrimSpace(email)))
 }
 
 func QQRateLimitCacheKey(qq string) string {

@@ -20,7 +20,12 @@ func under(path, prefix string) bool {
 }
 
 func InitRouter(r *gin.Engine) {
-	apiCors := cors.Default()
+	apiCors := cors.New(cors.Config{
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:    []string{"Origin", "Content-Type", "Authorization"},
+		MaxAge:          12 * time.Hour,
+	})
 	internalCors := cors.New(cors.Config{
 		AllowOriginFunc: func(origin string) bool {
 			if origin == "https://fdfz.top" {
