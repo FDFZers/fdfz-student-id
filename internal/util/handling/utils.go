@@ -17,18 +17,16 @@ func CookieDomain() string {
 	return ".ffhub.localhost"
 }
 
-func RespondBanned(c *gin.Context, ban *model.UserBan, item string) {
+// BannedError 构造“用户已被封禁”错误，失败动作名由 handler 包装器统一追加。
+func BannedError(ban *model.UserBan) *errs.Error {
 	if ban.EndTime.Valid {
-		errs.PermissionDeniedError().AppendDetails(
+		return errs.PermissionDeniedError().AppendDetails(
 			fmt.Sprintf("用户已封禁：%s（%s）", ban.Reason, ban.EndTime.Time.Format("2006-01-02 15:04:05")),
-			item,
-		).Respond(c)
-	} else {
-		errs.PermissionDeniedError().AppendDetails(
-			fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
-			item,
-		).Respond(c)
+		)
 	}
+	return errs.PermissionDeniedError().AppendDetails(
+		fmt.Sprintf("用户已永久封禁：%s", ban.Reason),
+	)
 }
 
 func SetTokenCookies(c *gin.Context, accessToken, sessionToken string, accessMaxAge, sessionMaxAge int) {

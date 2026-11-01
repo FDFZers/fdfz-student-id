@@ -46,38 +46,30 @@ func (r *updateProfileReq) empty() bool {
 		r.StudentNum == nil
 }
 
-func updateUserProfileHandler(c *gin.Context) {
+func updateUserProfileHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	targetID, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		err.AppendDetails("用户信息修改失败").Respond(c)
-		return
+		return err
 	}
 
 	var req updateProfileReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "用户信息修改失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if req.empty() {
-		errs.BadRequestError().AppendDetails("未提供需要修改的字段", "用户信息修改失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("未提供需要修改的字段")
 	}
 
 	target, err := user.GetUserByID(c.Request.Context(), targetID)
 	if err != nil {
-		err.AppendDetails("用户信息修改失败").Respond(c)
-		return
+		return err
 	} else if target == nil {
-		errs.NotFoundError().AppendDetails("用户不存在", "用户信息修改失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("用户不存在")
 	}
 
 	isSelf := claims.UserID == targetID
 
-	permissionDenied := func() {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-	}
 	hasWritePerm := func(field string) bool {
 		if isSelf {
 			return perm.Contains(claims.Permissions, "student_id.user.profile."+field+".write")
@@ -97,8 +89,7 @@ func updateUserProfileHandler(c *gin.Context) {
 	}
 	for _, f := range selfFields {
 		if f.Present && !hasWritePerm(f.Field) {
-			permissionDenied()
-			return
+			return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 		}
 	}
 
@@ -117,13 +108,8 @@ func updateUserProfileHandler(c *gin.Context) {
 			continue
 		}
 		if isSelf || !perm.Contains(claims.Permissions, "student_id.users.profile."+f.Field+".write") {
-			permissionDenied()
-			return
+			return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 		}
-	}
-
-	respondErr := func(err *errs.Error) {
-		err.AppendDetails("用户信息修改失败").Respond(c)
 	}
 
 	if req.Nickname != nil {
@@ -131,23 +117,20 @@ func updateUserProfileHandler(c *gin.Context) {
 			target.Nickname = null.String{}
 		} else {
 			if err := handling.ValidateNickname(*req.Nickname); err != nil {
-				respondErr(err)
-				return
+				return err
 			}
 			target.Nickname = null.StringFrom(*req.Nickname)
 		}
 	}
 	if req.Signature != nil {
 		if err := handling.ValidateSignature(*req.Signature); err != nil {
-			respondErr(err)
-			return
+			return err
 		}
 		target.Signature = *req.Signature
 	}
 	if req.Bio != nil {
 		if err := handling.ValidateBio(*req.Bio); err != nil {
-			respondErr(err)
-			return
+			return err
 		}
 		target.Bio = *req.Bio
 	}
@@ -164,30 +147,26 @@ func updateUserProfileHandler(c *gin.Context) {
 				continue
 			}
 			if err := handling.ValidateVisibility(*field.Value); err != nil {
-				respondErr(err)
-				return
+				return err
 			}
 			*field.Dest = *field.Value
 		}
 	}
 	if req.Username != nil && *req.Username != target.Username {
 		if err := handling.ValidateUsername(*req.Username); err != nil {
-			respondErr(err)
-			return
+			return err
 		}
 		target.Username = *req.Username
 	}
 	if req.RealName != nil && *req.RealName != target.RealName {
 		if err := handling.ValidateRealName(*req.RealName); err != nil {
-			respondErr(err)
-			return
+			return err
 		}
 		target.RealName = *req.RealName
 	}
 	if req.School != nil {
 		if err := handling.ValidateSchool(*req.School); err != nil {
-			respondErr(err)
-			return
+			return err
 		}
 		target.School = *req.School
 	}
@@ -196,8 +175,7 @@ func updateUserProfileHandler(c *gin.Context) {
 			target.StudentNum = null.String{}
 		} else {
 			if err := handling.ValidateStudentNum(*req.StudentNum); err != nil {
-				respondErr(err)
-				return
+				return err
 			}
 			target.StudentNum = null.StringFrom(*req.StudentNum)
 		}
@@ -205,17 +183,16 @@ func updateUserProfileHandler(c *gin.Context) {
 
 	if target.Type == model.UserTypeStudent {
 		if !target.StudentNum.Valid {
-			errs.BadRequestError().AppendDetails("学生账号必须提供学号", "用户信息修改失败").Respond(c)
-			return
+			return errs.BadRequestError().AppendDetails("学生账号必须提供学号")
 		}
 	} else {
 		target.StudentNum = null.String{}
 	}
 
 	if err := user.UpdateUser(c.Request.Context(), target); err != nil {
-		err.AppendDetails("用户信息修改失败").Respond(c)
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, filterProfiles(claims, target)[0])
+	return nil
 }

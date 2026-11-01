@@ -14,35 +14,33 @@ import (
 	"github.com/guregu/null/v6"
 )
 
-func getUserBanHandler(c *gin.Context) {
+func getUserBanHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	targetIDStr := c.Param("id")
 	targetID, e := strconv.ParseInt(targetIDStr, 10, 64)
 	if e != nil {
-		errs.BadRequestError().AppendDetails("无效的用户 ID", "获取用户封禁信息失败").Respond(c)
-		return
+		// 历史文案与其它分支不一致，Seal 以保持响应不变。
+		return errs.BadRequestError().AppendDetails("无效的用户 ID", "获取用户封禁信息失败").Seal()
 	}
 
 	var allowed bool
 	if targetID == claims.UserID {
 		allowed = perm.Contains(claims.Permissions, "student_id.user.ban.read")
 	} else {
-		allowed = perm.Contains(claims.Permissions, "student_id.user.ban.read")
+		allowed = perm.Contains(claims.Permissions, "student_id.users.ban.read")
 	}
 	if !allowed {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	ban, err := user.GetUserBan(c.Request.Context(), targetID)
 	if err != nil {
-		err.AppendDetails("用户封禁信息获取失败").Respond(c)
-		return
+		return err
 	} else if ban == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"banned": false,
 		})
-		return
+		return nil
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -50,6 +48,7 @@ func getUserBanHandler(c *gin.Context) {
 		"reason":   ban.Reason,
 		"end_time": ban.EndTime,
 	})
+	return nil
 }
 
 type banUserReq struct {
@@ -57,39 +56,32 @@ type banUserReq struct {
 	EndTime null.Time `json:"end_time"`
 }
 
-func banUserHandler(c *gin.Context) {
+func banUserHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	targetID, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		err.AppendDetails("用户封禁失败").Respond(c)
-		return
+		return err
 	}
 	if targetID == claims.UserID {
-		errs.BadRequestError().AppendDetails("不能封禁自己", "用户封禁失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("不能封禁自己")
 	}
 	if !perm.Contains(claims.Permissions, "student_id.users.ban.create") {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	var req banUserReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "用户封禁失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateBanReason(req.Reason); err != nil {
-		err.AppendDetails("用户封禁失败").Respond(c)
-		return
+		return err
 	}
 	if req.EndTime.Valid && !req.EndTime.Time.After(time.Now()) {
-		errs.BadRequestError().AppendDetails("封禁结束时间必须晚于当前时间", "用户封禁失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("封禁结束时间必须晚于当前时间")
 	}
 
 	if err := EnsureUserExists(c, targetID); err != nil {
-		err.AppendDetails("用户封禁失败").Respond(c)
-		return
+		return err
 	}
 
 	newBan := &model.UserBan{
@@ -98,34 +90,31 @@ func banUserHandler(c *gin.Context) {
 		EndTime: req.EndTime,
 	}
 	if err := user.BanUser(c.Request.Context(), newBan); err != nil {
-		err.AppendDetails("用户封禁失败").Respond(c)
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
-func unbanUserHandler(c *gin.Context) {
+func unbanUserHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	targetID, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		err.AppendDetails("用户解封失败").Respond(c)
-		return
+		return err
 	}
 	if !perm.Contains(claims.Permissions, "student_id.users.ban.delete") {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	if err := EnsureUserExists(c, targetID); err != nil {
-		err.AppendDetails("用户解封失败").Respond(c)
-		return
+		return err
 	}
 
 	if err := user.UnbanUser(c.Request.Context(), targetID); err != nil {
-		err.AppendDetails("用户解封失败").Respond(c)
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }

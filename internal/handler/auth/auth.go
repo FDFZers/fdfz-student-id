@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -15,35 +16,37 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	a := api.Group("/auth")
 	i := internal.Group("/auth")
 
-	i.POST("/register", createRegisterHandler)
-	i.POST("/login/init", loginInitHandler)
-	i.POST("/login/finalize", loginFinalizeHandler)
-	i.POST("/refresh", refreshTokenHandler)
-	i.POST("/logout", middleware.RequireTokenType(model.TokenTypeUser), logoutHandler)
+	i.POST("/register", handling.Wrap("注册失败", createRegisterHandler))
+	i.POST("/login/init", handling.Wrap("登录失败", loginInitHandler))
+	i.POST("/login/finalize", handling.Wrap("登录失败", loginFinalizeHandler))
+	i.POST("/refresh", handling.Wrap("令牌刷新失败", refreshTokenHandler))
+	i.POST("/logout", middleware.RequireTokenType(model.TokenTypeUser), handling.Wrap("登出失败", logoutHandler))
 
-	i.POST("/password_reset/init/email", resetPasswordEmailInitHandler)
-	i.POST("/password_reset/init/qq", resetPasswordQQInitHandler)
-	i.POST("/password_reset/finalize", resetPasswordFinalizeHandler)
+	i.POST("/password_reset/init/email", handling.Wrap("密码重置初始化失败", resetPasswordEmailInitHandler))
+	i.POST("/password_reset/init/qq", handling.Wrap("密码重置初始化失败", resetPasswordQQInitHandler))
+	i.POST("/password_reset/finalize", handling.Wrap("密码重置失败", resetPasswordFinalizeHandler))
 
-	i.POST("/verify/email/init", verifyEmailInitHandler)
-	i.POST("/verify/email/verify", verifyEmailHandler)
-	i.POST("/verify/qq/init", verifyQQInitHandler)
-	i.POST("/verify/qq/verify", verifyQQHandler)
-	i.POST("/verify/totp", verifyTOTPHandler)
+	i.POST("/verify/email/init", handling.Wrap("邮箱验证码发送失败", verifyEmailInitHandler))
+	i.POST("/verify/email/verify", handling.Wrap("邮箱验证失败", verifyEmailHandler))
+	i.POST("/verify/qq/init", handling.Wrap("QQ 验证码初始化失败", verifyQQInitHandler))
+	i.POST("/verify/qq/verify", handling.Wrap("QQ 验证失败", verifyQQHandler))
+	i.POST("/verify/totp", handling.Wrap("TOTP 验证失败", verifyTOTPHandler))
 
-	i.POST("/stepup/init", middleware.RequireTokenType(model.TokenTypeUser), stepupInitHandler)
-	i.POST("/stepup/finalize", middleware.RequireTokenType(model.TokenTypeUser), stepupFinalizeHandler)
+	i.POST("/stepup/init", middleware.RequireTokenType(model.TokenTypeUser), handling.Wrap("二次验证初始化失败", stepupInitHandler))
+	i.POST("/stepup/finalize", middleware.RequireTokenType(model.TokenTypeUser), handling.Wrap("二次验证失败", stepupFinalizeHandler))
 
 	a.GET("/jwks", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
 		c.String(http.StatusOK, crypto.JWKS)
 	})
-	a.GET("/challenge", func(c *gin.Context) {
-		challenge, err := captcha.CreateChallenge()
-		if err != nil {
-			errs.CreateAndLogInternalError(err, "Failed to create altcha challenge").AppendDetails("Altcha Challenge 生成失败").Respond(c)
-			return
-		}
-		c.JSON(http.StatusOK, challenge)
-	})
+	a.GET("/challenge", handling.Wrap("Altcha Challenge 生成失败", challengeHandler))
+}
+
+func challengeHandler(c *gin.Context) *errs.Error {
+	challenge, err := captcha.CreateChallenge()
+	if err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to create altcha challenge")
+	}
+	c.JSON(http.StatusOK, challenge)
+	return nil
 }

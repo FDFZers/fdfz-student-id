@@ -32,19 +32,17 @@ func currentSessionID(claims *model.RegisteredTokenClaims) (uuid.UUID, *errs.Err
 	return id, nil
 }
 
-func listSessionsHandler(c *gin.Context) {
+func listSessionsHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	currentID, err := currentSessionID(claims)
 	if err != nil {
-		err.AppendDetails("会话列表获取失败").Respond(c)
-		return
+		return err
 	}
 
 	sessions, err := auth.ListUserSessions(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("会话列表获取失败").Respond(c)
-		return
+		return err
 	}
 
 	results := make([]sessionInfo, 0, len(sessions))
@@ -65,45 +63,39 @@ func listSessionsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"sessions": results,
 	})
+	return nil
 }
 
-func revokeSessionHandler(c *gin.Context) {
+func revokeSessionHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	targetID, e := uuid.Parse(c.Param("id"))
 	if e != nil {
-		errs.BadRequestError().AppendDetails("无效的会话 ID", "会话撤销失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("无效的会话 ID")
 	}
 
 	currentID, err := currentSessionID(claims)
 	if err != nil {
-		err.AppendDetails("会话撤销失败").Respond(c)
-		return
+		return err
 	}
 	isCurrent := targetID == currentID
 
 	session, err := auth.GetSessionByUUID(c.Request.Context(), targetID)
 	if err != nil {
 		if err.Info.Error == "not_found" {
-			errs.NotFoundError().AppendDetails("会话不存在", "会话撤销失败").Respond(c)
-			return
+			return errs.NotFoundError().AppendDetails("会话不存在")
 		}
-		err.AppendDetails("会话撤销失败").Respond(c)
-		return
+		return err
 	}
 	if session.UserID != claims.UserID {
-		errs.NotFoundError().AppendDetails("会话不存在", "会话撤销失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("会话不存在")
 	}
 	if session.RevokedAt != nil || !time.Now().Before(session.ExpiresAt) {
-		errs.NotFoundError().AppendDetails("会话不存在或已失效", "会话撤销失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("会话不存在或已失效")
 	}
 
 	if err := auth.RevokeSession(c.Request.Context(), targetID); err != nil {
-		err.AppendDetails("会话撤销失败").Respond(c)
-		return
+		return err
 	}
 
 	if isCurrent {
@@ -111,17 +103,18 @@ func revokeSessionHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
-func revokeAllSessionsHandler(c *gin.Context) {
+func revokeAllSessionsHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	if err := auth.RevokeAllUserSessions(c.Request.Context(), claims.UserID); err != nil {
-		err.AppendDetails("会话撤销失败").Respond(c)
-		return
+		return err
 	}
 
 	handling.ClearSessionCookies(c)
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }

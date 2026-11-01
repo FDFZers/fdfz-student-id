@@ -9,36 +9,33 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func getUserProfileByUsernameHandler(c *gin.Context) {
+func getUserProfileByUsernameHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	targetUsername := c.Param("username")
 
 	targetUser, err := user.GetUserByUsername(c.Request.Context(), targetUsername)
 	if err != nil {
-		err.AppendDetails("获取用户信息失败").Respond(c)
-		return
+		return err
 	} else if targetUser == nil {
-		errs.NotFoundError().AppendDetails("用户不存在", "获取用户信息失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("用户不存在")
 	}
 	c.JSON(http.StatusOK, filterProfiles(claims, targetUser)[0])
+	return nil
 }
 
-func getUserProfileByIDHandler(c *gin.Context) {
+func getUserProfileByIDHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	targetID, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		err.AppendDetails("获取用户信息失败").Respond(c)
-		return
+		return err
 	}
 
 	targetUser, err := user.GetUserByID(c.Request.Context(), targetID)
 	if err != nil {
-		err.AppendDetails("获取用户信息失败").Respond(c)
-		return
+		return err
 	} else if targetUser == nil {
-		errs.NotFoundError().AppendDetails("用户不存在", "获取用户信息失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("用户不存在")
 	}
 	c.JSON(http.StatusOK, filterProfiles(claims, targetUser)[0])
+	return nil
 }

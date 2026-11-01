@@ -23,64 +23,55 @@ type emailBindInitReq struct {
 	Email string `json:"email"`
 }
 
-func emailBindInitHandler(c *gin.Context) {
+func emailBindInitHandler(c *gin.Context) *errs.Error {
 	var req emailBindInitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "邮箱绑定失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateEmail(req.Email); err != nil {
-		err.AppendDetails("邮箱绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("邮箱绑定失败").Respond(c)
-		return
+		return err
 	}
 	if current != nil && strings.EqualFold(current.Email, req.Email) {
-		errs.ConflictError().AppendDetails("该邮箱已绑定", "邮箱绑定失败").Respond(c)
-		return
+		return errs.ConflictError().AppendDetails("该邮箱已绑定")
 	}
 
 	taken, err := user.IsEmailTaken(c.Request.Context(), req.Email)
 	if err != nil {
-		err.AppendDetails("邮箱绑定失败").Respond(c)
-		return
+		return err
 	}
 	if taken {
-		errs.ConflictError().AppendDetails("该邮箱已被其他用户绑定", "邮箱绑定失败").Respond(c)
-		return
+		return errs.ConflictError().AppendDetails("该邮箱已被其他用户绑定")
 	}
 
 	if err := auth.TryAcquireEmailRateLimit(c.Request.Context(), req.Email); err != nil {
-		err.AppendDetails("邮箱绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	code, e := crypto.GenerateCode(6, crypto.CodeCharset)
 	if e != nil {
-		errs.CreateAndLogInternalError(e, "Failed to generate email bind code").
-			AppendDetails("验证码生成失败", "邮箱绑定失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(e, "Failed to generate email bind code").
+			AppendDetails("验证码生成失败")
 	}
 
 	if err := auth.SetPendingEmailBind(c.Request.Context(), claims.UserID, req.Email, code); err != nil {
-		err.AppendDetails("邮箱绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	if err := email.SendBindEmailCode(req.Email, code); err != nil {
 		auth.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
-		errs.CreateAndLogInternalError(err, "Failed to send email bind code").
-			AppendDetails("邮件发送失败", "邮箱绑定失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(err, "Failed to send email bind code").
+			AppendDetails("邮件发送失败")
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
 type emailBindVerifyReq struct {
@@ -88,279 +79,246 @@ type emailBindVerifyReq struct {
 	Code  string `json:"code"`
 }
 
-func emailBindVerifyHandler(c *gin.Context) {
+func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req emailBindVerifyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "邮箱绑定失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateEmail(req.Email); err != nil {
-		err.AppendDetails("邮箱绑定失败").Respond(c)
-		return
+		return err
 	}
 	if req.Code == "" {
-		errs.BadRequestError().AppendDetails("验证码不能为空", "邮箱绑定失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("验证码不能为空")
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	pending, err := auth.GetPendingEmailBind(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("邮箱绑定失败").Respond(c)
-		return
+		return err
 	} else if pending == nil {
-		errs.IllegalStateError().AppendDetails("邮箱绑定未发起或已过期", "邮箱绑定失败").Respond(c)
-		return
+		return errs.IllegalStateError().AppendDetails("邮箱绑定未发起或已过期")
 	}
 	if !strings.EqualFold(pending.Email, req.Email) {
-		errs.BadRequestError().AppendDetails("邮箱与绑定请求不一致", "邮箱绑定失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("邮箱与绑定请求不一致")
 	}
 
-	if !checkBindAttempts(c, bindEmailAttemptsKind, claims.UserID) {
-		return
+	if err := checkBindAttempts(c.Request.Context(), bindEmailAttemptsKind, claims.UserID); err != nil {
+		return err
 	}
 
 	if subtle.ConstantTimeCompare([]byte(pending.Code), []byte(req.Code)) != 1 {
-		if !recordBindFailure(c, bindEmailAttemptsKind, claims.UserID) {
-			return
+		if err := recordBindFailure(c.Request.Context(), bindEmailAttemptsKind, claims.UserID); err != nil {
+			return err
 		}
-		errs.ForbiddenError().AppendDetails("验证码错误", "邮箱绑定失败").Respond(c)
-		return
+		return errs.ForbiddenError().AppendDetails("验证码错误")
 	}
 
 	if err := user.SetUserEmail(c.Request.Context(), &model.UserEmail{
 		UserID: claims.UserID,
 		Email:  pending.Email,
 	}); err != nil {
-		err.AppendDetails("邮箱绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	auth.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
 	auth.ResetBindAttempts(c.Request.Context(), bindEmailAttemptsKind, claims.UserID)
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
-func emailUnbindHandler(c *gin.Context) {
+func emailUnbindHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("邮箱解绑失败").Respond(c)
-		return
+		return err
 	} else if current == nil {
-		errs.NotFoundError().AppendDetails("未绑定邮箱", "邮箱解绑失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("未绑定邮箱")
 	}
 
 	if err := user.DeleteUserEmail(c.Request.Context(), claims.UserID); err != nil {
-		err.AppendDetails("邮箱解绑失败").Respond(c)
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
-func totpBindInitHandler(c *gin.Context) {
+func totpBindInitHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("TOTP 绑定失败").Respond(c)
-		return
+		return err
 	} else if existing != nil {
-		errs.ConflictError().AppendDetails("已绑定 TOTP", "TOTP 绑定失败").Respond(c)
-		return
+		return errs.ConflictError().AppendDetails("已绑定 TOTP")
 	}
 
 	secret, otpAuthURL, e := crypto.GenerateTOTP(uint64(claims.UserID))
 	if e != nil {
-		errs.CreateAndLogInternalError(e, "Failed to generate TOTP secret").
-			AppendDetails("TOTP 密钥生成失败", "TOTP 绑定失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(e, "Failed to generate TOTP secret").
+			AppendDetails("TOTP 密钥生成失败")
 	}
 
 	if err := auth.SetPendingTOTPBind(c.Request.Context(), claims.UserID, secret); err != nil {
-		err.AppendDetails("TOTP 绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"secret": secret,
 		"url":    otpAuthURL,
 	})
+	return nil
 }
 
 type totpBindVerifyReq struct {
 	Code string `json:"code"`
 }
 
-func totpBindVerifyHandler(c *gin.Context) {
+func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req totpBindVerifyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "TOTP 绑定失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateTOTPCode(req.Code); err != nil {
-		err.AppendDetails("TOTP 绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	pending, err := auth.GetPendingTOTPBind(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("TOTP 绑定失败").Respond(c)
-		return
+		return err
 	} else if pending == nil {
-		errs.IllegalStateError().AppendDetails("TOTP 绑定未发起或已过期", "TOTP 绑定失败").Respond(c)
-		return
+		return errs.IllegalStateError().AppendDetails("TOTP 绑定未发起或已过期")
 	}
 
-	if !checkBindAttempts(c, bindTOTPAttemptsKind, claims.UserID) {
-		return
+	if err := checkBindAttempts(c.Request.Context(), bindTOTPAttemptsKind, claims.UserID); err != nil {
+		return err
 	}
 
 	ok2, e := crypto.VerifyTOTP(pending.Secret, req.Code)
 	if e != nil {
-		errs.CreateAndLogInternalError(e, "Failed to verify TOTP code").
-			AppendDetails("TOTP 校验失败", "TOTP 绑定失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(e, "Failed to verify TOTP code").
+			AppendDetails("TOTP 校验失败")
 	}
 	if !ok2 {
-		if !recordBindFailure(c, bindTOTPAttemptsKind, claims.UserID) {
-			return
+		if err := recordBindFailure(c.Request.Context(), bindTOTPAttemptsKind, claims.UserID); err != nil {
+			return err
 		}
-		errs.ForbiddenError().AppendDetails("验证码错误", "TOTP 绑定失败").Respond(c)
-		return
+		return errs.ForbiddenError().AppendDetails("验证码错误")
 	}
 
 	if err := user.UpsertUserTotp(c.Request.Context(), &model.UserTOTP{
 		UserID: claims.UserID,
 		Secret: pending.Secret,
 	}); err != nil {
-		err.AppendDetails("TOTP 绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	auth.DeletePendingTOTPBind(c.Request.Context(), claims.UserID)
 	auth.ResetBindAttempts(c.Request.Context(), bindTOTPAttemptsKind, claims.UserID)
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
-func totpUnbindHandler(c *gin.Context) {
+func totpUnbindHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("TOTP 解绑失败").Respond(c)
-		return
+		return err
 	} else if existing == nil {
-		errs.NotFoundError().AppendDetails("未绑定 TOTP", "TOTP 解绑失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("未绑定 TOTP")
 	}
 
 	if err := user.DeleteUserTotp(c.Request.Context(), claims.UserID); err != nil {
-		err.AppendDetails("TOTP 解绑失败").Respond(c)
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
 type qqBindInitReq struct {
 	QQ string `json:"qq"`
 }
 
-func qqBindInitHandler(c *gin.Context) {
+func qqBindInitHandler(c *gin.Context) *errs.Error {
 	var req qqBindInitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "QQ 绑定失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateQQ(req.QQ); err != nil {
-		err.AppendDetails("QQ 绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("QQ 绑定失败").Respond(c)
-		return
+		return err
 	}
 	if current != nil && current.QQ == req.QQ {
-		errs.ConflictError().AppendDetails("该 QQ 已绑定", "QQ 绑定失败").Respond(c)
-		return
+		return errs.ConflictError().AppendDetails("该 QQ 已绑定")
 	}
 
 	taken, err := user.IsQQTaken(c.Request.Context(), req.QQ)
 	if err != nil {
-		err.AppendDetails("QQ 绑定失败").Respond(c)
-		return
+		return err
 	}
 	if taken {
-		errs.ConflictError().AppendDetails("该 QQ 已被其他用户绑定", "QQ 绑定失败").Respond(c)
-		return
+		return errs.ConflictError().AppendDetails("该 QQ 已被其他用户绑定")
 	}
 
 	code, e := crypto.GenerateCode(6, crypto.CodeCharset)
 	if e != nil {
-		errs.CreateAndLogInternalError(e, "Failed to generate QQ bind code").
-			AppendDetails("验证码生成失败", "QQ 绑定失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(e, "Failed to generate QQ bind code").
+			AppendDetails("验证码生成失败")
 	}
 
 	if err := auth.SetPendingQQBind(c.Request.Context(), claims.UserID, req.QQ, code); err != nil {
-		err.AppendDetails("QQ 绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	// 验证码由用户使用待绑定的 QQ 主动发送给机器人，服务端拉取好友消息进行校验
 	c.JSON(http.StatusOK, gin.H{
 		"code": code,
 	})
+	return nil
 }
 
 type qqBindVerifyReq struct {
 	QQ string `json:"qq"`
 }
 
-func qqBindVerifyHandler(c *gin.Context) {
+func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req qqBindVerifyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "QQ 绑定失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateQQ(req.QQ); err != nil {
-		err.AppendDetails("QQ 绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	pending, err := auth.GetPendingQQBind(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("QQ 绑定失败").Respond(c)
-		return
+		return err
 	} else if pending == nil {
-		errs.IllegalStateError().AppendDetails("QQ 绑定未发起或已过期", "QQ 绑定失败").Respond(c)
-		return
+		return errs.IllegalStateError().AppendDetails("QQ 绑定未发起或已过期")
 	}
 	if pending.QQ != req.QQ {
-		errs.BadRequestError().AppendDetails("QQ 与绑定请求不一致", "QQ 绑定失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("QQ 与绑定请求不一致")
 	}
 
-	if !checkBindAttempts(c, bindQQAttemptsKind, claims.UserID) {
-		return
+	if err := checkBindAttempts(c.Request.Context(), bindQQAttemptsKind, claims.UserID); err != nil {
+		return err
 	}
 
 	if err := auth.TryAcquireQQRateLimit(c.Request.Context(), pending.QQ); err != nil {
-		err.AppendDetails("QQ 绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	pullCtx, cancel := context.WithTimeout(c.Request.Context(), auth.QQPullTimeout)
@@ -368,9 +326,8 @@ func qqBindVerifyHandler(c *gin.Context) {
 
 	messages, e := qq.GetFriendMsgHistory(pullCtx, pending.QQ, 20)
 	if e != nil {
-		errs.CreateAndLogInternalError(e, "Failed to pull QQ messages from NapCat").
-			AppendDetails("NapCat 错误", "QQ 绑定失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(e, "Failed to pull QQ messages from NapCat").
+			AppendDetails("NapCat 错误")
 	}
 
 	cutoff := time.Now().Add(-auth.PendingBindDuration).Unix()
@@ -386,45 +343,42 @@ func qqBindVerifyHandler(c *gin.Context) {
 	}
 
 	if !matched {
-		if !recordBindFailure(c, bindQQAttemptsKind, claims.UserID) {
-			return
+		if err := recordBindFailure(c.Request.Context(), bindQQAttemptsKind, claims.UserID); err != nil {
+			return err
 		}
-		errs.ForbiddenError().
-			AppendDetails("未识别到验证码，请使用该 QQ 向机器人发送验证码", "QQ 绑定失败").Respond(c)
-		return
+		return errs.ForbiddenError().
+			AppendDetails("未识别到验证码，请使用该 QQ 向机器人发送验证码")
 	}
 
 	if err := user.SetUserQQ(c.Request.Context(), &model.UserQQ{
 		UserID: claims.UserID,
 		QQ:     pending.QQ,
 	}); err != nil {
-		err.AppendDetails("QQ 绑定失败").Respond(c)
-		return
+		return err
 	}
 
 	auth.DeletePendingQQBind(c.Request.Context(), claims.UserID)
 	auth.ResetBindAttempts(c.Request.Context(), bindQQAttemptsKind, claims.UserID)
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
-func qqUnbindHandler(c *gin.Context) {
+func qqUnbindHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("QQ 解绑失败").Respond(c)
-		return
+		return err
 	} else if current == nil {
-		errs.NotFoundError().AppendDetails("未绑定 QQ", "QQ 解绑失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("未绑定 QQ")
 	}
 
 	if err := user.DeleteUserQQ(c.Request.Context(), claims.UserID); err != nil {
-		err.AppendDetails("QQ 解绑失败").Respond(c)
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
 
 func bindingValidateClaims() gin.HandlerFunc {
@@ -452,24 +406,23 @@ func bindingValidateClaims() gin.HandlerFunc {
 	}
 }
 
-func checkBindAttempts(c *gin.Context, kind string, userID int64) bool {
-	attempts, err := auth.GetBindAttempts(c.Request.Context(), kind, userID)
+// checkBindAttempts 返回 nil 表示可以继续绑定；返回的错误已自行收尾（"绑定失败"），
+// 因为它是绑定流程的一个子阶段，失败动作名与所属路由不同。
+func checkBindAttempts(ctx context.Context, kind string, userID int64) *errs.Error {
+	attempts, err := auth.GetBindAttempts(ctx, kind, userID)
 	if err != nil {
-		err.AppendDetails("绑定失败").Respond(c)
-		return false
+		return err.AppendDetails("绑定失败").Seal()
 	}
 	if attempts >= auth.MaxBindAttempts {
-		errs.RateLimitExceededError().
-			AppendDetails("验证码错误次数过多，请重新发起绑定", "绑定失败").Respond(c)
-		return false
+		return errs.RateLimitExceededError().
+			AppendDetails("验证码错误次数过多，请重新发起绑定", "绑定失败").Seal()
 	}
-	return true
+	return nil
 }
 
-func recordBindFailure(c *gin.Context, kind string, userID int64) bool {
-	if _, err := auth.IncreaseBindAttempts(c.Request.Context(), kind, userID); err != nil {
-		err.AppendDetails("绑定失败").Respond(c)
-		return false
+func recordBindFailure(ctx context.Context, kind string, userID int64) *errs.Error {
+	if _, err := auth.IncreaseBindAttempts(ctx, kind, userID); err != nil {
+		return err.AppendDetails("绑定失败").Seal()
 	}
-	return true
+	return nil
 }

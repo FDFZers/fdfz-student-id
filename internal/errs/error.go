@@ -20,6 +20,7 @@ type ErrorInfo struct {
 type Error struct {
 	HTTPCode int
 	Info     ErrorInfo
+	sealed   bool
 }
 
 func CreateError(httpCode int, id string) *Error {
@@ -34,6 +35,15 @@ func CreateError(httpCode int, id string) *Error {
 func (e *Error) AppendDetails(detail ...string) *Error {
 	e.Info.Details = append(e.Info.Details, detail...)
 	return e
+}
+
+func (e *Error) Seal() *Error {
+	e.sealed = true
+	return e
+}
+
+func (e *Error) IsSealed() bool {
+	return e.sealed
 }
 
 func (e *Error) Respond(c *gin.Context) {
@@ -79,6 +89,9 @@ func NotFoundError() *Error {
 }
 func ConflictError() *Error {
 	return CreateError(http.StatusConflict, "conflict")
+}
+func AltchaError() *Error {
+	return CreateError(http.StatusForbidden, "altcha_error")
 }
 
 func CreateAndLogInternalError[T any](err T, log string, args ...any) *Error {

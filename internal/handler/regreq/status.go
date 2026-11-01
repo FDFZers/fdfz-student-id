@@ -10,26 +10,22 @@ import (
 	"github.com/google/uuid"
 )
 
-func registerRequestStatusHandler(c *gin.Context) {
+func registerRequestStatusHandler(c *gin.Context) *errs.Error {
 	if err := captcha.VerifyPayloadStr(c.Query("altcha_payload")); err != nil {
-		err.AppendDetails("注册请求状态查询失败").Respond(c)
-		return
+		return err
 	}
 
 	id, e := uuid.Parse(c.Query("id"))
 	if e != nil {
-		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册请求状态查询失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("无效的注册请求 ID")
 	}
 
 	req, err := user.GetRegisterRequestByID(c.Request.Context(), id)
 	if err != nil {
-		err.AppendDetails("注册请求状态查询失败").Respond(c)
-		return
+		return err
 	}
 	if req == nil {
-		errs.NotFoundError().AppendDetails("注册请求不存在", "注册请求状态查询失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("注册请求不存在")
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -37,4 +33,5 @@ func registerRequestStatusHandler(c *gin.Context) {
 		"review_comment": req.ReviewComment,
 		"reviewed_at":    req.ReviewedAt,
 	})
+	return nil
 }

@@ -15,28 +15,24 @@ import (
 	"github.com/google/uuid"
 )
 
-func stepupInitHandler(c *gin.Context) {
+func stepupInitHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	if claims.IsTemporary {
-		errs.PermissionDeniedError().AppendDetails("临时会话不支持二次验证", "二次验证初始化失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("临时会话不支持二次验证")
 	}
 
 	ban, err := user.GetUserBan(c.Request.Context(), claims.UserID)
 	if err != nil {
-		err.AppendDetails("二次验证初始化失败").Respond(c)
-		return
+		return err
 	}
 	if ban != nil {
-		handling.RespondBanned(c, ban, "二次验证初始化失败")
-		return
+		return handling.BannedError(ban)
 	}
 
 	session, err := auth.CreateAuthSession(c.Request.Context(), auth.AuthSessionTypeStepup, false, claims.UserID, false)
 	if err != nil {
-		err.AppendDetails("二次验证初始化失败").Respond(c)
-		return
+		return err
 	}
 
 	methods := make([]string, 0, 3)
@@ -55,45 +51,39 @@ func stepupInitHandler(c *gin.Context) {
 		"2fa":        methods,
 		"passed":     session.Passed2FA,
 	})
+	return nil
 }
 
 type stepupFinalizeReq struct {
 	SessionID uuid.UUID `json:"session_id"`
 }
 
-func stepupFinalizeHandler(c *gin.Context) {
+func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 	var req stepupFinalizeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "二次验证失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if req.SessionID == uuid.Nil {
-		errs.BadRequestError().AppendDetails("无效的鉴权会话 ID", "二次验证失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("无效的鉴权会话 ID")
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	session, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
 	if err != nil {
-		err.AppendDetails("二次验证失败").Respond(c)
-		return
+		return err
 	} else if session == nil {
-		errs.NotFoundError().AppendDetails("鉴权会话不存在", "二次验证失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("鉴权会话不存在")
 	}
 
 	if session.Type != auth.AuthSessionTypeStepup {
-		errs.BadRequestError().AppendDetails("鉴权会话类型错误", "二次验证失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("鉴权会话类型错误")
 	}
 	if session.UserID != claims.UserID {
-		errs.ForbiddenError().AppendDetails("鉴权会话不属于当前用户", "二次验证失败").Respond(c)
-		return
+		return errs.ForbiddenError().AppendDetails("鉴权会话不属于当前用户")
 	}
 	if !session.Passed2FA {
-		errs.IllegalStateError().AppendDetails("二次验证未通过", "二次验证失败").Respond(c)
-		return
+		return errs.IllegalStateError().AppendDetails("二次验证未通过")
 	}
 
 	stepupToken, e := crypto.GenerateJWT(uuid.New(), &model.TokenClaims{
@@ -101,8 +91,7 @@ func stepupFinalizeHandler(c *gin.Context) {
 		TokenType: model.TokenTypeStepup,
 	}, cfg.C.StepupTokenTTL)
 	if e != nil {
-		errs.CreateAndLogInternalError(e, "Failed to generate stepup token").AppendDetails("令牌生成失败", "二次验证失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(e, "Failed to generate stepup token").AppendDetails("令牌生成失败")
 	}
 
 	if err := auth.DeleteAuthSession(c.Request.Context(), session); err != nil {
@@ -113,4 +102,5 @@ func stepupFinalizeHandler(c *gin.Context) {
 	handling.SetStepupCookie(c, stepupToken, maxAge)
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }

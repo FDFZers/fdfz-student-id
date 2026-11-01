@@ -12,26 +12,22 @@ import (
 	"github.com/google/uuid"
 )
 
-func getRegisterRequestHandler(c *gin.Context) {
+func getRegisterRequestHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	if !perm.Contains(claims.Permissions, "student_id.register_requests.read") {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	id, e := uuid.Parse(c.Param("id"))
 	if e != nil {
-		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册申请获取失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("无效的注册请求 ID")
 	}
 
 	request, err := user.GetRegisterRequestByID(c.Request.Context(), id)
 	if err != nil {
-		err.AppendDetails("注册申请获取失败").Respond(c)
-		return
+		return err
 	} else if request == nil {
-		errs.NotFoundError().AppendDetails("注册请求不存在", "注册申请获取失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("注册请求不存在")
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -49,35 +45,32 @@ func getRegisterRequestHandler(c *gin.Context) {
 		"review_comment":   request.ReviewComment,
 		"reviewed_at":      request.ReviewedAt,
 	})
+	return nil
 }
 
-func getRegisterRequestProofImageHandler(c *gin.Context) {
+func getRegisterRequestProofImageHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	if !perm.ContainsAny(claims.Permissions, "student_id.register_requests.read") {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	id, e := uuid.Parse(c.Param("id"))
 	if e != nil {
-		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "佐证图片获取失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("无效的注册请求 ID")
 	}
 
 	request, err := user.GetRegisterRequestByID(c.Request.Context(), id)
 	if err != nil {
-		err.AppendDetails("佐证图片获取失败").Respond(c)
-		return
+		return err
 	} else if request == nil {
-		errs.NotFoundError().AppendDetails("注册请求不存在", "佐证图片获取失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("注册请求不存在")
 	}
 
 	fileURL, err := filestore.BuildFileUrl("/student_id/proof_images/" + request.ID.String())
 	if err != nil {
-		err.AppendDetails("佐证图片获取失败").Respond(c)
-		return
+		return err
 	}
 
 	c.Redirect(http.StatusFound, fileURL)
+	return nil
 }

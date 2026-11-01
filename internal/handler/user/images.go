@@ -46,45 +46,42 @@ var (
 	}
 )
 
-func setAvatarHandler(c *gin.Context)    { setProfileImageHandler(c, avatarImage) }
-func setBannerHandler(c *gin.Context)    { setProfileImageHandler(c, bannerImage) }
-func getAvatarHandler(c *gin.Context)    { serveProfileImage(c, avatarImage) }
-func getBannerHandler(c *gin.Context)    { serveProfileImage(c, bannerImage) }
-func deleteAvatarHandler(c *gin.Context) { deleteProfileImageHandler(c, avatarImage) }
-func deleteBannerHandler(c *gin.Context) { deleteProfileImageHandler(c, bannerImage) }
+func setAvatarHandler(c *gin.Context) *errs.Error { return setProfileImageHandler(c, avatarImage) }
+func setBannerHandler(c *gin.Context) *errs.Error { return setProfileImageHandler(c, bannerImage) }
+func getAvatarHandler(c *gin.Context) *errs.Error { return serveProfileImage(c, avatarImage) }
+func getBannerHandler(c *gin.Context) *errs.Error { return serveProfileImage(c, bannerImage) }
+func deleteAvatarHandler(c *gin.Context) *errs.Error {
+	return deleteProfileImageHandler(c, avatarImage)
+}
+func deleteBannerHandler(c *gin.Context) *errs.Error {
+	return deleteProfileImageHandler(c, bannerImage)
+}
 
-func setProfileImageHandler(c *gin.Context, kind profileImageKind) {
-	failMsg := kind.Item + "设置失败"
-
+func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 	form, e := c.MultipartForm()
 	if e != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", failMsg).Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	target, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		err.AppendDetails(failMsg).Respond(c)
-		return
+		return err
 	}
 	targetStr := strconv.FormatInt(target, 10)
 
 	hasAdmin := perm.Contains(claims.Permissions, kind.AdminWritePerm)
 	hasSelf := target == claims.UserID && perm.Contains(claims.Permissions, kind.SelfWritePerm)
 	if !hasAdmin && !hasSelf {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	fileHeaders := form.File[kind.Field]
 	switch {
 	case len(fileHeaders) == 0:
-		errs.BadRequestError().AppendDetails("请上传"+kind.Item, failMsg).Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请上传" + kind.Item)
 	case len(fileHeaders) > 1:
-		errs.BadRequestError().AppendDetails(kind.Item+"最多上传 1 张", failMsg).Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails(kind.Item + "最多上传 1 张")
 	}
 	fileHeader := fileHeaders[0]
 
@@ -93,8 +90,7 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) {
 		"image/png":  {},
 		"image/webp": {},
 	}); err != nil {
-		err.AppendDetails(failMsg).Respond(c)
-		return
+		return err
 	}
 
 	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
@@ -104,19 +100,18 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) {
 		AppID:        null.IntFrom(1),
 		UserID:       null.IntFrom(claims.UserID),
 	}); err != nil {
-		err.AppendDetails(failMsg).Respond(c)
-		return
+		return err
 	}
+
+	return nil
 }
 
-func serveProfileImage(c *gin.Context, kind profileImageKind) {
-	failMsg := kind.Item + "获取失败"
+func serveProfileImage(c *gin.Context, kind profileImageKind) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	targetID, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		err.AppendDetails(failMsg).Respond(c)
-		return
+		return err
 	}
 
 	permKey := kind.AdminReadPerm
@@ -124,56 +119,49 @@ func serveProfileImage(c *gin.Context, kind profileImageKind) {
 		permKey = kind.SelfReadPerm
 	}
 	if !perm.Contains(claims.Permissions, permKey) {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	if err := EnsureUserExists(c, targetID); err != nil {
-		err.AppendDetails(failMsg).Respond(c)
-		return
+		return err
 	}
 
 	slug := "/student_id/" + kind.Slug + "/" + strconv.FormatInt(targetID, 10)
 	fileURL, err := filestore.BuildFileUrl(slug)
 	if err != nil {
-		err.AppendDetails(failMsg).Respond(c)
-		return
+		return err
 	}
 
 	c.Redirect(http.StatusFound, fileURL)
+	return nil
 }
 
-func deleteProfileImageHandler(c *gin.Context, kind profileImageKind) {
-	failMsg := kind.Item + "删除失败"
+func deleteProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	target, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
-		err.AppendDetails(failMsg).Respond(c)
-		return
+		return err
 	}
 
 	hasAdmin := perm.Contains(claims.Permissions, kind.AdminWritePerm)
 	hasSelf := target == claims.UserID && perm.Contains(claims.Permissions, kind.SelfWritePerm)
 	if !hasAdmin && !hasSelf {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	if err := EnsureUserExists(c, target); err != nil {
-		err.AppendDetails(failMsg).Respond(c)
-		return
+		return err
 	}
 
 	slug := "/student_id/" + kind.Slug + "/" + strconv.FormatInt(target, 10)
 	if err := filestore.DeleteFile(slug); err != nil {
 		if err.HTTPCode == http.StatusNotFound {
-			errs.NotFoundError().AppendDetails("未设置"+kind.Item, failMsg).Respond(c)
-		} else {
-			err.AppendDetails(failMsg).Respond(c)
+			return errs.NotFoundError().AppendDetails("未设置" + kind.Item)
 		}
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }

@@ -17,33 +17,30 @@ type reviewRegisterReq struct {
 	Comment string                      `json:"comment"`
 }
 
-func reviewRegisterHandler(c *gin.Context) {
+func reviewRegisterHandler(c *gin.Context) *errs.Error {
 	var req reviewRegisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "注册请求审核失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
 	if req.ID == uuid.Nil {
-		errs.BadRequestError().AppendDetails("无效的注册请求 ID", "注册请求审核失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("无效的注册请求 ID")
 	}
 
 	if !req.Status.IsValid() || req.Status == model.RegisterRequestStatusPending {
-		errs.BadRequestError().AppendDetails("无效的审核状态", "注册请求审核失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("无效的审核状态")
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	if !perm.Contains(claims.Permissions, "student_id.register_requests.review") {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	if err := user.ReviewRegisterRequest(c.Request.Context(), req.ID, req.Status, req.Comment, claims.UserID); err != nil {
-		err.Respond(c)
-		return
+		// 服务层错误已自带 "注册请求审核失败"，直接返回以保持响应不变。
+		return err.Seal()
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }

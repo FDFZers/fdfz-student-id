@@ -1,6 +1,7 @@
 package security
 
 import (
+	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/user"
@@ -10,18 +11,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func deleteAccountHandler(c *gin.Context) {
+func deleteAccountHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 
 	if err := auth.RevokeAllUserSessions(c.Request.Context(), claims.UserID); err != nil {
-		err.AppendDetails("账号注销失败").Respond(c)
-		return
+		return err
 	}
 
 	scheduledAt, err := user.ScheduleAccountDeletion(c.Request.Context(), claims.UserID, user.AccountDeletionDelay)
 	if err != nil {
-		err.AppendDetails("账号注销失败").Respond(c)
-		return
+		return err
 	}
 
 	handling.ClearSessionCookies(c)
@@ -29,4 +28,5 @@ func deleteAccountHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"scheduled_at": scheduledAt,
 	})
+	return nil
 }

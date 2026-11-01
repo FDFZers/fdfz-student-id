@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
+	"fdfz-student-id/internal/util/handling"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -15,47 +16,47 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	a := api.Group("/user")
 	i := internal.Group("/user")
 
-	a.GET("/profile", middleware.RequireToken(), getUserProfileByIDHandler)
-	a.GET("/profile/id/:id", middleware.RequireToken(), getUserProfileByIDHandler)
-	a.GET("/profile/username/:username", middleware.RequireToken(), getUserProfileByUsernameHandler)
+	a.GET("/profile", middleware.RequireToken(), handling.Wrap("获取用户信息失败", getUserProfileByIDHandler))
+	a.GET("/profile/id/:id", middleware.RequireToken(), handling.Wrap("获取用户信息失败", getUserProfileByIDHandler))
+	a.GET("/profile/username/:username", middleware.RequireToken(), handling.Wrap("获取用户信息失败", getUserProfileByUsernameHandler))
 
-	a.PATCH("/profile", middleware.RequireToken(), updateUserProfileHandler)
-	a.PATCH("/profile/id/:id", middleware.RequireToken(), updateUserProfileHandler)
+	a.PATCH("/profile", middleware.RequireToken(), handling.Wrap("用户信息修改失败", updateUserProfileHandler))
+	a.PATCH("/profile/id/:id", middleware.RequireToken(), handling.Wrap("用户信息修改失败", updateUserProfileHandler))
 
-	a.GET("/avatar", middleware.RequireToken(), getAvatarHandler)
-	a.GET("/avatar/:id", middleware.RequireToken(), getAvatarHandler)
+	a.GET("/avatar", middleware.RequireToken(), handling.Wrap("头像获取失败", getAvatarHandler))
+	a.GET("/avatar/:id", middleware.RequireToken(), handling.Wrap("头像获取失败", getAvatarHandler))
 
-	a.GET("/banner", middleware.RequireToken(), getBannerHandler)
-	a.GET("/banner/:id", middleware.RequireToken(), getBannerHandler)
+	a.GET("/banner", middleware.RequireToken(), handling.Wrap("背景图获取失败", getBannerHandler))
+	a.GET("/banner/:id", middleware.RequireToken(), handling.Wrap("背景图获取失败", getBannerHandler))
 
-	a.PUT("/avatar", middleware.RequireToken(), middleware.LimitSize(5<<20), setAvatarHandler)
-	a.PUT("/avatar/:id", middleware.RequireToken(), middleware.LimitSize(5<<20), setAvatarHandler)
+	a.PUT("/avatar", middleware.RequireToken(), middleware.LimitSize(5<<20), handling.Wrap("头像设置失败", setAvatarHandler))
+	a.PUT("/avatar/:id", middleware.RequireToken(), middleware.LimitSize(5<<20), handling.Wrap("头像设置失败", setAvatarHandler))
 
-	a.PUT("/banner", middleware.RequireToken(), middleware.LimitSize(5<<20), setBannerHandler)
-	a.PUT("/banner/:id", middleware.RequireToken(), middleware.LimitSize(5<<20), setBannerHandler)
+	a.PUT("/banner", middleware.RequireToken(), middleware.LimitSize(5<<20), handling.Wrap("背景图设置失败", setBannerHandler))
+	a.PUT("/banner/:id", middleware.RequireToken(), middleware.LimitSize(5<<20), handling.Wrap("背景图设置失败", setBannerHandler))
 
-	a.DELETE("/avatar", middleware.RequireToken(), deleteAvatarHandler)
-	a.DELETE("/avatar/:id", middleware.RequireToken(), deleteAvatarHandler)
+	a.DELETE("/avatar", middleware.RequireToken(), handling.Wrap("头像删除失败", deleteAvatarHandler))
+	a.DELETE("/avatar/:id", middleware.RequireToken(), handling.Wrap("头像删除失败", deleteAvatarHandler))
 
-	a.DELETE("/banner", middleware.RequireToken(), deleteBannerHandler)
-	a.DELETE("/banner/:id", middleware.RequireToken(), deleteBannerHandler)
+	a.DELETE("/banner", middleware.RequireToken(), handling.Wrap("背景图删除失败", deleteBannerHandler))
+	a.DELETE("/banner/:id", middleware.RequireToken(), handling.Wrap("背景图删除失败", deleteBannerHandler))
 
-	a.GET("/search/info", middleware.RequireToken(), SearchInfoHandler)
-	a.POST("/search/query", middleware.RequireToken(), SearchQueryHandler)
+	a.GET("/search/info", middleware.RequireToken(), handling.Wrap("用户搜索失败", SearchInfoHandler))
+	a.POST("/search/query", middleware.RequireToken(), handling.Wrap("用户搜索失败", SearchQueryHandler))
 
-	i.GET("/ban/:id", middleware.RequireToken(), getUserBanHandler)
-	i.POST("/ban/:id", middleware.RequireToken(), banUserHandler)
-	i.DELETE("/ban/:id", middleware.RequireToken(), unbanUserHandler)
+	i.GET("/ban/:id", middleware.RequireToken(), handling.Wrap("用户封禁信息获取失败", getUserBanHandler))
+	i.POST("/ban/:id", middleware.RequireToken(), handling.Wrap("用户封禁失败", banUserHandler))
+	i.DELETE("/ban/:id", middleware.RequireToken(), handling.Wrap("用户解封失败", unbanUserHandler))
 
-	a.POST("/follow/:id", middleware.RequireToken(), followUserHandler)
-	a.DELETE("/follow/:id", middleware.RequireToken(), unfollowUserHandler)
-	a.GET("/follow/:id", middleware.RequireToken(), getFollowStatusHandler)
-	a.GET("/followers", middleware.RequireToken(), getFollowersHandler)
-	a.GET("/followers/:id", middleware.RequireToken(), getFollowersHandler)
-	a.GET("/following", middleware.RequireToken(), getFollowingHandler)
-	a.GET("/following/:id", middleware.RequireToken(), getFollowingHandler)
-	a.GET("/friends", middleware.RequireToken(), getFriendsHandler)
-	a.GET("/friends/:id", middleware.RequireToken(), getFriendsHandler)
+	a.POST("/follow/:id", middleware.RequireToken(), handling.Wrap("关注失败", followUserHandler))
+	a.DELETE("/follow/:id", middleware.RequireToken(), handling.Wrap("取消关注失败", unfollowUserHandler))
+	a.GET("/follow/:id", middleware.RequireToken(), handling.Wrap("关注关系获取失败", getFollowStatusHandler))
+	a.GET("/followers", middleware.RequireToken(), handling.Wrap("粉丝列表获取失败", getFollowersHandler))
+	a.GET("/followers/:id", middleware.RequireToken(), handling.Wrap("粉丝列表获取失败", getFollowersHandler))
+	a.GET("/following", middleware.RequireToken(), handling.Wrap("关注列表获取失败", getFollowingHandler))
+	a.GET("/following/:id", middleware.RequireToken(), handling.Wrap("关注列表获取失败", getFollowingHandler))
+	a.GET("/friends", middleware.RequireToken(), handling.Wrap("好友列表获取失败", getFriendsHandler))
+	a.GET("/friends/:id", middleware.RequireToken(), handling.Wrap("好友列表获取失败", getFriendsHandler))
 }
 
 func ResolveTargetID(c *gin.Context, selfID int64) (int64, *errs.Error) {

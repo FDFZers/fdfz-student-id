@@ -28,33 +28,28 @@ type createRegisterRequestReq struct {
 	AltchaPayload string         `form:"altcha_payload"`
 }
 
-func createRegisterHandler(c *gin.Context) {
+func createRegisterHandler(c *gin.Context) *errs.Error {
 	// 解析请求
 	var req createRegisterRequestReq
 	if err := c.ShouldBind(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "注册失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
 	if err := captcha.VerifyPayloadStr(req.AltchaPayload); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 
 	form, err := c.MultipartForm()
 	if err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "注册失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
 	fileHeaders := form.File["proof_image"]
 	switch {
 	case len(fileHeaders) == 0:
-		errs.BadRequestError().AppendDetails("请上传证明身份的佐证图片", "注册失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请上传证明身份的佐证图片")
 	case len(fileHeaders) > 1:
-		errs.BadRequestError().AppendDetails("佐证图片最多上传 1 张", "注册失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("佐证图片最多上传 1 张")
 	}
 	fileHeader := fileHeaders[0]
 
@@ -65,46 +60,37 @@ func createRegisterHandler(c *gin.Context) {
 
 	if req.Type == model.UserTypeStudent {
 		if !studentNum.Valid {
-			errs.BadRequestError().AppendDetails("学生账号需提供学号", "注册失败").Respond(c)
-			return
+			return errs.BadRequestError().AppendDetails("学生账号需提供学号")
 		}
 		if err := handling.ValidateStudentNum(studentNum.String); err != nil {
-			err.AppendDetails("注册失败").Respond(c)
-			return
+			return err
 		}
 	}
 
 	if err := handling.ValidateUsername(req.Username); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 	if err := handling.ValidateNickname(req.Nickname); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 	if err := handling.ValidateRealName(req.RealName); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 	if err := handling.ValidatePassword(req.Password); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 	if err := handling.ValidateSchool(req.School); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 	if err := handling.ValidateUserType(req.Type); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 	if err := handling.ValidateMIMEType(fileHeader, map[string]struct{}{
 		"image/jpeg": {},
 		"image/png":  {},
 		"image/webp": {},
 	}); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 
 	var nickname null.String
@@ -114,18 +100,15 @@ func createRegisterHandler(c *gin.Context) {
 
 	// 查询用户名占用信息
 	if taken, err := user.IsUsernameTaken(c.Request.Context(), req.Username); err != nil {
-		errs.CreateAndLogInternalError(err, "Failed to check username availability").AppendDetails("用户名占用信息查询失败", "注册失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(err, "Failed to check username availability").AppendDetails("用户名占用信息查询失败")
 	} else if taken {
-		errs.ConflictError().AppendDetails("用户名已存在", "注册失败").Respond(c)
-		return
+		return errs.ConflictError().AppendDetails("用户名已存在")
 	}
 
 	// 密码哈希
 	pwdHash, err := crypto.HashArgon2ID(req.Password)
 	if err != nil {
-		errs.CreateAndLogInternalError(err, "Failed to hash password").AppendDetails("密码哈希失败", "注册失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(err, "Failed to hash password").AppendDetails("密码哈希失败")
 	}
 
 	// 创建注册请求
@@ -140,8 +123,7 @@ func createRegisterHandler(c *gin.Context) {
 	}
 
 	if err := user.CreateRegisterRequest(c.Request.Context(), r); err != nil {
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 
 	// 上传佐证图片
@@ -150,15 +132,14 @@ func createRegisterHandler(c *gin.Context) {
 		FileName: r.ID.String() + strings.ToLower(path.Ext(fileHeader.Filename)),
 		AppID:    null.IntFrom(1),
 	}); err != nil {
-		if err := user.DeleteRegisterRequest(c.Request.Context(), r.ID); err != nil {
-			err.AppendDetails("注册失败且回退失败，请联系管理员").Respond(c)
-			return
+		if deleteErr := user.DeleteRegisterRequest(c.Request.Context(), r.ID); deleteErr != nil {
+			return deleteErr.AppendDetails("注册失败且回退失败，请联系管理员").Seal()
 		}
-		err.AppendDetails("注册失败").Respond(c)
-		return
+		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"id": r.ID,
 	})
+	return nil
 }

@@ -8,13 +8,10 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/altcha-org/altcha-lib-go/v2"
 )
-
-var AltchaError = errs.CreateError(http.StatusForbidden, "altcha_error")
 
 func CreateChallenge() (altcha.Challenge, error) {
 	expiresAt := time.Now().Add(cfg.C.AltchaTimeout)
@@ -67,13 +64,13 @@ func VerifyPayloadStr(payloadStr string) *errs.Error {
 
 	result, err := VerifyChallenge(payload)
 	if err != nil {
-		return AltchaError.AppendDetails("Altcha 内部错误")
+		return errs.AltchaError().AppendDetails("Altcha 内部错误")
 	}
 	if !result.Verified {
-		return AltchaError.AppendDetails("Altcha Challenge 无效")
+		return errs.AltchaError().AppendDetails("Altcha Challenge 无效")
 	}
 	if result.Expired {
-		return AltchaError.AppendDetails("Altcha Challenge 过期")
+		return errs.AltchaError().AppendDetails("Altcha Challenge 过期")
 	}
 	return nil
 }

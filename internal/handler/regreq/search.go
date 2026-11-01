@@ -22,32 +22,29 @@ var searchCfg = search2.SearchConfig{
 
 var searchInfo = search2.GetInfo(&searchCfg)
 
-func SearchInfoHandler(c *gin.Context) {
+func SearchInfoHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	if !perm.Contains(claims.Permissions, "student_id.register_requests.list") {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 	c.JSON(http.StatusOK, searchInfo)
+	return nil
 }
 
-func SearchQueryHandler(c *gin.Context) {
+func SearchQueryHandler(c *gin.Context) *errs.Error {
 	var req search2.SearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "注册请求搜索失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
 	if !perm.Contains(claims.Permissions, "student_id.register_requests.list") {
-		errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Respond(c)
-		return
+		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	requests, err := search2.ExecSearch[model.RegisterRequest](c, &searchCfg, &req)
 	if err != nil {
-		err.AppendDetails("注册请求搜索失败").Respond(c)
-		return
+		return err
 	}
 
 	filtered := make([]*gin.H, 0, len(requests.Data))
@@ -73,4 +70,5 @@ func SearchQueryHandler(c *gin.Context) {
 		"count": requests.Count,
 		"data":  filtered,
 	})
+	return nil
 }

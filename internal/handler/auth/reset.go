@@ -26,7 +26,7 @@ func createPasswordResetAuthSession(ctx context.Context, userID int64, email, qq
 		QQ:     qq,
 	}
 	if err := auth.UpdateAuthSession(ctx, session, false); err != nil {
-		return nil, err.AppendDetails("密码重置初始化失败")
+		return nil, err.AppendDetails("密码重置初始化失败").Seal()
 	}
 	return session, nil
 }
@@ -36,61 +36,54 @@ type resetPasswordEmailInitReq struct {
 	AltchaPayload string `json:"altcha_payload"`
 }
 
-func resetPasswordEmailInitHandler(c *gin.Context) {
+func resetPasswordEmailInitHandler(c *gin.Context) *errs.Error {
 	var req resetPasswordEmailInitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "密码重置初始化失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := captcha.VerifyPayloadStr(req.AltchaPayload); err != nil {
-		err.AppendDetails("密码重置初始化失败").Respond(c)
-		return
+		return err
 	}
 
 	usr, err := user.GetUserByEmail(c.Request.Context(), req.Email)
 	if err != nil {
-		err.AppendDetails("密码重置初始化失败").Respond(c)
-		return
+		return err
 	} else if usr == nil {
-		if session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.String{}); err != nil {
-			err.Respond(c)
-			return
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"session_id": session.ID,
-				"2fa":        []string{"email"},
-			})
-			return
+		session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.String{})
+		if err != nil {
+			return err
 		}
-	}
-
-	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
-	if err != nil {
-		err.AppendDetails("密码重置初始化失败").Respond(c)
-		return
-	} else if ban != nil {
-		if session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.String{}); err != nil {
-			err.Respond(c)
-			return
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"session_id": session.ID,
-				"2fa":        []string{"email"},
-			})
-			return
-		}
-	}
-
-	if session, err := createPasswordResetAuthSession(c.Request.Context(), usr.ID, null.StringFrom(req.Email), null.String{}); err != nil {
-		err.Respond(c)
-		return
-	} else {
 		c.JSON(http.StatusOK, gin.H{
 			"session_id": session.ID,
 			"2fa":        []string{"email"},
 		})
-		return
+		return nil
 	}
+
+	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
+	if err != nil {
+		return err
+	} else if ban != nil {
+		session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.String{})
+		if err != nil {
+			return err
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"session_id": session.ID,
+			"2fa":        []string{"email"},
+		})
+		return nil
+	}
+
+	session, err := createPasswordResetAuthSession(c.Request.Context(), usr.ID, null.StringFrom(req.Email), null.String{})
+	if err != nil {
+		return err
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"session_id": session.ID,
+		"2fa":        []string{"email"},
+	})
+	return nil
 }
 
 type resetPasswordQQInitReq struct {
@@ -98,61 +91,54 @@ type resetPasswordQQInitReq struct {
 	AltchaPayload string `json:"altcha_payload"`
 }
 
-func resetPasswordQQInitHandler(c *gin.Context) {
+func resetPasswordQQInitHandler(c *gin.Context) *errs.Error {
 	var req resetPasswordQQInitReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "密码重置初始化失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := captcha.VerifyPayloadStr(req.AltchaPayload); err != nil {
-		err.AppendDetails("密码重置初始化失败").Respond(c)
-		return
+		return err
 	}
 
 	usr, err := user.GetUserByQQ(c.Request.Context(), req.QQ)
 	if err != nil {
-		err.AppendDetails("密码重置初始化失败").Respond(c)
-		return
+		return err
 	} else if usr == nil {
-		if session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.String{}); err != nil {
-			err.Respond(c)
-			return
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"session_id": session.ID,
-				"2fa":        []string{"qq"},
-			})
-			return
+		session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.String{})
+		if err != nil {
+			return err
 		}
-	}
-
-	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
-	if err != nil {
-		err.AppendDetails("密码重置初始化失败").Respond(c)
-		return
-	} else if ban != nil {
-		if session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.String{}); err != nil {
-			err.Respond(c)
-			return
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"session_id": session.ID,
-				"2fa":        []string{"qq"},
-			})
-			return
-		}
-	}
-
-	if session, err := createPasswordResetAuthSession(c.Request.Context(), usr.ID, null.String{}, null.StringFrom(req.QQ)); err != nil {
-		err.Respond(c)
-		return
-	} else {
 		c.JSON(http.StatusOK, gin.H{
 			"session_id": session.ID,
 			"2fa":        []string{"qq"},
 		})
-		return
+		return nil
 	}
+
+	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
+	if err != nil {
+		return err
+	} else if ban != nil {
+		session, err := createPasswordResetAuthSession(c.Request.Context(), 0, null.String{}, null.String{})
+		if err != nil {
+			return err
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"session_id": session.ID,
+			"2fa":        []string{"qq"},
+		})
+		return nil
+	}
+
+	session, err := createPasswordResetAuthSession(c.Request.Context(), usr.ID, null.String{}, null.StringFrom(req.QQ))
+	if err != nil {
+		return err
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"session_id": session.ID,
+		"2fa":        []string{"qq"},
+	})
+	return nil
 }
 
 type resetPasswordFinalizeReq struct {
@@ -160,57 +146,48 @@ type resetPasswordFinalizeReq struct {
 	Password  string    `json:"password"`
 }
 
-func resetPasswordFinalizeHandler(c *gin.Context) {
+func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 	var req resetPasswordFinalizeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		errs.BadRequestError().AppendDetails("请求解析失败", "密码重置失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
 	session, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
 	if err != nil {
-		err.AppendDetails("密码重置失败").Respond(c)
-		return
+		return err
 	} else if session == nil {
-		errs.NotFoundError().AppendDetails("鉴权会话不存在", "密码重置失败").Respond(c)
-		return
+		return errs.NotFoundError().AppendDetails("鉴权会话不存在")
 	}
 
 	if session.Type != auth.AuthSessionTypeResetPassword {
-		errs.BadRequestError().AppendDetails("鉴权会话类型错误", "密码重置失败").Respond(c)
-		return
+		return errs.BadRequestError().AppendDetails("鉴权会话类型错误")
 	}
 	if !session.Passed2FA {
-		errs.IllegalStateError().AppendDetails("二次验证未通过", "密码重置失败").Respond(c)
-		return
+		return errs.IllegalStateError().AppendDetails("二次验证未通过")
 	}
 	if session.UserID == 0 {
 		c.JSON(http.StatusOK, gin.H{})
-		return
+		return nil
 	}
 
 	ban, err := user.GetUserBan(c.Request.Context(), session.UserID)
 	if err != nil {
-		err.AppendDetails("密码重置失败").Respond(c)
-		return
+		return err
 	}
 	if ban != nil {
-		handling.RespondBanned(c, ban, "密码重置失败")
-		return
+		return handling.BannedError(ban)
 	}
 
 	pwdHash, e := crypto.HashArgon2ID(req.Password)
 	if e != nil {
-		errs.CreateAndLogInternalError(e, "Failed to hash new password").AppendDetails("密码哈希失败", "密码重置失败").Respond(c)
-		return
+		return errs.CreateAndLogInternalError(e, "Failed to hash new password").AppendDetails("密码哈希失败")
 	}
 
 	if err := user.UpsertUserPassword(c.Request.Context(), &model.UserPassword{
 		UserID:   session.UserID,
 		Password: pwdHash,
 	}); err != nil {
-		err.AppendDetails("密码重置失败").Respond(c)
-		return
+		return err
 	}
 
 	if err := auth.DeleteAuthSession(c.Request.Context(), session); err != nil {
@@ -218,4 +195,5 @@ func resetPasswordFinalizeHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
+	return nil
 }
