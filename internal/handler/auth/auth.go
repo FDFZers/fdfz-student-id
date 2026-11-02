@@ -3,7 +3,6 @@ package auth
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/middleware"
-	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
@@ -16,11 +15,11 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	a := api.Group("/auth")
 	i := internal.Group("/auth")
 
-	i.POST("/register", handling.Wrap("注册失败", createRegisterHandler))
+	i.POST("/register", middleware.LimitSize(5<<20), handling.Wrap("注册失败", createRegisterHandler))
 	i.POST("/login/init", handling.Wrap("登录失败", loginInitHandler))
 	i.POST("/login/finalize", handling.Wrap("登录失败", loginFinalizeHandler))
 	i.POST("/refresh", handling.Wrap("令牌刷新失败", refreshTokenHandler))
-	i.POST("/logout", middleware.RequireTokenType(model.TokenTypeUser), handling.Wrap("登出失败", logoutHandler))
+	i.POST("/logout", handling.Wrap("登出失败", logoutHandler))
 
 	i.POST("/password_reset/init/email", handling.Wrap("密码重置初始化失败", resetPasswordEmailInitHandler))
 	i.POST("/password_reset/init/qq", handling.Wrap("密码重置初始化失败", resetPasswordQQInitHandler))
@@ -32,8 +31,8 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/verify/qq/verify", handling.Wrap("QQ 验证失败", verifyQQHandler))
 	i.POST("/verify/totp", handling.Wrap("TOTP 验证失败", verifyTOTPHandler))
 
-	i.POST("/stepup/init", middleware.RequireTokenType(model.TokenTypeUser), handling.Wrap("二次验证初始化失败", stepupInitHandler))
-	i.POST("/stepup/finalize", middleware.RequireTokenType(model.TokenTypeUser), handling.Wrap("二次验证失败", stepupFinalizeHandler))
+	i.POST("/stepup/init", handling.Wrap("二次验证初始化失败", stepupInitHandler))
+	i.POST("/stepup/finalize", handling.Wrap("二次验证失败", stepupFinalizeHandler))
 
 	a.GET("/jwks", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")

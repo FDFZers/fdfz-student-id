@@ -5,6 +5,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,8 @@ func reviewRegisterHandler(c *gin.Context) *errs.Error {
 		// 服务层错误已自带 "注册请求审核失败"，直接返回以保持响应不变。
 		return err.Seal()
 	}
+
+	slog.Info("Register request reviewed", "register_id", req.ID, "status", req.Status, "reviewer_id", claims.UserID)
 
 	c.JSON(http.StatusOK, gin.H{})
 	return nil

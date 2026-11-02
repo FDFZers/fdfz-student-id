@@ -33,9 +33,11 @@ func ScheduleCron() (*cron.Cron, error) {
 	}
 
 	_, err = c.AddFunc("*/10 * * * *", func() {
-		_, err := user.FinalizeDueAccountDeletions(context.Background())
+		count, err := user.FinalizeDueAccountDeletions(context.Background())
 		if err != nil {
 			slog.Error("Failed to finalize scheduled account deletions", "error", err.Info)
+		} else if count > 0 {
+			slog.Info("Finalized scheduled account deletions", "count", count)
 		}
 	})
 	if err != nil {

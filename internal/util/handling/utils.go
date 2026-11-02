@@ -41,6 +41,10 @@ func SetStepupCookie(c *gin.Context, token string, maxAge int) {
 }
 
 func ClearSessionCookies(c *gin.Context) {
-	SetTokenCookies(c, "", "", 0, 0)
+	SetTokenCookies(c, "", "", -1, -1)
+	SetStepupCookie(c, "", -1)
+}
+
+func ClearStepupCookie(c *gin.Context) {
 	SetStepupCookie(c, "", -1)
 }

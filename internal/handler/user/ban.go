@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,8 +20,7 @@ func getUserBanHandler(c *gin.Context) *errs.Error {
 	targetIDStr := c.Param("id")
 	targetID, e := strconv.ParseInt(targetIDStr, 10, 64)
 	if e != nil {
-		// 历史文案与其它分支不一致，Seal 以保持响应不变。
-		return errs.BadRequestError().AppendDetails("无效的用户 ID", "获取用户封禁信息失败").Seal()
+		return errs.BadRequestError().AppendDetails("无效的用户 ID")
 	}
 
 	var allowed bool
@@ -93,6 +93,16 @@ func banUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	attrs := []any{
+		"user_id", targetID,
+		"operator_id", claims.UserID,
+		"reason", req.Reason,
+	}
+	if req.EndTime.Valid {
+		attrs = append(attrs, "end_time", req.EndTime.Time)
+	}
+	slog.Info("User banned", attrs...)
+
 	c.JSON(http.StatusOK, gin.H{})
 	return nil
 }
@@ -102,6 +112,9 @@ func unbanUserHandler(c *gin.Context) *errs.Error {
 	targetID, err := ResolveTargetID(c, claims.UserID)
 	if err != nil {
 		return err
+	}
+	if targetID == claims.UserID {
+		return errs.BadRequestError().AppendDetails("不能解封自己")
 	}
 	if !perm.Contains(claims.Permissions, "student_id.users.ban.delete") {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
@@ -114,6 +127,8 @@ func unbanUserHandler(c *gin.Context) *errs.Error {
 	if err := user.UnbanUser(c.Request.Context(), targetID); err != nil {
 		return err
 	}
+
+	slog.Info("User unbanned", "user_id", targetID, "operator_id", claims.UserID)
 
 	c.JSON(http.StatusOK, gin.H{})
 	return nil

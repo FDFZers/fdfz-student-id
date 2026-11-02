@@ -54,6 +54,10 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	if err := auth.TryAcquireEmailBindQuota(c.Request.Context(), claims.UserID); err != nil {
+		return err
+	}
+
 	code, e := crypto.GenerateCode(6, crypto.CodeCharset)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to generate email bind code").
@@ -383,8 +387,8 @@ func qqUnbindHandler(c *gin.Context) *errs.Error {
 
 func bindingValidateClaims() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		middleware.RequireStepupToken()(c)
-		if c.IsAborted() {
+		if err := middleware.ValidateStepupToken(c); err != nil {
+			err.Abort(c)
 			return
 		}
 
@@ -406,8 +410,6 @@ func bindingValidateClaims() gin.HandlerFunc {
 	}
 }
 
-// checkBindAttempts 返回 nil 表示可以继续绑定；返回的错误已自行收尾（"绑定失败"），
-// 因为它是绑定流程的一个子阶段，失败动作名与所属路由不同。
 func checkBindAttempts(ctx context.Context, kind string, userID int64) *errs.Error {
 	attempts, err := auth.GetBindAttempts(ctx, kind, userID)
 	if err != nil {

@@ -4,11 +4,13 @@ package auth
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/service/filestore"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
+	"log/slog"
 	"net/http"
 	"path"
 	"strings"
@@ -35,7 +37,12 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	if err := captcha.VerifyPayloadStr(req.AltchaPayload); err != nil {
+	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
+		return err
+	}
+
+	// 单 IP 每小时注册请求配额：抬高批量探测用户名/学号是否存在的成本。
+	if err := auth.TryAcquireRegisterIPQuota(c.Request.Context(), c.ClientIP()); err != nil {
 		return err
 	}
 
@@ -98,11 +105,11 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		nickname = null.StringFrom(req.Nickname)
 	}
 
-	// 查询用户名占用信息
+	// 用户名冲突与学号冲突统一使用同一句模糊提示
 	if taken, err := user.IsUsernameTaken(c.Request.Context(), req.Username); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to check username availability").AppendDetails("用户名占用信息查询失败")
 	} else if taken {
-		return errs.ConflictError().AppendDetails("用户名已存在")
+		return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试", "注册请求创建失败")
 	}
 
 	// 密码哈希
@@ -137,6 +144,8 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		}
 		return err
 	}
+
+	slog.Info("Register request created", "register_id", r.ID, "username", r.Username, "type", req.Type, "school", req.School)
 
 	c.JSON(http.StatusOK, gin.H{
 		"id": r.ID,

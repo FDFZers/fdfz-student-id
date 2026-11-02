@@ -24,21 +24,9 @@ type sessionInfo struct {
 	LastUserAgent string     `json:"last_user_agent"`
 }
 
-func currentSessionID(claims *model.RegisteredTokenClaims) (uuid.UUID, *errs.Error) {
-	id, err := uuid.Parse(claims.ID)
-	if err != nil {
-		return uuid.Nil, errs.InvalidTokenError().AppendDetails("无效的会话", "鉴权失败")
-	}
-	return id, nil
-}
-
 func listSessionsHandler(c *gin.Context) *errs.Error {
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-
-	currentID, err := currentSessionID(claims)
-	if err != nil {
-		return err
-	}
+	currentID := uuid.MustParse(claims.SessionID.String)
 
 	sessions, err := auth.ListUserSessions(c.Request.Context(), claims.UserID)
 	if err != nil {
@@ -74,10 +62,7 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("无效的会话 ID")
 	}
 
-	currentID, err := currentSessionID(claims)
-	if err != nil {
-		return err
-	}
+	currentID := uuid.MustParse(claims.SessionID.String)
 	isCurrent := targetID == currentID
 
 	session, err := auth.GetSessionByUUID(c.Request.Context(), targetID)

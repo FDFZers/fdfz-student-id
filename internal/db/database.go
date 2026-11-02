@@ -18,31 +18,39 @@ type Repo struct {
 
 var R *Repo
 
-func GetRedis[T any](
+func GetRedisFound[T any](
 	ctx context.Context,
 	key string,
-) (*T, *errs.Error) {
+) (*T, bool, *errs.Error) {
 	// 获取 Redis 缓存值
 	res, err := R.Get(ctx, key).Result()
 	if err == nil {
-		// 命中空值
+		// 命中空值标记
 		if res == RedisEmptyMark {
-			return nil, nil
+			return nil, true, nil
 		}
 		// 命中数据
 		var data T
 		if err := json.Unmarshal([]byte(res), &data); err == nil {
-			return &data, nil
+			return &data, true, nil
 		} else {
 			// 缓存数据损坏，返回解析错误
-			return nil, errs.CreateAndLogInternalError(err, "Failed to parse cached data").AppendDetails("Redis 缓存数据损坏")
+			return nil, false, errs.CreateAndLogInternalError(err, "Failed to parse cached data").AppendDetails("Redis 缓存数据损坏")
 		}
 	} else if !errors.Is(err, redis.Nil) {
 		// Redis 错误
-		return nil, errs.CreateAndLogInternalError(err, "Failed to get cached data").AppendDetails("Redis 错误")
+		return nil, false, errs.CreateAndLogInternalError(err, "Failed to get cached data").AppendDetails("Redis 错误")
 	}
 	// 缓存未命中
-	return nil, nil
+	return nil, false, nil
+}
+
+func GetRedis[T any](
+	ctx context.Context,
+	key string,
+) (*T, *errs.Error) {
+	data, _, err := GetRedisFound[T](ctx, key)
+	return data, err
 }
 
 func SetRedis[T any](
@@ -69,11 +77,10 @@ func GetCached[T any](
 	duration time.Duration,
 	queryFn func() (*T, error), // 缓存未命中时的回源查询函数
 ) (*T, *errs.Error) {
-	rData, err := GetRedis[T](ctx, key)
+	rData, found, err := GetRedisFound[T](ctx, key)
 	if err != nil {
 		return nil, err
-	}
-	if rData != nil {
+	} else if found {
 		return rData, nil
 	}
 

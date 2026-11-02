@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/guregu/null/v6"
 )
 
 func stepupInitHandler(c *gin.Context) *errs.Error {
@@ -89,6 +90,7 @@ func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 	stepupToken, e := crypto.GenerateJWT(uuid.New(), &model.TokenClaims{
 		UserID:    claims.UserID,
 		TokenType: model.TokenTypeStepup,
+		SessionID: null.StringFrom(claims.ID),
 	}, cfg.C.StepupTokenTTL)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to generate stepup token").AppendDetails("令牌生成失败")

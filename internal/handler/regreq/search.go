@@ -13,7 +13,8 @@ import (
 var searchCfg = search2.SearchConfig{
 	Table:             "register_requests",
 	Item:              "注册请求",
-	Fields:            []search2.Field{{ID: "id", Column: "id"}, {ID: "student_num", Column: "student_num"}, {ID: "real_name", Column: "real_name"}, {ID: "created_user_id", Column: "created_user_id"}},
+	Columns:           []string{"id", "username", "nickname", "type", "student_num", "real_name", "school", "password", "created_at", "status", "created_user_id", "reviewer_user_id", "review_comment", "reviewed_at"},
+	Fields:            []search2.Field{{ID: "id", Column: "id", Numeric: true}, {ID: "student_num", Column: "student_num"}, {ID: "real_name", Column: "real_name"}, {ID: "created_user_id", Column: "created_user_id", Numeric: true}},
 	MatchMethods:      search2.MatchMethodValues(),
 	SortableFields:    []search2.Field{{ID: "created_at", Column: "created_at"}, {ID: "reviewed_at", Column: "reviewed_at"}},
 	Tags:              []search2.Tag{{ID: "status", Column: "status", ValueMap: search2.ValueMapOf(model.RegisterRequestStatusNames())}, {ID: "type", Column: "type", ValueMap: search2.ValueMapOf(model.UserTypeNames())}, {ID: "school", Column: "school", ValueMap: search2.ValueMapOf(model.SchoolNames())}},

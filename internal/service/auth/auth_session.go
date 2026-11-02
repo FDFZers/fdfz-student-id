@@ -60,6 +60,7 @@ func ValidateUserPassword(ctx context.Context, userID int64, password string) *e
 	pwd, err := user.GetUserPassword(ctx, userID)
 	if err != nil {
 		if err.Info.Error == "not_found" {
+			crypto.BurnPasswordVerifyCost()
 			return errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败")
 		}
 		return err.AppendDetails("密码验证失败")

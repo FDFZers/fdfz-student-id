@@ -42,8 +42,9 @@ type TagSelection struct {
 }
 
 type Field struct {
-	ID     string
-	Column string
+	ID      string
+	Column  string
+	Numeric bool // 数值列：匹配时按 ::text 比较
 }
 
 type Tag struct {
@@ -59,7 +60,8 @@ type SearchConfig struct {
 	MatchMethods      []MatchMethod
 	SortableFields    []Field
 	Tags              []Tag
-	DefaultSortColumn string // query is empty && sort is null
+	Columns           []string // 数据查询显式选择的列，为空则 SELECT *
+	DefaultSortColumn string   // query is empty && sort is null
 }
 
 type Query struct {

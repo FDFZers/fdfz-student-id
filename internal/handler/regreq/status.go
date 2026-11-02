@@ -11,7 +11,7 @@ import (
 )
 
 func registerRequestStatusHandler(c *gin.Context) *errs.Error {
-	if err := captcha.VerifyPayloadStr(c.Query("altcha_payload")); err != nil {
+	if err := captcha.VerifyPayloadStr(c.Request.Context(), c.Query("altcha_payload")); err != nil {
 		return err
 	}
 

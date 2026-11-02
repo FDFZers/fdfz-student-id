@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
+	"fdfz-student-id/internal/model"
 	fileutils "fdfz-student-id/internal/util/file"
 	"fdfz-student-id/internal/util/storage"
 	"io"
@@ -49,19 +50,31 @@ type StoreFileReq struct {
 // 令牌
 // ---------------------------------------------------------------------------
 
-func CreateToken(slug string) (string, *errs.Error) {
-	return CreateTokenAt(slug, time.Now())
+func CreateDownloadToken(slug string) (string, *errs.Error) {
+	return CreateTokenAt(slug, model.FileTokenTypeDownload, time.Now())
 }
 
-func CreateTokenAt(slug string, t time.Time) (string, *errs.Error) {
+func CreateUploadToken(slug string) (string, *errs.Error) {
+	return CreateTokenAt(slug, model.FileTokenTypeUpload, time.Now())
+}
+
+func CreateTokenAt(slug string, tokenType model.FileTokenType, t time.Time) (string, *errs.Error) {
+	if tokenType != model.FileTokenTypeDownload && tokenType != model.FileTokenTypeUpload {
+		return "", errs.CreateAndLogInternalError(errors.New("invalid token type"),
+			"Invalid filestore token type",
+			"token_type", tokenType,
+		).AppendDetails("无效的文件令牌类型")
+	}
 	timestamp := t.Unix()
 	return strconv.FormatInt(timestamp, 10) + tokenSeparator +
-		signSlugToken(cfg.C.FilestoreHMACSecret, slug, timestamp), nil
+		signSlugToken(cfg.C.FilestoreHMACSecret, slug, tokenType, timestamp), nil
 }
 
-func signSlugToken(secret, slug string, timestamp int64) string {
+func signSlugToken(secret, slug string, tokenType model.FileTokenType, timestamp int64) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(slug))
+	mac.Write([]byte("\n"))
+	mac.Write([]byte(tokenType))
 	mac.Write([]byte("\n"))
 	mac.Write(strconv.AppendInt(nil, timestamp, 10))
 	return hex.EncodeToString(mac.Sum(nil))
@@ -80,7 +93,7 @@ func buildUrl(slug, reqType string) (string, *errs.Error) {
 		return "", errs.BadRequestError().AppendDetails("无效的 Slug", "文件地址获取失败")
 	}
 
-	token, err := CreateToken(slug)
+	token, err := CreateDownloadToken(slug)
 	if err != nil {
 		return "", err.AppendDetails("文件地址获取失败")
 	}
@@ -109,7 +122,7 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		return errs.CreateAndLogInternalError(errors.New("nil file header"), "File header is nil").AppendDetails("未提供文件", "文件上传失败")
 	}
 
-	token, err := CreateToken(request.Slug)
+	token, err := CreateUploadToken(request.Slug)
 	if err != nil {
 		return err.AppendDetails("文件上传失败")
 	}
@@ -215,7 +228,7 @@ func DeleteFile(slug string) *errs.Error {
 		return errs.BadRequestError().AppendDetails("无效的 Slug", "文件删除失败")
 	}
 
-	token, err := CreateToken(slug)
+	token, err := CreateUploadToken(slug)
 	if err != nil {
 		return err.AppendDetails("文件删除失败")
 	}

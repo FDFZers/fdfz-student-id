@@ -2,12 +2,15 @@ package router
 
 import (
 	"fdfz-student-id/internal/cfg"
+	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/handler/auth"
 	"fdfz-student-id/internal/handler/healthcheck"
 	"fdfz-student-id/internal/handler/misc"
 	"fdfz-student-id/internal/handler/regreq"
 	"fdfz-student-id/internal/handler/security"
 	"fdfz-student-id/internal/handler/user"
+	"fdfz-student-id/internal/middleware"
+	"fdfz-student-id/internal/model"
 	"strings"
 	"time"
 
@@ -51,8 +54,18 @@ func InitRouter(r *gin.Engine) {
 		}
 	})
 
-	v1 := r.Group("/api/v1")
-	internal := r.Group("/api/internal")
+	v1 := r.Group("/api/v1", middleware.ParseToken())
+	internal := r.Group("/api/internal", middleware.ParseToken(), func(c *gin.Context) {
+		claims, ok := c.Get("claims")
+		if !ok {
+			return
+		}
+		typ := claims.(model.RegisteredTokenClaims).TokenType
+		if typ != model.TokenTypeUser && typ != model.TokenTypeStepup {
+			errs.InvalidTokenError().AppendDetails("令牌类型错误", "鉴权失败").Abort(c)
+			return
+		}
+	})
 
 	misc.InitRoutes(v1, internal)
 	auth.InitRoutes(v1, internal)

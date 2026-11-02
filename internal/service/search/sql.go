@@ -13,6 +13,8 @@ import (
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
+const MaxSearchLimit = 500
+
 func GetInfo(cfg *SearchConfig) *SearchInfo {
 	fields := make([]string, 0, len(cfg.Fields))
 	for _, field := range cfg.Fields {
@@ -112,7 +114,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 	if trimmed != "" && len(searchFields) > 0 {
 		orParts := make([]sq.Sqlizer, 0, len(searchFields))
 		for _, f := range searchFields {
-			if c := buildMatchCondition(f.Column, trimmed, method, req.CaseSensitive); c != nil {
+			if c := buildMatchCondition(f, trimmed, method, req.CaseSensitive); c != nil {
 				orParts = append(orParts, c)
 			}
 		}
@@ -143,6 +145,9 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 
 	countB := psql.Select("COUNT(*)").From(cfg.Table)
 	dataB := psql.Select("*").From(cfg.Table)
+	if len(cfg.Columns) > 0 {
+		dataB = psql.Select(cfg.Columns...).From(cfg.Table)
+	}
 
 	if len(conditions) > 0 {
 		where := sq.And(conditions)
@@ -171,9 +176,11 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		dataB = dataB.OrderBy(cfg.DefaultSortColumn)
 	}
 
-	if req.Limit > 0 {
-		dataB = dataB.Limit(uint64(req.Limit))
+	limit := req.Limit
+	if limit <= 0 || limit > MaxSearchLimit {
+		limit = MaxSearchLimit
 	}
+	dataB = dataB.Limit(uint64(limit))
 	if req.Offset > 0 {
 		dataB = dataB.Offset(uint64(req.Offset))
 	}
@@ -193,7 +200,12 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 	}, nil
 }
 
-func buildMatchCondition(col, query string, method MatchMethod, caseSensitive bool) sq.Sqlizer {
+func buildMatchCondition(f Field, query string, method MatchMethod, caseSensitive bool) sq.Sqlizer {
+	col := f.Column
+	if f.Numeric {
+		col = f.Column + "::text"
+	}
+
 	likeOp := "ILIKE"
 	reOp := "~*"
 	if caseSensitive {

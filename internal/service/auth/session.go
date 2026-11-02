@@ -238,6 +238,19 @@ func RevokeAllUserSessions(ctx context.Context, userID int64) *errs.Error {
 	return nil
 }
 
+const revokeOtherUserSessionsSQL = `
+UPDATE user_sessions
+SET revoked_at = now()
+WHERE user_id = $1 AND uuid <> $2 AND revoked_at IS NULL
+`
+
+func RevokeOtherUserSessions(ctx context.Context, userID int64, keepSessionID uuid.UUID) *errs.Error {
+	if _, err := db.R.Exec(ctx, revokeOtherUserSessionsSQL, userID, keepSessionID); err != nil {
+		return errs.CreatePGError(err, "用户会话", "Failed to revoke other sessions").AppendDetails("其他用户会话撤销失败")
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // 删除会话
 // ---------------------------------------------------------------------------

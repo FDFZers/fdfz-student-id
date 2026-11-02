@@ -3,17 +3,20 @@ package security
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type changePasswordReq struct {
-	OldPassword string `json:"old_password"`
-	NewPassword string `json:"new_password"`
+	OldPassword         string `json:"old_password"`
+	NewPassword         string `json:"new_password"`
+	RevokeOtherSessions *bool  `json:"revoke_other_sessions"`
 }
 
 func changePasswordHandler(c *gin.Context) *errs.Error {
@@ -23,6 +26,11 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 	}
 
 	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+
+	currentSessionID, e := uuid.Parse(claims.SessionID.String)
+	if e != nil {
+		return errs.InvalidTokenError().AppendDetails("无效的会话", "鉴权失败")
+	}
 
 	ban, err := user.GetUserBan(c.Request.Context(), claims.UserID)
 	if err != nil {
@@ -59,6 +67,17 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 		Password: pwdHash,
 	}); err != nil {
 		return err
+	}
+
+	if err := auth.RevokeUserStepups(c.Request.Context(), claims.UserID); err != nil {
+		return err
+	}
+	handling.ClearStepupCookie(c)
+
+	if req.RevokeOtherSessions == nil || *req.RevokeOtherSessions {
+		if err := auth.RevokeOtherUserSessions(c.Request.Context(), claims.UserID, currentSessionID); err != nil {
+			return err
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{})

@@ -7,6 +7,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -98,6 +99,8 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 	db.SetRedis(ctx, UserIDCacheKey(u.Username), u.ID, UserCacheDuration)
 	db.SetRedis(ctx, UserCacheKey(u.ID), u, UserCacheDuration)
 	db.R.Del(ctx, UsernameExistsCacheKey(u.Username))
+
+	slog.Info("User created", "user_id", u.ID, "username", u.Username, "type", u.Type, "school", u.School)
 
 	return nil
 }

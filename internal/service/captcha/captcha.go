@@ -1,6 +1,7 @@
 package captcha
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -47,7 +48,7 @@ func VerifyChallenge(payload altcha.Payload) (res altcha.VerifySolutionResult, e
 	})
 }
 
-func VerifyPayloadStr(payloadStr string) *errs.Error {
+func VerifyPayloadStr(ctx context.Context, payloadStr string) *errs.Error {
 	if cfg.C.BypassCaptcha {
 		slog.Debug("Bypassed captcha")
 		return nil
@@ -71,6 +72,10 @@ func VerifyPayloadStr(payloadStr string) *errs.Error {
 	}
 	if result.Expired {
 		return errs.AltchaError().AppendDetails("Altcha Challenge 过期")
+	}
+
+	if err := TryConsumeAltchaChallenge(ctx, payload); err != nil {
+		return err
 	}
 	return nil
 }

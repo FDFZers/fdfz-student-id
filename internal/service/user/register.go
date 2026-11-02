@@ -36,14 +36,15 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 	if taken, err := IsUsernameTaken(ctx, r.Username); err != nil {
 		return err.AppendDetails("注册请求创建失败")
 	} else if taken {
-		return errs.ConflictError().AppendDetails("用户名已存在", "注册请求创建失败")
+		// 与学号冲突使用同一句模糊文案
+		return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试", "注册请求创建失败")
 	}
 
 	if r.Type == model.UserTypeStudent {
 		if taken, err := IsStudentNumTaken(ctx, r.School, r.StudentNum, 0); err != nil {
 			return err.AppendDetails("注册请求创建失败")
 		} else if taken {
-			return errs.ConflictError().AppendDetails("该学校的学号已存在", "注册请求创建失败")
+			return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试", "注册请求创建失败")
 		}
 	}
 

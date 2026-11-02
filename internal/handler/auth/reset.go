@@ -41,7 +41,7 @@ func resetPasswordEmailInitHandler(c *gin.Context) *errs.Error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
-	if err := captcha.VerifyPayloadStr(req.AltchaPayload); err != nil {
+	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
 
@@ -96,7 +96,7 @@ func resetPasswordQQInitHandler(c *gin.Context) *errs.Error {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
-	if err := captcha.VerifyPayloadStr(req.AltchaPayload); err != nil {
+	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
 
@@ -178,6 +178,10 @@ func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 		return handling.BannedError(ban)
 	}
 
+	if err := handling.ValidatePassword(req.Password); err != nil {
+		return err
+	}
+
 	pwdHash, e := crypto.HashArgon2ID(req.Password)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to hash new password").AppendDetails("密码哈希失败")
@@ -189,6 +193,15 @@ func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 	}); err != nil {
 		return err
 	}
+
+	// 重置密码后强制撤销全部会话
+	if err := auth.RevokeAllUserSessions(c.Request.Context(), session.UserID); err != nil {
+		return err
+	}
+	if err := auth.RevokeUserStepups(c.Request.Context(), session.UserID); err != nil {
+		return err
+	}
+	handling.ClearSessionCookies(c)
 
 	if err := auth.DeleteAuthSession(c.Request.Context(), session); err != nil {
 		slog.Warn("Failed to delete password reset auth session", "error", err.Info.Error, "session_id", session.ID)

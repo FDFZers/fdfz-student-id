@@ -63,6 +63,10 @@ func VerifyArgon2ID(str, encodedHash string) (bool, error) {
 	return false, nil
 }
 
+func BurnPasswordVerifyCost() {
+	_, _ = VerifyArgon2ID("dummy-password-for-timing-equalization", "$argon2id$v=19$m=65536,t=3,p=4$A/VMpUldqzUMDLbcsbpY+h5JSyK7nMhY/laPBS2n2hs=$mQcGzal+0cYbaOXUo9MO9jzhXFFG3+r2XtkX5Bh05Ww=")
+}
+
 type params struct {
 	memory  uint32
 	time    uint32

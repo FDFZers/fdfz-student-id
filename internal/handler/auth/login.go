@@ -32,7 +32,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	if err := captcha.VerifyPayloadStr(req.AltchaPayload); err != nil {
+	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
 
@@ -47,6 +47,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 	if err != nil {
 		return err
 	} else if usr == nil {
+		crypto.BurnPasswordVerifyCost()
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败")
 	}
 
@@ -131,6 +132,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	if err != nil {
 		return err
 	} else if finalized {
+		slog.Info("Finalized overdue account deletion on login", "user_id", authSession.UserID)
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败").Seal()
 	}
 

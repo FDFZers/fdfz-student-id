@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,8 @@ func deleteAccountHandler(c *gin.Context) *errs.Error {
 	}
 
 	handling.ClearSessionCookies(c)
+
+	slog.Info("Account deletion scheduled", "user_id", claims.UserID, "scheduled_at", scheduledAt)
 
 	c.JSON(http.StatusOK, gin.H{
 		"scheduled_at": scheduledAt,
