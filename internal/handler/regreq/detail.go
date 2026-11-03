@@ -2,10 +2,10 @@ package regreq
 
 import (
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/filestore"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,8 +13,8 @@ import (
 )
 
 func getRegisterRequestHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	if !perm.Contains(claims.Permissions, "student_id.register_requests.read") {
+	claims := handling.MustGetClaims(c)
+	if !perm.HasPermission(claims, perm.PermRegisterRequestRead) {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
@@ -49,8 +49,8 @@ func getRegisterRequestHandler(c *gin.Context) *errs.Error {
 }
 
 func getRegisterRequestProofImageHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	if !perm.ContainsAny(claims.Permissions, "student_id.register_requests.read") {
+	claims := handling.MustGetClaims(c)
+	if !perm.HasPermission(claims, perm.PermRegisterRequestRead) {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 

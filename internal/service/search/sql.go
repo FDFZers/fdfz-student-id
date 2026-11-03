@@ -13,17 +13,20 @@ import (
 
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
-const MaxSearchLimit = 500
+const (
+	DefaultLimit = 20
+	MaxLimit     = 500
+)
 
 func GetInfo(cfg *SearchConfig) *SearchInfo {
 	fields := make([]string, 0, len(cfg.Fields))
 	for _, field := range cfg.Fields {
-		fields = append(fields, field.Column)
+		fields = append(fields, field.ID)
 	}
 
 	sortableFields := make([]string, 0, len(cfg.SortableFields))
 	for _, field := range cfg.SortableFields {
-		sortableFields = append(sortableFields, field.Column)
+		sortableFields = append(sortableFields, field.ID)
 	}
 
 	tags := make(map[string][]string, len(cfg.Tags))
@@ -32,7 +35,7 @@ func GetInfo(cfg *SearchConfig) *SearchInfo {
 		for _, value := range tag.ValueMap {
 			values = append(values, value)
 		}
-		tags[tag.Column] = values
+		tags[tag.ID] = values
 	}
 
 	return &SearchInfo{
@@ -84,12 +87,21 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		allowedMatch[m] = struct{}{}
 	}
 
-	method := req.MatchMethod
-	if method == "" {
+	var method MatchMethod
+	if req.MatchMethod == nil {
 		method = MatchMethodContains
+	} else {
+		method = *req.MatchMethod
 	}
 	if _, ok := allowedMatch[method]; !ok {
 		return nil, errs.BadRequestError().AppendDetails("未知匹配方法：" + string(method))
+	}
+
+	var caseSensitive bool
+	if req.CaseSensitive == nil {
+		caseSensitive = true
+	} else {
+		caseSensitive = *req.CaseSensitive
 	}
 
 	requested := req.Fields
@@ -114,7 +126,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 	if trimmed != "" && len(searchFields) > 0 {
 		orParts := make([]sq.Sqlizer, 0, len(searchFields))
 		for _, f := range searchFields {
-			if c := buildMatchCondition(f, trimmed, method, req.CaseSensitive); c != nil {
+			if c := buildMatchCondition(f, trimmed, method, caseSensitive); c != nil {
 				orParts = append(orParts, c)
 			}
 		}
@@ -143,6 +155,8 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		}
 	}
 
+	conditions = append(conditions, cfg.AdditionalWhere...)
+
 	countB := psql.Select("COUNT(*)").From(cfg.Table)
 	dataB := psql.Select("*").From(cfg.Table)
 	if len(cfg.Columns) > 0 {
@@ -162,13 +176,19 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 			return nil, errs.BadRequestError().AppendDetails("未知排序字段：" + req.SortBy.String)
 		}
 		var dir string
-		switch string(req.SortOrder) {
-		case "", string(SortOrderAscending):
+		var order SortOrder
+		if req.SortOrder != nil {
+			order = *req.SortOrder
+		} else {
+			order = SortOrderAscending
+		}
+		switch order {
+		case SortOrderAscending:
 			dir = "ASC"
-		case string(SortOrderDescending):
+		case SortOrderDescending:
 			dir = "DESC"
 		default:
-			return nil, errs.BadRequestError().AppendDetails("未知排序顺序：" + string(req.SortOrder))
+			return nil, errs.BadRequestError().AppendDetails("未知排序顺序：" + string(order))
 		}
 		dataB = dataB.OrderBy(fmt.Sprintf("%s %s", f.Column, dir))
 
@@ -176,13 +196,18 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		dataB = dataB.OrderBy(cfg.DefaultSortColumn)
 	}
 
-	limit := req.Limit
-	if limit <= 0 || limit > MaxSearchLimit {
-		limit = MaxSearchLimit
+	var limit int64
+	if req.Limit.Valid {
+		limit = req.Limit.Int64
+	} else {
+		limit = DefaultLimit
+	}
+	if limit <= 0 || limit > MaxLimit {
+		limit = MaxLimit
 	}
 	dataB = dataB.Limit(uint64(limit))
-	if req.Offset > 0 {
-		dataB = dataB.Offset(uint64(req.Offset))
+	if req.Offset.Valid && req.Offset.Int64 > 0 {
+		dataB = dataB.Offset(uint64(req.Offset.Int64))
 	}
 
 	countSQL, countArgs, err := countB.ToSql()
@@ -293,10 +318,10 @@ func buildTagCondition(tag Tag, sel TagSelection) (sq.Sqlizer, *errs.Error) {
 
 	var parts []sq.Sqlizer
 	if len(includeVals) > 0 {
-		parts = append(parts, sq.Eq{tag.Column: includeVals})
+		parts = append(parts, sq.Expr(fmt.Sprintf("%s::text = ANY(?)", tag.Column), includeVals))
 	}
 	if len(excludeVals) > 0 {
-		parts = append(parts, sq.NotEq{tag.Column: excludeVals})
+		parts = append(parts, sq.Expr(fmt.Sprintf("NOT (%s::text = ANY(?))", tag.Column), excludeVals))
 	}
 	if len(parts) == 0 {
 		return nil, nil

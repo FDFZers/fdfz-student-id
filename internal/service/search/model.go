@@ -1,7 +1,10 @@
 //go:generate go tool go-enum --names --values --marshal --sql
 package search
 
-import "github.com/guregu/null/v6"
+import (
+	"github.com/Masterminds/squirrel"
+	"github.com/guregu/null/v6"
+)
 
 // ENUM(contains, exact, prefix, suffix, fuzzy, regex)
 type MatchMethod string
@@ -18,13 +21,13 @@ type SearchInfo struct {
 
 type SearchRequest struct {
 	Query         string                  `json:"query"`
-	Limit         int                     `json:"limit"`
-	Offset        int                     `json:"offset"`
+	Limit         null.Int64              `json:"limit"`
+	Offset        null.Int64              `json:"offset"`
 	Fields        []string                `json:"fields"`
 	SortBy        null.String             `json:"sort_by"` // null -> relevance
-	SortOrder     SortOrder               `json:"sort_order"`
-	MatchMethod   MatchMethod             `json:"match_method"`
-	CaseSensitive bool                    `json:"case_sensitive"`
+	SortOrder     *SortOrder              `json:"sort_order"`
+	MatchMethod   *MatchMethod            `json:"match_method"`
+	CaseSensitive *bool                   `json:"case_sensitive"`
 	Tags          map[string]TagSelection `json:"tags"`
 }
 
@@ -60,8 +63,9 @@ type SearchConfig struct {
 	MatchMethods      []MatchMethod
 	SortableFields    []Field
 	Tags              []Tag
-	Columns           []string // 数据查询显式选择的列，为空则 SELECT *
-	DefaultSortColumn string   // query is empty && sort is null
+	Columns           []string
+	AdditionalWhere   []squirrel.Sqlizer
+	DefaultSortColumn string // query is empty && sort is null
 }
 
 type Query struct {

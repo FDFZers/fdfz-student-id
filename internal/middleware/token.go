@@ -5,8 +5,12 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/auth"
+	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,6 +51,21 @@ func RequireToken() gin.HandlerFunc {
 		if _, exists := c.Get("token_claims"); !exists {
 			errs.InvalidTokenError().AppendDetails("未提供令牌", "鉴权失败").Abort(c)
 			return
+		}
+	}
+}
+
+func RequirePermission(permissions ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		RequireToken()(c)
+		if c.IsAborted() {
+			return
+		}
+		for _, permission := range permissions {
+			if !perm.HasPermission(handling.MustGetClaims(c), permission) {
+				errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Abort(c)
+				return
+			}
 		}
 	}
 }
@@ -106,5 +125,39 @@ func RequireStepupToken() gin.HandlerFunc {
 			err.Abort(c)
 			return
 		}
+	}
+}
+
+func RequireAppAccess(appParam string, globalPermission string, ownedAppPermission string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		RequireToken()(c)
+		if c.IsAborted() {
+			return
+		}
+
+		claims := handling.GetClaimsOrNil(c)
+		if claims.TokenType != model.TokenTypeUser {
+			errs.InvalidTokenError().AppendDetails("令牌类型错误", "鉴权失败").Abort(c)
+			return
+		}
+
+		if perm.HasPermission(claims, globalPermission) {
+			c.Set("app_access_scope", "global")
+			return
+		}
+
+		appID, err := strconv.ParseInt(c.Param(appParam), 10, 64)
+		if err != nil || appID <= 0 {
+			errs.BadRequestError().AppendDetails("无效的应用 ID", "鉴权失败").Abort(c)
+			return
+		}
+
+		if !perm.HasPermission(claims, ownedAppPermission) || !slices.Contains(claims.OwnedApps, appID) {
+			errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Abort(c)
+			return
+		}
+
+		c.Set("app_access_scope", "owner")
+		c.Set("app_access_app_id", appID)
 	}
 }

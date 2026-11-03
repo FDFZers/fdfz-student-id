@@ -14,11 +14,6 @@ var C *Config
 type Config struct {
 	PostgresURL               string
 	RedisURL                  string
-	FilestorePublicEndpoint   string
-	FilestoreInternalEndpoint string
-	FilestoreHMACSecret       string
-	NapCatEndpoint            string
-	NapCatToken               string
 	AltchaHMACSecret          string
 	AltchaTimeout             time.Duration
 	JWTKeyID                  string
@@ -27,6 +22,17 @@ type Config struct {
 	TempSessionTokenTTL       time.Duration
 	PermSessionTokenTTL       time.Duration
 	CodeSendInterval          time.Duration
+	OAuthAccessTokenTTL       time.Duration
+	OAuthRefreshTokenTTL      time.Duration
+	OAuthCodeTTL              time.Duration
+	OAuthDeviceCodeTTL        time.Duration
+	OAuthConsentRequestTTL    time.Duration
+	FilestorePublicEndpoint   string
+	FilestoreInternalEndpoint string
+	FilestoreHMACSecret       string
+	NapCatEndpoint            string
+	NapCatToken               string
+	AuthFrontendURL           string
 	SMTP                      SMTPConfig
 	SchoolIPs                 map[string]model.School
 	TrustedProxies            []string
@@ -67,6 +73,12 @@ func LoadConfig() error {
 	cfg.SMTP.Username = env("SMTP_USERNAME", "<noreply@fdfz.top>")
 	cfg.BypassCaptcha = !IsProd && env("BYPASS_CAPTCHA", "false") == "true"
 	cfg.SharedDir = env("SHARED_DIR", "./shared")
+	cfg.AuthFrontendURL = env("AUTH_FRONTEND_URL", "https://auth.fdfz.top")
+	cfg.OAuthAccessTokenTTL = envDur("OAUTH_ACCESS_TOKEN_TTL", 30*time.Minute)
+	cfg.OAuthRefreshTokenTTL = envDur("OAUTH_REFRESH_TOKEN_TTL", 30*24*time.Hour)
+	cfg.OAuthCodeTTL = envDur("OAUTH_CODE_TTL", 60*time.Second)
+	cfg.OAuthDeviceCodeTTL = envDur("OAUTH_DEVICE_CODE_TTL", 10*time.Minute)
+	cfg.OAuthConsentRequestTTL = envDur("OAUTH_CONSENT_REQUEST_TTL", 10*time.Minute)
 
 	if cfg.StepupTokenTTL = envDur("STEPUP_TOKEN_TTL", 5*time.Minute); cfg.StepupTokenTTL <= 0 {
 		return fmt.Errorf("stepup token ttl must be positive")

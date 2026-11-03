@@ -3,6 +3,10 @@ package user
 import (
 	"context"
 	"encoding/json"
+	"fdfz-student-id/internal/service/search"
+	"fmt"
+	"time"
+
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
@@ -11,9 +15,39 @@ import (
 )
 
 const (
-	FollowListDefaultLimit int32 = 20
-	FollowListMaxLimit     int32 = 100
+	FollowCacheDuration = 1 * time.Minute
 )
+
+func FollowRelationshipCacheKey(viewerID, targetID int64) string {
+	return fmt.Sprintf("student_id:user:follow:rel:%d:%d", viewerID, targetID)
+}
+
+func FollowersCountCacheKey(userID int64) string {
+	return fmt.Sprintf("student_id:user:follow:count:followers:%d", userID)
+}
+
+func FollowingCountCacheKey(userID int64) string {
+	return fmt.Sprintf("student_id:user:follow:count:following:%d", userID)
+}
+
+func FriendsCountCacheKey(userID int64) string {
+	return fmt.Sprintf("student_id:user:follow:count:friends:%d", userID)
+}
+
+func invalidateFollowCache(ctx context.Context, followerID, followingID int64) {
+	db.R.Del(ctx,
+		// 双向关系都会变化
+		FollowRelationshipCacheKey(followerID, followingID),
+		FollowRelationshipCacheKey(followingID, followerID),
+		// followerID 关注数变化
+		FollowingCountCacheKey(followerID),
+		// followingID 粉丝数变化
+		FollowersCountCacheKey(followingID),
+		// 互关可能变化，因此好友数两侧都可能变
+		FriendsCountCacheKey(followerID),
+		FriendsCountCacheKey(followingID),
+	)
+}
 
 func listFollows(
 	ctx context.Context,
@@ -22,12 +56,12 @@ func listFollows(
 	listSQL string,
 	userID int64,
 	limit, offset int32,
-) (*model.FollowList, *errs.Error) {
+) (*model.RelationList, *errs.Error) {
 	if limit <= 0 {
-		limit = FollowListDefaultLimit
+		limit = search.DefaultLimit
 	}
-	if limit > FollowListMaxLimit {
-		limit = FollowListMaxLimit
+	if limit > search.MaxLimit {
+		limit = search.MaxLimit
 	}
 	if offset < 0 {
 		offset = 0
@@ -48,7 +82,7 @@ func listFollows(
 		return nil, err
 	}
 
-	return &model.FollowList{Count: count, Users: users}, nil
+	return &model.RelationList{Count: count, Users: users}, nil
 }
 
 func collectFollowUsers(rows pgx.Rows, item string) ([]*model.User, *errs.Error) {
@@ -98,6 +132,7 @@ func FollowUser(ctx context.Context, followerID, followingID int64) *errs.Error 
 	if _, err := db.R.Exec(ctx, followUserSQL, followerID, followingID); err != nil {
 		return errs.CreatePGError(err, "关注", "Failed to follow user").AppendDetails("关注失败")
 	}
+	invalidateFollowCache(ctx, followerID, followingID)
 	return nil
 }
 
@@ -114,6 +149,7 @@ func UnfollowUser(ctx context.Context, followerID, followingID int64) *errs.Erro
 	if _, err := db.R.Exec(ctx, unfollowUserSQL, followerID, followingID); err != nil {
 		return errs.CreatePGError(err, "关注", "Failed to unfollow user").AppendDetails("取消关注失败")
 	}
+	invalidateFollowCache(ctx, followerID, followingID)
 	return nil
 }
 
@@ -127,23 +163,40 @@ SELECT
     EXISTS (SELECT 1 FROM user_follows WHERE follower_id = $2 AND following_id = $1)
 `
 
-func GetFollowRelationship(ctx context.Context, viewerID, targetID int64) (model.FollowRelationship, *errs.Error) {
-	var following, followedBy bool
-	err := db.R.QueryRow(ctx, getFollowRelationshipSQL, viewerID, targetID).
-		Scan(&following, &followedBy)
+func GetFollowRelationship(ctx context.Context, viewerID, targetID int64) (model.Relationship, *errs.Error) {
+	rel, err := db.GetCached(
+		ctx,
+		"关注关系",
+		FollowRelationshipCacheKey(viewerID, targetID),
+		FollowCacheDuration,
+		func() (*model.Relationship, error) {
+			var following, followedBy bool
+			if err := db.R.QueryRow(ctx, getFollowRelationshipSQL, viewerID, targetID).
+				Scan(&following, &followedBy); err != nil {
+				return nil, err
+			}
+
+			var r model.Relationship
+			switch {
+			case following && followedBy:
+				r = model.RelationshipFriends
+			case following:
+				r = model.RelationshipFollowing
+			case followedBy:
+				r = model.RelationshipFollowed
+			default:
+				r = model.RelationshipNone
+			}
+			return &r, nil
+		},
+	)
 	if err != nil {
-		return "", errs.CreatePGError(err, "关注关系", "Failed to get follow relationship")
+		return "", err.AppendDetails("关注关系获取失败")
 	}
-
-	if following && followedBy {
-		return model.FollowRelationshipFriends, nil
-	} else if following {
-		return model.FollowRelationshipFollowing, nil
-	} else if followedBy {
-		return model.FollowRelationshipFollowed, nil
+	if rel == nil {
+		return model.RelationshipNone, nil
 	}
-
-	return model.FollowRelationshipNone, nil
+	return *rel, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +213,7 @@ WHERE f.following_id = $1 AND u.deleted_at IS NULL
 ORDER BY f.created_at DESC, u.id DESC
 LIMIT $2 OFFSET $3`
 
-func ListFollowers(ctx context.Context, userID int64, limit, offset int32) (*model.FollowList, *errs.Error) {
+func ListFollowers(ctx context.Context, userID int64, limit, offset int32) (*model.RelationList, *errs.Error) {
 	return listFollows(ctx, "粉丝列表", countFollowersSQL, listFollowersSQL, userID, limit, offset)
 }
 
@@ -172,11 +225,24 @@ WHERE f.following_id = $1 AND u.deleted_at IS NULL
 `
 
 func CountFollowers(ctx context.Context, userID int64) (int64, *errs.Error) {
-	var count int64
-	if err := db.R.QueryRow(ctx, countFollowersSQL, userID).Scan(&count); err != nil {
-		return 0, errs.CreatePGError(err, "粉丝列表", "Failed to count follower list")
+	count, err := db.GetCached(
+		ctx,
+		"粉丝列表",
+		FollowersCountCacheKey(userID),
+		FollowCacheDuration,
+		func() (*int64, error) {
+			var c int64
+			err := db.R.QueryRow(ctx, countFollowersSQL, userID).Scan(&c)
+			return &c, err
+		},
+	)
+	if err != nil {
+		return 0, err.AppendDetails("粉丝数获取失败")
 	}
-	return count, nil
+	if count == nil {
+		return 0, nil
+	}
+	return *count, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +259,7 @@ WHERE f.follower_id = $1 AND u.deleted_at IS NULL
 ORDER BY f.created_at DESC, u.id DESC
 LIMIT $2 OFFSET $3`
 
-func ListFollowing(ctx context.Context, userID int64, limit, offset int32) (*model.FollowList, *errs.Error) {
+func ListFollowing(ctx context.Context, userID int64, limit, offset int32) (*model.RelationList, *errs.Error) {
 	return listFollows(ctx, "关注列表", countFollowingSQL, listFollowingSQL, userID, limit, offset)
 }
 
@@ -205,11 +271,24 @@ WHERE f.follower_id = $1 AND u.deleted_at IS NULL
 `
 
 func CountFollowing(ctx context.Context, userID int64) (int64, *errs.Error) {
-	var count int64
-	if err := db.R.QueryRow(ctx, countFollowingSQL, userID).Scan(&count); err != nil {
-		return 0, errs.CreatePGError(err, "关注列表", "Failed to count following list")
+	count, err := db.GetCached(
+		ctx,
+		"关注列表",
+		FollowingCountCacheKey(userID),
+		FollowCacheDuration,
+		func() (*int64, error) {
+			var c int64
+			err := db.R.QueryRow(ctx, countFollowingSQL, userID).Scan(&c)
+			return &c, err
+		},
+	)
+	if err != nil {
+		return 0, err.AppendDetails("关注数获取失败")
 	}
-	return count, nil
+	if count == nil {
+		return 0, nil
+	}
+	return *count, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +306,7 @@ WHERE f.follower_id = $1 AND u.deleted_at IS NULL
 ORDER BY f.created_at DESC, u.id DESC
 LIMIT $2 OFFSET $3`
 
-func ListFriends(ctx context.Context, userID int64, limit, offset int32) (*model.FollowList, *errs.Error) {
+func ListFriends(ctx context.Context, userID int64, limit, offset int32) (*model.RelationList, *errs.Error) {
 	return listFollows(ctx, "好友列表", countFriendsSQL, listFriendsSQL, userID, limit, offset)
 }
 
@@ -240,9 +319,22 @@ WHERE f.follower_id = $1 AND u.deleted_at IS NULL
 `
 
 func CountFriends(ctx context.Context, userID int64) (int64, *errs.Error) {
-	var count int64
-	if err := db.R.QueryRow(ctx, countFriendsSQL, userID).Scan(&count); err != nil {
-		return 0, errs.CreatePGError(err, "好友列表", "Failed to count friend list")
+	count, err := db.GetCached(
+		ctx,
+		"好友列表",
+		FriendsCountCacheKey(userID),
+		FollowCacheDuration,
+		func() (*int64, error) {
+			var c int64
+			err := db.R.QueryRow(ctx, countFriendsSQL, userID).Scan(&c)
+			return &c, err
+		},
+	)
+	if err != nil {
+		return 0, err.AppendDetails("好友数获取失败")
 	}
-	return count, nil
+	if count == nil {
+		return 0, nil
+	}
+	return *count, nil
 }

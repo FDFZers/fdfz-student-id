@@ -4,7 +4,7 @@ package model
 import "time"
 
 // ENUM(none, followed, following, friends)
-type FollowRelationship string
+type Relationship string
 
 type UserFollow struct {
 	ID          int64     `json:"id" db:"id"`
@@ -13,7 +13,7 @@ type UserFollow struct {
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 }
 
-type FollowList struct {
+type RelationList struct {
 	Count int32
 	Users []*User
 }

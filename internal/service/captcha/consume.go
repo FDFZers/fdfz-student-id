@@ -43,7 +43,7 @@ func TryConsumeAltchaChallenge(ctx context.Context, payload altcha.Payload) *err
 	if err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to consume altcha challenge").AppendDetails("Redis 错误", "Altcha Challenge 消费失败")
 	} else if !ok {
-		return errs.RateLimitExceededError().AppendDetails("Altcha Challenge 已被使用，请重新进行人机验证")
+		return errs.AltchaError().AppendDetails("请重新进行人机验证")
 	}
 	return nil
 }

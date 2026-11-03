@@ -13,67 +13,67 @@ import (
 )
 
 const (
-	// OAuthClientTypeConfidential is a OAuthClientType of type confidential.
-	OAuthClientTypeConfidential OAuthClientType = "confidential"
-	// OAuthClientTypePublic is a OAuthClientType of type public.
-	OAuthClientTypePublic OAuthClientType = "public"
+	// AppAuthStatusActive is a AppAuthStatus of type active.
+	AppAuthStatusActive AppAuthStatus = "active"
+	// AppAuthStatusPending is a AppAuthStatus of type pending.
+	AppAuthStatusPending AppAuthStatus = "pending"
 )
 
-var ErrInvalidOAuthClientType = fmt.Errorf("not a valid OAuthClientType, try [%s]", strings.Join(_OAuthClientTypeNames, ", "))
+var ErrInvalidAppAuthStatus = fmt.Errorf("not a valid AppAuthStatus, try [%s]", strings.Join(_AppAuthStatusNames, ", "))
 
-var _OAuthClientTypeNames = []string{
-	string(OAuthClientTypeConfidential),
-	string(OAuthClientTypePublic),
+var _AppAuthStatusNames = []string{
+	string(AppAuthStatusActive),
+	string(AppAuthStatusPending),
 }
 
-// OAuthClientTypeNames returns a list of possible string values of OAuthClientType.
-func OAuthClientTypeNames() []string {
-	tmp := make([]string, len(_OAuthClientTypeNames))
-	copy(tmp, _OAuthClientTypeNames)
+// AppAuthStatusNames returns a list of possible string values of AppAuthStatus.
+func AppAuthStatusNames() []string {
+	tmp := make([]string, len(_AppAuthStatusNames))
+	copy(tmp, _AppAuthStatusNames)
 	return tmp
 }
 
-// OAuthClientTypeValues returns a list of the values for OAuthClientType
-func OAuthClientTypeValues() []OAuthClientType {
-	return []OAuthClientType{
-		OAuthClientTypeConfidential,
-		OAuthClientTypePublic,
+// AppAuthStatusValues returns a list of the values for AppAuthStatus
+func AppAuthStatusValues() []AppAuthStatus {
+	return []AppAuthStatus{
+		AppAuthStatusActive,
+		AppAuthStatusPending,
 	}
 }
 
 // String implements the Stringer interface.
-func (x OAuthClientType) String() string {
+func (x AppAuthStatus) String() string {
 	return string(x)
 }
 
 // IsValid provides a quick way to determine if the typed value is
 // part of the allowed enumerated values
-func (x OAuthClientType) IsValid() bool {
-	_, err := ParseOAuthClientType(string(x))
+func (x AppAuthStatus) IsValid() bool {
+	_, err := ParseAppAuthStatus(string(x))
 	return err == nil
 }
 
-var _OAuthClientTypeValue = map[string]OAuthClientType{
-	"confidential": OAuthClientTypeConfidential,
-	"public":       OAuthClientTypePublic,
+var _AppAuthStatusValue = map[string]AppAuthStatus{
+	"active":  AppAuthStatusActive,
+	"pending": AppAuthStatusPending,
 }
 
-// ParseOAuthClientType attempts to convert a string to a OAuthClientType.
-func ParseOAuthClientType(name string) (OAuthClientType, error) {
-	if x, ok := _OAuthClientTypeValue[name]; ok {
+// ParseAppAuthStatus attempts to convert a string to a AppAuthStatus.
+func ParseAppAuthStatus(name string) (AppAuthStatus, error) {
+	if x, ok := _AppAuthStatusValue[name]; ok {
 		return x, nil
 	}
-	return OAuthClientType(""), fmt.Errorf("%s is %w", name, ErrInvalidOAuthClientType)
+	return AppAuthStatus(""), fmt.Errorf("%s is %w", name, ErrInvalidAppAuthStatus)
 }
 
 // MarshalText implements the text marshaller method.
-func (x OAuthClientType) MarshalText() ([]byte, error) {
+func (x AppAuthStatus) MarshalText() ([]byte, error) {
 	return []byte(string(x)), nil
 }
 
 // UnmarshalText implements the text unmarshaller method.
-func (x *OAuthClientType) UnmarshalText(text []byte) error {
-	tmp, err := ParseOAuthClientType(string(text))
+func (x *AppAuthStatus) UnmarshalText(text []byte) error {
+	tmp, err := ParseAppAuthStatus(string(text))
 	if err != nil {
 		return err
 	}
@@ -85,16 +85,16 @@ func (x *OAuthClientType) UnmarshalText(text []byte) error {
 // (allocating a larger slice if necessary) and returns the updated slice.
 //
 // Implementations must not retain b, nor mutate any bytes within b[:len(b)].
-func (x OAuthClientType) AppendText(b []byte) ([]byte, error) {
+func (x AppAuthStatus) AppendText(b []byte) ([]byte, error) {
 	return append(b, x.String()...), nil
 }
 
-var errOAuthClientTypeNilPtr = errors.New("value pointer is nil") // one per type for package clashes
+var errAppAuthStatusNilPtr = errors.New("value pointer is nil") // one per type for package clashes
 
 // Scan implements the Scanner interface.
-func (x *OAuthClientType) Scan(value interface{}) (err error) {
+func (x *AppAuthStatus) Scan(value interface{}) (err error) {
 	if value == nil {
-		*x = OAuthClientType("")
+		*x = AppAuthStatus("")
 		return
 	}
 
@@ -102,29 +102,273 @@ func (x *OAuthClientType) Scan(value interface{}) (err error) {
 	// driver.Value values at the top of the list for expediency
 	switch v := value.(type) {
 	case string:
-		*x, err = ParseOAuthClientType(v)
+		*x, err = ParseAppAuthStatus(v)
 	case []byte:
-		*x, err = ParseOAuthClientType(string(v))
-	case OAuthClientType:
+		*x, err = ParseAppAuthStatus(string(v))
+	case AppAuthStatus:
 		*x = v
-	case *OAuthClientType:
+	case *AppAuthStatus:
 		if v == nil {
-			return errOAuthClientTypeNilPtr
+			return errAppAuthStatusNilPtr
 		}
 		*x = *v
 	case *string:
 		if v == nil {
-			return errOAuthClientTypeNilPtr
+			return errAppAuthStatusNilPtr
 		}
-		*x, err = ParseOAuthClientType(*v)
+		*x, err = ParseAppAuthStatus(*v)
 	default:
-		return errors.New("invalid type for OAuthClientType")
+		return errors.New("invalid type for AppAuthStatus")
 	}
 
 	return
 }
 
 // Value implements the driver Valuer interface.
-func (x OAuthClientType) Value() (driver.Value, error) {
+func (x AppAuthStatus) Value() (driver.Value, error) {
+	return x.String(), nil
+}
+
+const (
+	// AppStatusActive is a AppStatus of type active.
+	AppStatusActive AppStatus = "active"
+	// AppStatusSuspended is a AppStatus of type suspended.
+	AppStatusSuspended AppStatus = "suspended"
+)
+
+var ErrInvalidAppStatus = fmt.Errorf("not a valid AppStatus, try [%s]", strings.Join(_AppStatusNames, ", "))
+
+var _AppStatusNames = []string{
+	string(AppStatusActive),
+	string(AppStatusSuspended),
+}
+
+// AppStatusNames returns a list of possible string values of AppStatus.
+func AppStatusNames() []string {
+	tmp := make([]string, len(_AppStatusNames))
+	copy(tmp, _AppStatusNames)
+	return tmp
+}
+
+// AppStatusValues returns a list of the values for AppStatus
+func AppStatusValues() []AppStatus {
+	return []AppStatus{
+		AppStatusActive,
+		AppStatusSuspended,
+	}
+}
+
+// String implements the Stringer interface.
+func (x AppStatus) String() string {
+	return string(x)
+}
+
+// IsValid provides a quick way to determine if the typed value is
+// part of the allowed enumerated values
+func (x AppStatus) IsValid() bool {
+	_, err := ParseAppStatus(string(x))
+	return err == nil
+}
+
+var _AppStatusValue = map[string]AppStatus{
+	"active":    AppStatusActive,
+	"suspended": AppStatusSuspended,
+}
+
+// ParseAppStatus attempts to convert a string to a AppStatus.
+func ParseAppStatus(name string) (AppStatus, error) {
+	if x, ok := _AppStatusValue[name]; ok {
+		return x, nil
+	}
+	return AppStatus(""), fmt.Errorf("%s is %w", name, ErrInvalidAppStatus)
+}
+
+// MarshalText implements the text marshaller method.
+func (x AppStatus) MarshalText() ([]byte, error) {
+	return []byte(string(x)), nil
+}
+
+// UnmarshalText implements the text unmarshaller method.
+func (x *AppStatus) UnmarshalText(text []byte) error {
+	tmp, err := ParseAppStatus(string(text))
+	if err != nil {
+		return err
+	}
+	*x = tmp
+	return nil
+}
+
+// AppendText appends the textual representation of itself to the end of b
+// (allocating a larger slice if necessary) and returns the updated slice.
+//
+// Implementations must not retain b, nor mutate any bytes within b[:len(b)].
+func (x AppStatus) AppendText(b []byte) ([]byte, error) {
+	return append(b, x.String()...), nil
+}
+
+var errAppStatusNilPtr = errors.New("value pointer is nil") // one per type for package clashes
+
+// Scan implements the Scanner interface.
+func (x *AppStatus) Scan(value interface{}) (err error) {
+	if value == nil {
+		*x = AppStatus("")
+		return
+	}
+
+	// A wider range of scannable types.
+	// driver.Value values at the top of the list for expediency
+	switch v := value.(type) {
+	case string:
+		*x, err = ParseAppStatus(v)
+	case []byte:
+		*x, err = ParseAppStatus(string(v))
+	case AppStatus:
+		*x = v
+	case *AppStatus:
+		if v == nil {
+			return errAppStatusNilPtr
+		}
+		*x = *v
+	case *string:
+		if v == nil {
+			return errAppStatusNilPtr
+		}
+		*x, err = ParseAppStatus(*v)
+	default:
+		return errors.New("invalid type for AppStatus")
+	}
+
+	return
+}
+
+// Value implements the driver Valuer interface.
+func (x AppStatus) Value() (driver.Value, error) {
+	return x.String(), nil
+}
+
+const (
+	// AppTypeConfidential is a AppType of type confidential.
+	AppTypeConfidential AppType = "confidential"
+	// AppTypePublic is a AppType of type public.
+	AppTypePublic AppType = "public"
+	// AppTypeConfidentialDevice is a AppType of type confidential_device.
+	AppTypeConfidentialDevice AppType = "confidential_device"
+	// AppTypePublicDevice is a AppType of type public_device.
+	AppTypePublicDevice AppType = "public_device"
+)
+
+var ErrInvalidAppType = fmt.Errorf("not a valid AppType, try [%s]", strings.Join(_AppTypeNames, ", "))
+
+var _AppTypeNames = []string{
+	string(AppTypeConfidential),
+	string(AppTypePublic),
+	string(AppTypeConfidentialDevice),
+	string(AppTypePublicDevice),
+}
+
+// AppTypeNames returns a list of possible string values of AppType.
+func AppTypeNames() []string {
+	tmp := make([]string, len(_AppTypeNames))
+	copy(tmp, _AppTypeNames)
+	return tmp
+}
+
+// AppTypeValues returns a list of the values for AppType
+func AppTypeValues() []AppType {
+	return []AppType{
+		AppTypeConfidential,
+		AppTypePublic,
+		AppTypeConfidentialDevice,
+		AppTypePublicDevice,
+	}
+}
+
+// String implements the Stringer interface.
+func (x AppType) String() string {
+	return string(x)
+}
+
+// IsValid provides a quick way to determine if the typed value is
+// part of the allowed enumerated values
+func (x AppType) IsValid() bool {
+	_, err := ParseAppType(string(x))
+	return err == nil
+}
+
+var _AppTypeValue = map[string]AppType{
+	"confidential":        AppTypeConfidential,
+	"public":              AppTypePublic,
+	"confidential_device": AppTypeConfidentialDevice,
+	"public_device":       AppTypePublicDevice,
+}
+
+// ParseAppType attempts to convert a string to a AppType.
+func ParseAppType(name string) (AppType, error) {
+	if x, ok := _AppTypeValue[name]; ok {
+		return x, nil
+	}
+	return AppType(""), fmt.Errorf("%s is %w", name, ErrInvalidAppType)
+}
+
+// MarshalText implements the text marshaller method.
+func (x AppType) MarshalText() ([]byte, error) {
+	return []byte(string(x)), nil
+}
+
+// UnmarshalText implements the text unmarshaller method.
+func (x *AppType) UnmarshalText(text []byte) error {
+	tmp, err := ParseAppType(string(text))
+	if err != nil {
+		return err
+	}
+	*x = tmp
+	return nil
+}
+
+// AppendText appends the textual representation of itself to the end of b
+// (allocating a larger slice if necessary) and returns the updated slice.
+//
+// Implementations must not retain b, nor mutate any bytes within b[:len(b)].
+func (x AppType) AppendText(b []byte) ([]byte, error) {
+	return append(b, x.String()...), nil
+}
+
+var errAppTypeNilPtr = errors.New("value pointer is nil") // one per type for package clashes
+
+// Scan implements the Scanner interface.
+func (x *AppType) Scan(value interface{}) (err error) {
+	if value == nil {
+		*x = AppType("")
+		return
+	}
+
+	// A wider range of scannable types.
+	// driver.Value values at the top of the list for expediency
+	switch v := value.(type) {
+	case string:
+		*x, err = ParseAppType(v)
+	case []byte:
+		*x, err = ParseAppType(string(v))
+	case AppType:
+		*x = v
+	case *AppType:
+		if v == nil {
+			return errAppTypeNilPtr
+		}
+		*x = *v
+	case *string:
+		if v == nil {
+			return errAppTypeNilPtr
+		}
+		*x, err = ParseAppType(*v)
+	default:
+		return errors.New("invalid type for AppType")
+	}
+
+	return
+}
+
+// Value implements the driver Valuer interface.
+func (x AppType) Value() (driver.Value, error) {
 	return x.String(), nil
 }

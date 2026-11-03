@@ -3,9 +3,11 @@ package handling
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	"fdfz-student-id/internal/service/perm"
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/dlclark/regexp2"
@@ -165,6 +167,67 @@ func ValidateTOTPCode(code string) *errs.Error {
 		return errs.CreateAndLogInternalError(err, "Failed to validate totp code").AppendDetails("TOTP 验证码校验失败")
 	} else if !ok {
 		return errs.BadRequestError().AppendDetails("无效的 TOTP 验证码")
+	}
+	return nil
+}
+
+func ValidatePermissionValue(value string) *errs.Error {
+	if value == "" {
+		return errs.BadRequestError().AppendDetails("权限值为空")
+	}
+	if utf8.RuneCountInString(value) > 96 {
+		return errs.BadRequestError().AppendDetails("权限值过长")
+	}
+	return nil
+}
+
+func ValidatePermissionDescription(description string) *errs.Error {
+	if utf8.RuneCountInString(description) > 256 {
+		return errs.BadRequestError().AppendDetails("权限描述过长")
+	}
+	return nil
+}
+
+func ValidateUserGroupName(name string) *errs.Error {
+	if name == "" {
+		return errs.BadRequestError().AppendDetails("用户组名为空")
+	}
+	if utf8.RuneCountInString(name) > 128 {
+		return errs.BadRequestError().AppendDetails("用户组名过长")
+	}
+	return nil
+}
+
+func ValidateUserGroupNote(note string) *errs.Error {
+	if utf8.RuneCountInString(note) > 256 {
+		return errs.BadRequestError().AppendDetails("用户组备注过长")
+	}
+	return nil
+}
+
+func ValidateGrantPermission(permission string) *errs.Error {
+	if permission == "" {
+		return errs.BadRequestError().AppendDetails("权限名为空")
+	}
+	if _, err := perm.ParsePermission(permission); err != nil {
+		return errs.BadRequestError().AppendDetails("无效的权限名")
+	}
+	if utf8.RuneCountInString(permission) > 128 {
+		return errs.BadRequestError().AppendDetails("权限名过长")
+	}
+	return nil
+}
+
+func ValidateGrantNote(note string) *errs.Error {
+	if utf8.RuneCountInString(note) > 256 {
+		return errs.BadRequestError().AppendDetails("备注过长")
+	}
+	return nil
+}
+
+func ValidateValidRange(validFrom, validUntil *time.Time) *errs.Error {
+	if validFrom != nil && validUntil != nil && !validUntil.After(*validFrom) {
+		return errs.BadRequestError().AppendDetails("有效期无效")
 	}
 	return nil
 }

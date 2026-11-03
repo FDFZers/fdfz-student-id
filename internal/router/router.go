@@ -6,11 +6,13 @@ import (
 	"fdfz-student-id/internal/handler/auth"
 	"fdfz-student-id/internal/handler/healthcheck"
 	"fdfz-student-id/internal/handler/misc"
+	"fdfz-student-id/internal/handler/permissions"
 	"fdfz-student-id/internal/handler/regreq"
 	"fdfz-student-id/internal/handler/security"
 	"fdfz-student-id/internal/handler/user"
 	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
+	"fdfz-student-id/internal/util/handling"
 	"strings"
 	"time"
 
@@ -56,12 +58,11 @@ func InitRouter(r *gin.Engine) {
 
 	v1 := r.Group("/api/v1", middleware.ParseToken())
 	internal := r.Group("/api/internal", middleware.ParseToken(), func(c *gin.Context) {
-		claims, ok := c.Get("claims")
-		if !ok {
+		claims := handling.GetClaimsOrNil(c)
+		if claims == nil {
 			return
 		}
-		typ := claims.(model.RegisteredTokenClaims).TokenType
-		if typ != model.TokenTypeUser && typ != model.TokenTypeStepup {
+		if claims.TokenType != model.TokenTypeUser && claims.TokenType != model.TokenTypeStepup {
 			errs.InvalidTokenError().AppendDetails("令牌类型错误", "鉴权失败").Abort(c)
 			return
 		}
@@ -72,6 +73,7 @@ func InitRouter(r *gin.Engine) {
 	regreq.InitRoutes(v1, internal)
 	user.InitRoutes(v1, internal)
 	security.InitRoutes(internal)
+	permissions.InitRoutes(internal)
 }
 
 func InitHealthCheckRouter(r *gin.Engine) {

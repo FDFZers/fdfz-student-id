@@ -4,28 +4,29 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
-	search2 "fdfz-student-id/internal/service/search"
+	"fdfz-student-id/internal/service/search"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-var searchCfg = search2.SearchConfig{
+var searchCfg = search.SearchConfig{
 	Table:             "register_requests",
 	Item:              "注册请求",
 	Columns:           []string{"id", "username", "nickname", "type", "student_num", "real_name", "school", "password", "created_at", "status", "created_user_id", "reviewer_user_id", "review_comment", "reviewed_at"},
-	Fields:            []search2.Field{{ID: "id", Column: "id", Numeric: true}, {ID: "student_num", Column: "student_num"}, {ID: "real_name", Column: "real_name"}, {ID: "created_user_id", Column: "created_user_id", Numeric: true}},
-	MatchMethods:      search2.MatchMethodValues(),
-	SortableFields:    []search2.Field{{ID: "created_at", Column: "created_at"}, {ID: "reviewed_at", Column: "reviewed_at"}},
-	Tags:              []search2.Tag{{ID: "status", Column: "status", ValueMap: search2.ValueMapOf(model.RegisterRequestStatusNames())}, {ID: "type", Column: "type", ValueMap: search2.ValueMapOf(model.UserTypeNames())}, {ID: "school", Column: "school", ValueMap: search2.ValueMapOf(model.SchoolNames())}},
+	Fields:            []search.Field{{ID: "id", Column: "id", Numeric: true}, {ID: "student_num", Column: "student_num"}, {ID: "real_name", Column: "real_name"}, {ID: "created_user_id", Column: "created_user_id", Numeric: true}},
+	MatchMethods:      search.MatchMethodValues(),
+	SortableFields:    []search.Field{{ID: "created_at", Column: "created_at"}, {ID: "reviewed_at", Column: "reviewed_at"}},
+	Tags:              []search.Tag{{ID: "status", Column: "status", ValueMap: search.ValueMapOf(model.RegisterRequestStatusNames())}, {ID: "type", Column: "type", ValueMap: search.ValueMapOf(model.UserTypeNames())}, {ID: "school", Column: "school", ValueMap: search.ValueMapOf(model.SchoolNames())}},
 	DefaultSortColumn: "id",
 }
 
-var searchInfo = search2.GetInfo(&searchCfg)
+var searchInfo = search.GetInfo(&searchCfg)
 
 func SearchInfoHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	if !perm.Contains(claims.Permissions, "student_id.register_requests.list") {
+	claims := handling.MustGetClaims(c)
+	if !perm.HasPermission(claims, perm.PermRegisterRequestList) {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 	c.JSON(http.StatusOK, searchInfo)
@@ -33,17 +34,17 @@ func SearchInfoHandler(c *gin.Context) *errs.Error {
 }
 
 func SearchQueryHandler(c *gin.Context) *errs.Error {
-	var req search2.SearchRequest
+	var req search.SearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	if !perm.Contains(claims.Permissions, "student_id.register_requests.list") {
+	claims := handling.MustGetClaims(c)
+	if !perm.HasPermission(claims, perm.PermRegisterRequestList) {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
-	requests, err := search2.ExecSearch[model.RegisterRequest](c, &searchCfg, &req)
+	requests, err := search.ExecSearch[model.RegisterRequest](c, &searchCfg, &req)
 	if err != nil {
 		return err
 	}

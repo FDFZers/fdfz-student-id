@@ -1,28 +1,48 @@
 package perm
 
 import (
+	"fdfz-student-id/internal/model"
 	"sort"
 )
 
-func Contains(s []string, target string) bool {
+func contains(s []string, target string) bool {
 	i := sort.Search(len(s), func(i int) bool { return s[i] >= target })
 	return i < len(s) && s[i] == target
 }
 
-func ContainsAny(s []string, targets ...string) bool {
+func containsAny(s []string, targets ...string) bool {
 	for _, target := range targets {
-		if Contains(s, target) {
+		if contains(s, target) {
 			return true
 		}
 	}
 	return false
 }
 
-func ContainsAll(s []string, targets ...string) bool {
+func containsAll(s []string, targets ...string) bool {
 	for _, target := range targets {
-		if !Contains(s, target) {
+		if !contains(s, target) {
 			return false
 		}
 	}
 	return true
+}
+
+func HasPermission(claims *model.RegisteredTokenClaims, permissions ...string) bool {
+	if claims == nil || claims.TokenType != model.TokenTypeUser {
+		return false
+	}
+	for _, permission := range permissions {
+		if !contains(claims.Permissions, permission) {
+			return false
+		}
+	}
+	return true
+}
+
+func HasAnyPermission(claims *model.RegisteredTokenClaims, permissions ...string) bool {
+	if claims == nil || claims.TokenType != model.TokenTypeUser {
+		return false
+	}
+	return containsAny(claims.Permissions, permissions...)
 }

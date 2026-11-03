@@ -16,7 +16,7 @@ import (
 )
 
 func getUserBanHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 	targetIDStr := c.Param("id")
 	targetID, e := strconv.ParseInt(targetIDStr, 10, 64)
 	if e != nil {
@@ -25,9 +25,9 @@ func getUserBanHandler(c *gin.Context) *errs.Error {
 
 	var allowed bool
 	if targetID == claims.UserID {
-		allowed = perm.Contains(claims.Permissions, "student_id.user.ban.read")
+		allowed = perm.HasPermission(claims, perm.PermUserBanRead)
 	} else {
-		allowed = perm.Contains(claims.Permissions, "student_id.users.ban.read")
+		allowed = perm.HasPermission(claims, perm.PermUsersBanRead)
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
@@ -57,16 +57,13 @@ type banUserReq struct {
 }
 
 func banUserHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetID, err := ResolveTargetID(c, claims.UserID)
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
 	if err != nil {
 		return err
 	}
 	if targetID == claims.UserID {
 		return errs.BadRequestError().AppendDetails("不能封禁自己")
-	}
-	if !perm.Contains(claims.Permissions, "student_id.users.ban.create") {
-		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	var req banUserReq
@@ -80,7 +77,7 @@ func banUserHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("封禁结束时间必须晚于当前时间")
 	}
 
-	if err := EnsureUserExists(c, targetID); err != nil {
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
 		return err
 	}
 
@@ -108,19 +105,16 @@ func banUserHandler(c *gin.Context) *errs.Error {
 }
 
 func unbanUserHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetID, err := ResolveTargetID(c, claims.UserID)
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
 	if err != nil {
 		return err
 	}
 	if targetID == claims.UserID {
 		return errs.BadRequestError().AppendDetails("不能解封自己")
 	}
-	if !perm.Contains(claims.Permissions, "student_id.users.ban.delete") {
-		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
-	}
 
-	if err := EnsureUserExists(c, targetID); err != nil {
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
 		return err
 	}
 

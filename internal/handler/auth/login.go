@@ -5,10 +5,12 @@ import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	"fdfz-student-id/internal/service/app"
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
+	"fdfz-student-id/internal/service/userperm"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
@@ -166,7 +168,11 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	perms, err := user.GetUserPerms(c.Request.Context(), authSession.UserID)
+	perms, err := userperm.ListUserEffectivePermissions(c.Request.Context(), authSession.UserID)
+	if err != nil {
+		return rollback(err)
+	}
+	ownedApps, err := app.ListOwnedAppIDs(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return rollback(err)
 	}
@@ -174,7 +180,8 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	accessToken, e := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      authSession.UserID,
 		TokenType:   model.TokenTypeUser,
-		Permissions: perm.MatchAll(perms),
+		Permissions: perm.ResolvePatterns(perms),
+		OwnedApps:   ownedApps,
 		IsTemporary: authSession.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
 	if e != nil {
@@ -234,7 +241,11 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	}
 	sessionTokenHash := crypto.HashSHA512(sessionToken)
 
-	perms, err := user.GetUserPerms(c.Request.Context(), session.UserID)
+	perms, err := userperm.ListUserEffectivePermissions(c.Request.Context(), session.UserID)
+	if err != nil {
+		return err
+	}
+	ownedApps, err := app.ListOwnedAppIDs(c.Request.Context(), session.UserID)
 	if err != nil {
 		return err
 	}
@@ -242,7 +253,8 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	accessToken, e := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      session.UserID,
 		TokenType:   model.TokenTypeUser,
-		Permissions: perm.MatchAll(perms),
+		Permissions: perm.ResolvePatterns(perms),
+		OwnedApps:   ownedApps,
 		IsTemporary: session.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
 	if e != nil {
@@ -261,7 +273,7 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 }
 
 func logoutHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	sessionID, err := uuid.Parse(claims.ID)
 	if err != nil {

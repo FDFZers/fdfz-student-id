@@ -2,15 +2,15 @@ package user
 
 import (
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/user"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
 func getUserProfileByUsernameHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 	targetUsername := c.Param("username")
 
 	targetUser, err := user.GetUserByUsername(c.Request.Context(), targetUsername)
@@ -19,13 +19,19 @@ func getUserProfileByUsernameHandler(c *gin.Context) *errs.Error {
 	} else if targetUser == nil {
 		return errs.NotFoundError().AppendDetails("用户不存在")
 	}
-	c.JSON(http.StatusOK, filterProfiles(claims, targetUser)[0])
+
+	filtered, err := filterProfiles(c.Request.Context(), claims, targetUser)
+	if err != nil {
+		return err
+	}
+
+	c.JSON(http.StatusOK, filtered[0])
 	return nil
 }
 
 func getUserProfileByIDHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetID, err := ResolveTargetID(c, claims.UserID)
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
 	if err != nil {
 		return err
 	}
@@ -36,6 +42,12 @@ func getUserProfileByIDHandler(c *gin.Context) *errs.Error {
 	} else if targetUser == nil {
 		return errs.NotFoundError().AppendDetails("用户不存在")
 	}
-	c.JSON(http.StatusOK, filterProfiles(claims, targetUser)[0])
+
+	filtered, err := filterProfiles(c.Request.Context(), claims, targetUser)
+	if err != nil {
+		return err
+	}
+
+	c.JSON(http.StatusOK, filtered[0])
 	return nil
 }

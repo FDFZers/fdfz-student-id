@@ -28,7 +28,6 @@ type updateProfileReq struct {
 	Bio          *string                `json:"bio"`
 	Visibilities *updateVisibilitiesReq `json:"visibilities"`
 
-	// 以下字段仅允许管理员修改
 	Username   *string       `json:"username"`
 	RealName   *string       `json:"real_name"`
 	School     *model.School `json:"school"`
@@ -47,8 +46,8 @@ func (r *updateProfileReq) empty() bool {
 }
 
 func updateUserProfileHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	targetID, err := ResolveTargetID(c, claims.UserID)
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
 	if err != nil {
 		return err
 	}
@@ -70,44 +69,30 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 
 	isSelf := claims.UserID == targetID
 
-	hasWritePerm := func(field string) bool {
-		if isSelf {
-			return perm.Contains(claims.Permissions, "student_id.user.profile."+field+".write")
-		}
-		return perm.Contains(claims.Permissions, "student_id.users.profile."+field+".write")
-	}
-
-	// 自身可修改的字段
-	selfFields := []struct {
-		Field   string
-		Present bool
+	fields := []struct {
+		Field     string
+		Present   bool
+		SelfPerm  string
+		OtherPerm string
 	}{
-		{"nickname", req.Nickname != nil},
-		{"signature", req.Signature != nil},
-		{"bio", req.Bio != nil},
-		{"visibilities", req.Visibilities != nil && !req.Visibilities.empty()},
+		{"username", req.Username != nil, "", perm.PermUsersProfileUpdateBasic},
+		{"nickname", req.Nickname != nil, perm.PermUserProfileUpdateBasic, perm.PermUsersProfileUpdateBasic},
+		{"signature", req.Signature != nil, perm.PermUserProfileUpdateAbout, perm.PermUsersProfileUpdateAbout},
+		{"bio", req.Bio != nil, perm.PermUserProfileUpdateAbout, perm.PermUsersProfileUpdateAbout},
+		{"real_name", req.RealName != nil, "", perm.PermUsersProfileUpdateIdentity},
+		{"school", req.School != nil, "", perm.PermUsersProfileUpdateIdentity},
+		{"student_num", req.StudentNum != nil, "", perm.PermUsersProfileUpdateIdentity},
+		{"visibilities", req.Visibilities != nil && !req.Visibilities.empty(), perm.PermUserProfileUpdateVisibilities, perm.PermUsersProfileUpdateVisibilities},
 	}
-	for _, f := range selfFields {
-		if f.Present && !hasWritePerm(f.Field) {
-			return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
-		}
-	}
-
-	// 仅管理员可修改的字段
-	adminFields := []struct {
-		Field   string
-		Present bool
-	}{
-		{"username", req.Username != nil},
-		{"real_name", req.RealName != nil},
-		{"school", req.School != nil},
-		{"student_num", req.StudentNum != nil},
-	}
-	for _, f := range adminFields {
-		if !f.Present {
+	for _, field := range fields {
+		if !field.Present {
 			continue
 		}
-		if isSelf || !perm.Contains(claims.Permissions, "student_id.users.profile."+f.Field+".write") {
+		required := field.OtherPerm
+		if isSelf {
+			required = field.SelfPerm
+		}
+		if required == "" || !perm.HasPermission(claims, required) {
 			return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 		}
 	}
@@ -193,6 +178,11 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	c.JSON(http.StatusOK, filterProfiles(claims, target)[0])
+	filtered, err := filterProfiles(c.Request.Context(), claims, target)
+	if err != nil {
+		return err
+	}
+
+	c.JSON(http.StatusOK, filtered[0])
 	return nil
 }

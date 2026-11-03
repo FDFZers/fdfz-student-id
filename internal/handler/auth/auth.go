@@ -31,8 +31,8 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/verify/qq/verify", handling.Wrap("QQ 验证失败", verifyQQHandler))
 	i.POST("/verify/totp", handling.Wrap("TOTP 验证失败", verifyTOTPHandler))
 
-	i.POST("/stepup/init", handling.Wrap("二次验证初始化失败", stepupInitHandler))
-	i.POST("/stepup/finalize", handling.Wrap("二次验证失败", stepupFinalizeHandler))
+	i.POST("/stepup/init", middleware.RequireToken(), handling.Wrap("二次验证初始化失败", stepupInitHandler))
+	i.POST("/stepup/finalize", middleware.RequireToken(), handling.Wrap("二次验证失败", stepupFinalizeHandler))
 
 	a.GET("/jwks", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")

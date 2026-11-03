@@ -74,6 +74,8 @@ func GenerateJWT(id uuid.UUID, claims *model.TokenClaims, ttl time.Duration) (st
 	claimsCopy := *claims
 	claimsCopy.Permissions = slices.Clone(claims.Permissions)
 	slices.Sort(claimsCopy.Permissions)
+	claimsCopy.OwnedApps = slices.Clone(claims.OwnedApps)
+	slices.Sort(claimsCopy.OwnedApps)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS512, &model.RegisteredTokenClaims{
 		TokenClaims: claimsCopy,

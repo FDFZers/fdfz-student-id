@@ -1,11 +1,15 @@
 BEGIN;
 
+-- =============================================
 -- 枚举类型定义
 -- =============================================
 CREATE TYPE user_type AS ENUM ('student', 'teacher');
 CREATE TYPE school AS ENUM ('fdfz', 'ffxh', 'ffqp', 'ffpd', 'ffja');
-CREATE TYPE oauth_client_type AS ENUM ('confidential', 'public');
 CREATE TYPE register_request_status AS ENUM ('pending', 'approved', 'rejected');
+
+CREATE TYPE app_type AS ENUM ('confidential', 'public', 'confidential_device', 'public_device');
+CREATE TYPE app_status AS ENUM ('active', 'suspended');
+CREATE TYPE app_auth_status AS ENUM ('active', 'pending');
 
 -- =============================================
 -- 通用 updated_at 触发器函数
@@ -45,15 +49,17 @@ CREATE TABLE users
     deleted_at            TIMESTAMPTZ           DEFAULT NULL,
     deletion_scheduled_at TIMESTAMPTZ           DEFAULT NULL,
 
-    CHECK ((type = 'student' AND student_num IS NOT NULL) OR (type != 'student' AND student_num IS NULL))
+    CONSTRAINT chk_users_student_num
+        CHECK ((type = 'student' AND student_num IS NOT NULL) OR (type <> 'student' AND student_num IS NULL))
 );
 
-CREATE UNIQUE INDEX idx_users_username_lower_active
+CREATE UNIQUE INDEX uq_users_username_lower_active
     ON users (lower(username))
     WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX idx_users_school_student_num_active
+CREATE UNIQUE INDEX uq_users_school_student_num_active
     ON users (school, student_num)
     WHERE type = 'student' AND deleted_at IS NULL;
+
 CREATE INDEX idx_users_student_num
     ON users (student_num);
 CREATE INDEX idx_users_type_active
@@ -91,9 +97,11 @@ CREATE TABLE user_bans
     enabled    BOOLEAN      NOT NULL DEFAULT true
 );
 
-CREATE UNIQUE INDEX idx_user_bans_user_id_active
+CREATE UNIQUE INDEX uq_user_bans_user_id_active
     ON user_bans (user_id)
     WHERE enabled = true;
+CREATE INDEX idx_user_bans_user_id
+    ON user_bans (user_id);
 CREATE INDEX idx_user_bans_enabled_end_time
     ON user_bans (enabled, end_time);
 
@@ -107,7 +115,7 @@ CREATE TABLE user_follows
     following_id BIGINT      NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT uq_user_follows UNIQUE (follower_id, following_id),
+    CONSTRAINT uq_user_follows_follower_following UNIQUE (follower_id, following_id),
     CONSTRAINT chk_user_follows_not_self CHECK (follower_id <> following_id)
 );
 
@@ -124,6 +132,7 @@ CREATE TABLE user_passwords
     user_id    BIGINT       NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
     password   VARCHAR(256) NOT NULL, -- argon2id
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+
     CONSTRAINT pk_user_passwords PRIMARY KEY (user_id)
 );
 
@@ -147,10 +156,10 @@ CREATE TABLE user_emails
 
 CREATE INDEX idx_user_emails_user_id
     ON user_emails (user_id);
-CREATE UNIQUE INDEX idx_user_emails_user_id_active
+CREATE UNIQUE INDEX uq_user_emails_user_id_active
     ON user_emails (user_id)
     WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX idx_user_emails_lower_active
+CREATE UNIQUE INDEX uq_user_emails_email_lower_active
     ON user_emails (lower(email))
     WHERE deleted_at IS NULL;
 
@@ -168,10 +177,10 @@ CREATE TABLE user_qqs
 
 CREATE INDEX idx_user_qqs_user_id
     ON user_qqs (user_id);
-CREATE UNIQUE INDEX idx_user_qqs_user_id_active
+CREATE UNIQUE INDEX uq_user_qqs_user_id_active
     ON user_qqs (user_id)
     WHERE deleted_at IS NULL;
-CREATE UNIQUE INDEX idx_user_qqs_qq_active
+CREATE UNIQUE INDEX uq_user_qqs_qq_active
     ON user_qqs (qq)
     WHERE deleted_at IS NULL;
 
@@ -183,6 +192,7 @@ CREATE TABLE user_totp
     user_id    BIGINT       NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
     secret     VARCHAR(256) NOT NULL,
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+
     CONSTRAINT pk_user_totp PRIMARY KEY (user_id)
 );
 
@@ -197,10 +207,10 @@ EXECUTE FUNCTION fn_update_timestamp();
 -- =============================================
 CREATE TABLE user_sessions
 (
-    uuid               UUID         NOT NULL PRIMARY KEY DEFAULT uuidv7(),
+    id                 UUID         NOT NULL PRIMARY KEY DEFAULT uuidv7(),
     user_id            BIGINT       NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 
-    session_token_hash VARCHAR(128) NOT NULL, -- sha512
+    session_token_hash CHAR(128)    NOT NULL, -- sha512
     is_temporary       BOOLEAN      NOT NULL             DEFAULT false,
 
     created_at         TIMESTAMPTZ  NOT NULL             DEFAULT now(),
@@ -220,13 +230,13 @@ CREATE INDEX idx_user_sessions_user_id
 CREATE INDEX idx_user_sessions_user_active
     ON user_sessions (user_id)
     WHERE revoked_at IS NULL;
-CREATE UNIQUE INDEX uq_user_sessions_session_token_active
+CREATE UNIQUE INDEX uq_user_sessions_token_hash_active
     ON user_sessions (session_token_hash)
     WHERE revoked_at IS NULL;
 CREATE INDEX idx_user_sessions_expires_active
     ON user_sessions (expires_at)
     WHERE revoked_at IS NULL;
-CREATE INDEX idx_user_sessions_last_used
+CREATE INDEX idx_user_sessions_last_used_at
     ON user_sessions (last_used_at);
 CREATE INDEX idx_user_sessions_revoked_at
     ON user_sessions (revoked_at);
@@ -260,7 +270,8 @@ CREATE TABLE register_requests
     reviewer_user_id BIGINT REFERENCES users (id) ON DELETE RESTRICT,
     reviewed_at      TIMESTAMPTZ                                  DEFAULT NULL,
 
-    CHECK ((type = 'student' AND student_num IS NOT NULL) OR (type != 'student' AND student_num IS NULL))
+    CONSTRAINT chk_register_requests_student_num
+        CHECK ((type = 'student' AND student_num IS NOT NULL) OR (type <> 'student' AND student_num IS NULL))
 );
 
 CREATE INDEX idx_register_requests_student_num
@@ -268,46 +279,47 @@ CREATE INDEX idx_register_requests_student_num
 CREATE INDEX idx_register_requests_pending
     ON register_requests (status)
     WHERE reviewed_at IS NULL;
-CREATE INDEX idx_register_requests_created_user
+CREATE INDEX idx_register_requests_created_user_id
     ON register_requests (created_user_id)
     WHERE created_user_id IS NOT NULL;
-CREATE INDEX idx_register_requests_reviewer
+CREATE INDEX idx_register_requests_reviewer_user_id
     ON register_requests (reviewer_user_id);
-CREATE UNIQUE INDEX idx_register_requests_school_student_num_pending
+CREATE UNIQUE INDEX uq_register_requests_school_student_num_pending
     ON register_requests (school, student_num)
     WHERE status = 'pending' AND type = 'student';
 
 -- =============================================
--- OAuth应用 oauth_apps
+-- 应用 oauth_apps
 -- =============================================
 CREATE TABLE oauth_apps
 (
-    id                    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    namespace             VARCHAR(32)       NOT NULL,
-    owner_user_id         BIGINT            NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
-    secret_hash           VARCHAR(256)      NOT NULL, -- argon2id
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    namespace       VARCHAR(32)    NOT NULL,
+    owner_user_id   BIGINT         NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+    secret_hash     CHAR(128)               DEFAULT NULL, -- sha512
 
-    name                  VARCHAR(128)      NOT NULL,
-    description           TEXT              NOT NULL DEFAULT '',
+    name            VARCHAR(128)   NOT NULL,
+    description     TEXT           NOT NULL DEFAULT '',
+    homepage_url    TEXT           NOT NULL DEFAULT '',
 
-    client_type           oauth_client_type NOT NULL DEFAULT 'confidential',
-    redirect_uris         VARCHAR(512)[]    NOT NULL DEFAULT '{}',
-    requested_permissions JSONB             NOT NULL DEFAULT '[]'::jsonb,
+    client_type     app_type       NOT NULL DEFAULT 'confidential',
+    redirect_uris   VARCHAR(512)[] NOT NULL DEFAULT '{}',
+    requested_perms TEXT[]         NOT NULL DEFAULT '{}',
 
-    created_at            TIMESTAMPTZ       NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ       NOT NULL DEFAULT now(),
-    deleted_at            TIMESTAMPTZ                DEFAULT NULL,
+    status          app_status     NOT NULL DEFAULT 'active',
 
-    CONSTRAINT chk_oauth_apps_requested_permissions_array
-        CHECK (jsonb_typeof(requested_permissions) = 'array')
+    created_at      TIMESTAMPTZ    NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ    NOT NULL DEFAULT now(),
+    deleted_at      TIMESTAMPTZ             DEFAULT NULL
 );
 
-COMMENT ON COLUMN oauth_apps.requested_permissions IS '申请的权限 {perm: string, reason: string, optional: boolean}[]';
-
-CREATE INDEX idx_oauth_apps_owner
+CREATE UNIQUE INDEX uq_oauth_apps_namespace_lower_active
+    ON oauth_apps (lower(namespace))
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_oauth_apps_owner_user_id
     ON oauth_apps (owner_user_id);
-CREATE UNIQUE INDEX idx_oauth_apps_namespace_active
-    ON oauth_apps (namespace)
+CREATE INDEX idx_oauth_apps_status
+    ON oauth_apps (status)
     WHERE deleted_at IS NULL;
 
 CREATE TRIGGER trg_oauth_apps_updated_at
@@ -317,81 +329,186 @@ CREATE TRIGGER trg_oauth_apps_updated_at
 EXECUTE FUNCTION fn_update_timestamp();
 
 -- =============================================
--- 权限定义 permissions
+-- 权限定义 permission_defs
 -- =============================================
-CREATE TABLE permissions
+CREATE TABLE permission_defs
 (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     app_id      BIGINT       NOT NULL REFERENCES oauth_apps (id) ON DELETE RESTRICT,
-    value       VARCHAR(128) NOT NULL,
+    value       VARCHAR(96)  NOT NULL,               -- 路径部分
     description VARCHAR(256) NOT NULL DEFAULT '',
-    public      BOOLEAN      NOT NULL DEFAULT true,
-    parents     BIGINT[]     NOT NULL DEFAULT '{}', -- 父权限，递归包含这些权限
-    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_permissions_app_id
-    ON permissions (app_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_permissions_value
-    ON permissions (value);
-
-CREATE TRIGGER trg_permissions_updated_at
-    BEFORE UPDATE
-    ON permissions
-    FOR EACH ROW
-EXECUTE FUNCTION fn_update_timestamp();
-
--- =============================================
--- 用户权限 user_permissions
--- =============================================
-CREATE TABLE user_permissions
-(
-    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id     BIGINT       NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
-    permission  VARCHAR(128) NOT NULL,
-    enabled     BOOLEAN      NOT NULL DEFAULT true,
-    valid_from  TIMESTAMPTZ           DEFAULT NULL,
-    valid_until TIMESTAMPTZ           DEFAULT NULL,
+    requestable BOOLEAN      NOT NULL DEFAULT false, -- OAuth 可申请
+    created_by  BIGINT                DEFAULT NULL REFERENCES users (id) ON DELETE SET NULL,
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    note        VARCHAR(256) NOT NULL DEFAULT '',
-    CONSTRAINT uq_user_permissions_user_perm UNIQUE (user_id, permission)
+
+    CONSTRAINT uq_permission_defs_app_value UNIQUE (app_id, value)
 );
 
-CREATE INDEX idx_user_perm_valid
-    ON user_permissions (user_id, enabled, valid_from, valid_until);
+CREATE INDEX idx_permission_defs_created_by
+    ON permission_defs (created_by)
+    WHERE created_by IS NOT NULL;
 
-CREATE TRIGGER trg_user_permissions_updated_at
+CREATE TRIGGER trg_permission_defs_updated_at
     BEFORE UPDATE
-    ON user_permissions
+    ON permission_defs
     FOR EACH ROW
 EXECUTE FUNCTION fn_update_timestamp();
 
 -- =============================================
--- 用户授权应用 user_oauth_apps
+-- 权限继承 permission_implies
 -- =============================================
-CREATE TABLE user_oauth_apps
+CREATE TABLE permission_implies
 (
-    id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id     BIGINT         NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
-    app_id      BIGINT         NOT NULL REFERENCES oauth_apps (id) ON DELETE RESTRICT,
-    permissions VARCHAR(128)[] NOT NULL DEFAULT '{}',
-    updated_at  TIMESTAMPTZ    NOT NULL DEFAULT now(),
-    revoked_at  TIMESTAMPTZ             DEFAULT NULL
+    permission_id         BIGINT NOT NULL REFERENCES permission_defs (id) ON DELETE CASCADE,
+    implied_permission_id BIGINT NOT NULL REFERENCES permission_defs (id) ON DELETE CASCADE,
+
+    PRIMARY KEY (permission_id, implied_permission_id),
+    CONSTRAINT chk_permission_implies_not_self CHECK (permission_id <> implied_permission_id)
 );
 
-CREATE UNIQUE INDEX uq_user_oauth_apps_user_app_active
-    ON user_oauth_apps (user_id, app_id)
-    WHERE revoked_at IS NULL;
-CREATE INDEX idx_user_oauth_apps_app_revoked
-    ON user_oauth_apps (app_id)
-    WHERE revoked_at IS NULL;
+CREATE INDEX idx_permission_implies_implied_permission_id
+    ON permission_implies (implied_permission_id);
 
-CREATE TRIGGER trg_user_oauth_apps_updated_at
+-- =============================================
+-- 用户组 roles
+-- =============================================
+CREATE TABLE roles
+(
+    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    app_id     BIGINT       NOT NULL REFERENCES oauth_apps (id) ON DELETE CASCADE,
+    name       VARCHAR(128) NOT NULL,
+    note       VARCHAR(256) NOT NULL DEFAULT '',
+    is_public  BOOLEAN      NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_roles_app_id_name UNIQUE (app_id, name)
+);
+
+CREATE TRIGGER trg_roles_updated_at
     BEFORE UPDATE
-    ON user_oauth_apps
+    ON roles
     FOR EACH ROW
 EXECUTE FUNCTION fn_update_timestamp();
+
+-- =============================================
+-- 用户组包含的权限 role_permissions
+-- =============================================
+CREATE TABLE role_permissions
+(
+    role_id       BIGINT NOT NULL REFERENCES roles (id) ON DELETE CASCADE,
+    permission_id BIGINT NOT NULL REFERENCES permission_defs (id) ON DELETE CASCADE,
+
+    PRIMARY KEY (role_id, permission_id)
+);
+
+CREATE INDEX idx_role_permissions_permission_id
+    ON role_permissions (permission_id);
+
+-- =============================================
+-- 用户组成员 user_roles
+-- =============================================
+CREATE TABLE user_roles
+(
+    user_id     BIGINT      NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    role_id     BIGINT      NOT NULL REFERENCES roles (id) ON DELETE CASCADE,
+    granted_by  BIGINT               DEFAULT NULL REFERENCES users (id) ON DELETE SET NULL, -- null 表示系统
+    valid_from  TIMESTAMPTZ          DEFAULT NULL,
+    valid_until TIMESTAMPTZ          DEFAULT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (user_id, role_id),
+    CONSTRAINT chk_user_roles_valid_range
+        CHECK (valid_until IS NULL OR valid_from IS NULL OR valid_until > valid_from)
+);
+
+CREATE INDEX idx_user_roles_role_id
+    ON user_roles (role_id);
+CREATE INDEX idx_user_roles_granted_by
+    ON user_roles (granted_by)
+    WHERE granted_by IS NOT NULL;
+
+-- =============================================
+-- 用户直接权限授权 user_permission_grants
+-- =============================================
+CREATE TABLE user_permission_grants
+(
+    id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id            BIGINT       NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    permission         VARCHAR(128) NOT NULL,
+    granted_by_user_id BIGINT                DEFAULT NULL REFERENCES users (id) ON DELETE SET NULL, -- null 表示系统
+    granted_by_app_id  BIGINT       NOT NULL REFERENCES oauth_apps (id) ON DELETE CASCADE,
+    valid_from         TIMESTAMPTZ           DEFAULT NULL,
+    valid_until        TIMESTAMPTZ           DEFAULT NULL,
+    note               VARCHAR(256) NOT NULL DEFAULT '',
+    created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_user_permission_grants_user_permission UNIQUE (user_id, permission),
+    CONSTRAINT chk_user_permission_grants_valid_range
+        CHECK (valid_until IS NULL OR valid_from IS NULL OR valid_until > valid_from)
+);
+
+CREATE INDEX idx_user_permission_grants_permission
+    ON user_permission_grants (permission);
+CREATE INDEX idx_user_permission_grants_granted_by_app_id
+    ON user_permission_grants (granted_by_app_id)
+    WHERE granted_by_app_id IS NOT NULL;
+CREATE INDEX idx_user_permission_grants_granted_by_user_id
+    ON user_permission_grants (granted_by_user_id)
+    WHERE granted_by_user_id IS NOT NULL;
+
+CREATE TRIGGER trg_user_permission_grants_updated_at
+    BEFORE UPDATE
+    ON user_permission_grants
+    FOR EACH ROW
+EXECUTE FUNCTION fn_update_timestamp();
+
+-- =============================================
+-- OAuth 用户授权 oauth_authorizations
+-- =============================================
+CREATE TABLE oauth_authorizations
+(
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id      BIGINT          NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    app_id       BIGINT          NOT NULL REFERENCES oauth_apps (id) ON DELETE CASCADE,
+    permissions  TEXT[]          NOT NULL DEFAULT '{}',
+    status       app_auth_status NOT NULL DEFAULT 'active',
+    created_at   TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ              DEFAULT NULL,
+
+    CONSTRAINT uq_oauth_authorizations_user_id_app_id UNIQUE (user_id, app_id)
+);
+
+CREATE INDEX idx_oauth_authorizations_app_id
+    ON oauth_authorizations (app_id);
+
+CREATE TRIGGER trg_oauth_authorizations_updated_at
+    BEFORE UPDATE
+    ON oauth_authorizations
+    FOR EACH ROW
+EXECUTE FUNCTION fn_update_timestamp();
+
+-- =============================================
+-- OAuth 刷新令牌 oauth_refresh_tokens
+-- =============================================
+CREATE TABLE oauth_refresh_tokens
+(
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    auth_id      BIGINT      NOT NULL REFERENCES oauth_authorizations (id) ON DELETE CASCADE,
+    token_hash   CHAR(128)   NOT NULL, -- sha512
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ NOT NULL,
+    last_used_at TIMESTAMPTZ          DEFAULT NULL,
+
+    CONSTRAINT uq_oauth_refresh_tokens_token_hash UNIQUE (token_hash)
+);
+
+CREATE INDEX idx_oauth_refresh_tokens_auth_id
+    ON oauth_refresh_tokens (auth_id);
+CREATE INDEX idx_oauth_refresh_tokens_expires_at
+    ON oauth_refresh_tokens (expires_at);
 
 COMMIT;

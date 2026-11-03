@@ -17,7 +17,7 @@ import (
 )
 
 func stepupInitHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	if claims.IsTemporary {
 		return errs.PermissionDeniedError().AppendDetails("临时会话不支持二次验证")
@@ -68,7 +68,7 @@ func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("无效的鉴权会话 ID")
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	session, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/user"
+	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
 
@@ -32,13 +33,12 @@ func reviewRegisterHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("无效的审核状态")
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	if !perm.Contains(claims.Permissions, "student_id.register_requests.review") {
+	claims := handling.MustGetClaims(c)
+	if !perm.HasPermission(claims, perm.PermRegisterRequestReview) {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
 	if err := user.ReviewRegisterRequest(c.Request.Context(), req.ID, req.Status, req.Comment, claims.UserID); err != nil {
-		// 服务层错误已自带 "注册请求审核失败"，直接返回以保持响应不变。
 		return err.Seal()
 	}
 

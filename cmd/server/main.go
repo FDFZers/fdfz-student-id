@@ -96,10 +96,14 @@ func main() {
 	}
 	slog.Info("Database migrations completed")
 
-	// 加载权限
-	if err := perm.LoadDefinitions(context.Background()); err != nil {
+	// 加载权限目录（同时记录重载状态）
+	if err := perm.ReloadNow(context.Background()); err != nil {
+		slog.Error("Error loading permission catalog", "error", err.Info.Error)
 		os.Exit(1)
 	}
+	permCtx, stopPermReload := context.WithCancel(context.Background())
+	defer stopPermReload()
+	perm.StartAutoReload(permCtx, perm.DefaultReloadThrottle)
 
 	// 启动服务器
 	cron, err := schedule.ScheduleCron()
@@ -166,6 +170,8 @@ func main() {
 	<-quit
 
 	slog.Info("Student ID backend shutting down")
+
+	stopPermReload()
 
 	cron.Stop()
 	slog.Info("Cron stopped")

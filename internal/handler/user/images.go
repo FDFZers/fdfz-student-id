@@ -2,7 +2,6 @@ package user
 
 import (
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/filestore"
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
@@ -16,33 +15,21 @@ import (
 )
 
 type profileImageKind struct {
-	Field          string
-	Slug           string
-	Item           string
-	AdminWritePerm string
-	SelfWritePerm  string
-	AdminReadPerm  string
-	SelfReadPerm   string
+	Field string
+	Slug  string
+	Item  string
 }
 
 var (
 	avatarImage = profileImageKind{
-		Field:          "avatar",
-		Slug:           "avatars",
-		Item:           "头像",
-		AdminWritePerm: "student_id.users.profile.avatar.write",
-		SelfWritePerm:  "student_id.user.profile.avatar.write",
-		AdminReadPerm:  "student_id.user.profile.avatar.read",
-		SelfReadPerm:   "student_id.user.profile.avatar.read.self",
+		Field: "avatar",
+		Slug:  "avatars",
+		Item:  "头像",
 	}
 	bannerImage = profileImageKind{
-		Field:          "banner",
-		Slug:           "banners",
-		Item:           "背景图",
-		AdminWritePerm: "student_id.users.profile.banner.write",
-		SelfWritePerm:  "student_id.user.profile.banner.write",
-		AdminReadPerm:  "student_id.user.profile.banner.read",
-		SelfReadPerm:   "student_id.user.profile.banner.read.self",
+		Field: "banner",
+		Slug:  "banners",
+		Item:  "背景图",
 	}
 )
 
@@ -63,16 +50,20 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-	target, err := ResolveTargetID(c, claims.UserID)
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
 	if err != nil {
 		return err
 	}
-	targetStr := strconv.FormatInt(target, 10)
+	targetStr := strconv.FormatInt(targetID, 10)
 
-	hasAdmin := perm.Contains(claims.Permissions, kind.AdminWritePerm)
-	hasSelf := target == claims.UserID && perm.Contains(claims.Permissions, kind.SelfWritePerm)
-	if !hasAdmin && !hasSelf {
+	var allowed bool
+	if targetID == claims.UserID {
+		allowed = perm.HasPermission(claims, perm.PermUserProfileUpdateBasic)
+	} else {
+		allowed = perm.HasPermission(claims, perm.PermUsersProfileUpdateBasic)
+	}
+	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
@@ -107,22 +98,24 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 }
 
 func serveProfileImage(c *gin.Context, kind profileImageKind) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
-	targetID, err := ResolveTargetID(c, claims.UserID)
+	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
 	if err != nil {
 		return err
 	}
 
-	permKey := kind.AdminReadPerm
+	var allowed bool
 	if targetID == claims.UserID {
-		permKey = kind.SelfReadPerm
+		allowed = perm.HasPermission(claims, perm.PermUserProfileReadBasic)
+	} else {
+		allowed = perm.HasPermission(claims, perm.PermUsersProfileReadBasic)
 	}
-	if !perm.Contains(claims.Permissions, permKey) {
+	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
-	if err := EnsureUserExists(c, targetID); err != nil {
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
 		return err
 	}
 
@@ -137,24 +130,28 @@ func serveProfileImage(c *gin.Context, kind profileImageKind) *errs.Error {
 }
 
 func deleteProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
-	target, err := ResolveTargetID(c, claims.UserID)
+	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
 	if err != nil {
 		return err
 	}
 
-	hasAdmin := perm.Contains(claims.Permissions, kind.AdminWritePerm)
-	hasSelf := target == claims.UserID && perm.Contains(claims.Permissions, kind.SelfWritePerm)
-	if !hasAdmin && !hasSelf {
+	var allowed bool
+	if targetID == claims.UserID {
+		allowed = perm.HasPermission(claims, perm.PermUserProfileUpdateBasic)
+	} else {
+		allowed = perm.HasPermission(claims, perm.PermUsersProfileUpdateBasic)
+	}
+	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
 	}
 
-	if err := EnsureUserExists(c, target); err != nil {
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
 		return err
 	}
 
-	slug := "/student_id/" + kind.Slug + "/" + strconv.FormatInt(target, 10)
+	slug := "/student_id/" + kind.Slug + "/" + strconv.FormatInt(targetID, 10)
 	if err := filestore.DeleteFile(slug); err != nil {
 		if err.HTTPCode == http.StatusNotFound {
 			return errs.NotFoundError().AppendDetails("未设置" + kind.Item)

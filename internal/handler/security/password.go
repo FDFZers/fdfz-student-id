@@ -25,7 +25,7 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	currentSessionID, e := uuid.Parse(claims.SessionID.String)
 	if e != nil {

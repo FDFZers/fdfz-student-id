@@ -101,13 +101,13 @@ func CreateAndLogInternalError[T any](err T, log string, args ...any) *Error {
 
 func CreatePGError(err error, item, log string) *Error {
 	if errors.Is(err, pgx.ErrNoRows) {
-		return NotFoundError().AppendDetails(fmt.Sprintf("“%s”不存在", item), "PostreSQL 错误")
+		return NotFoundError().AppendDetails(fmt.Sprintf("“%s”不存在", item), "PostgreSQL 错误")
 	}
 
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || !strings.HasPrefix(pgErr.Code, "23") {
-		return CreateAndLogInternalError(err, log).AppendDetails("PostreSQL 内部错误")
+		return CreateAndLogInternalError(err, log).AppendDetails("PostgreSQL 内部错误")
 	}
 
-	return ConflictError().AppendDetails(fmt.Sprintf("“%s”冲突", pgErr.ConstraintName), "PostreSQL 错误")
+	return ConflictError().AppendDetails(fmt.Sprintf("“%s”冲突", pgErr.ConstraintName), "PostgreSQL 错误")
 }

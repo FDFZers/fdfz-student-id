@@ -70,6 +70,7 @@ type TokenClaims struct {
 	AppID       null.String `json:"app_id,omitzero"`
 	SessionID   null.String `json:"session_id,omitzero"`
 	Permissions []string    `json:"permissions"`
+	OwnedApps   []int64     `json:"owned_apps,omitzero"`
 	IsTemporary bool        `json:"is_temporary,omitzero"`
 }
 

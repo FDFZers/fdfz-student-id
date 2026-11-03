@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/auth"
 	"fdfz-student-id/internal/service/email"
@@ -32,7 +31,7 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
 	if err != nil {
@@ -95,7 +94,7 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("验证码不能为空")
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	pending, err := auth.GetPendingEmailBind(c.Request.Context(), claims.UserID)
 	if err != nil {
@@ -133,7 +132,7 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 }
 
 func emailUnbindHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
@@ -150,7 +149,7 @@ func emailUnbindHandler(c *gin.Context) *errs.Error {
 }
 
 func totpBindInitHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
@@ -188,7 +187,7 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	pending, err := auth.GetPendingTOTPBind(c.Request.Context(), claims.UserID)
 	if err != nil {
@@ -228,7 +227,7 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 }
 
 func totpUnbindHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
@@ -257,7 +256,7 @@ func qqBindInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
 	if err != nil {
@@ -305,7 +304,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 
 	pending, err := auth.GetPendingQQBind(c.Request.Context(), claims.UserID)
 	if err != nil {
@@ -369,7 +368,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 }
 
 func qqUnbindHandler(c *gin.Context) *errs.Error {
-	claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
+	claims := handling.MustGetClaims(c)
 	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
@@ -383,31 +382,6 @@ func qqUnbindHandler(c *gin.Context) *errs.Error {
 
 	c.JSON(http.StatusOK, gin.H{})
 	return nil
-}
-
-func bindingValidateClaims() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if err := middleware.ValidateStepupToken(c); err != nil {
-			err.Abort(c)
-			return
-		}
-
-		claims := c.MustGet("token_claims").(*model.RegisteredTokenClaims)
-		if claims.IsTemporary {
-			errs.PermissionDeniedError().AppendDetails("临时会话无法修改安全设置", "鉴权失败").Abort(c)
-			return
-		}
-
-		ban, err := user.GetUserBan(c.Request.Context(), claims.UserID)
-		if err != nil {
-			err.AppendDetails("鉴权失败").Abort(c)
-			return
-		}
-		if ban != nil {
-			errs.PermissionDeniedError().AppendDetails("用户已被封禁", "鉴权失败").Abort(c)
-			return
-		}
-	}
 }
 
 func checkBindAttempts(ctx context.Context, kind string, userID int64) *errs.Error {
