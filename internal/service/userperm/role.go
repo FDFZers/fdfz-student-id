@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// 用户组列表的分页限制。
 const (
 	RoleListDefaultLimit int32 = 20
 	RoleListMaxLimit     int32 = 100
@@ -21,30 +22,33 @@ const (
 // 用户组 CRUD
 // ---------------------------------------------------------------------------
 
+// createRoleSQL 新建用户组并回填自增 id 与时间戳。
 const createRoleSQL = `
 INSERT INTO roles (app_id, name, note, is_public)
 VALUES ($1, $2, $3, $4)
 RETURNING id, app_id, name, note, is_public, created_at, updated_at
 `
 
+// CreateRole 新建用户组并回填 id；同应用下名称唯一由数据库唯一约束保证（冲突时返回 conflict）。
 func CreateRole(ctx context.Context, r *model.Role) *errs.Error {
 	if r == nil {
-		return errs.BadRequestError().AppendDetails("参数不能为空", "创建用户组失败")
+		return errs.BadRequestError().AppendDetails("未提供参数")
 	}
 	err := db.R.QueryRow(ctx, createRoleSQL, r.AppID, r.Name, r.Note, r.Public).
 		Scan(&r.ID, &r.AppID, &r.Name, &r.Note, &r.Public, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
-		return errs.CreatePGError(err, "用户组", "Failed to create role").
-			AppendDetails("创建用户组失败")
+		return errs.CreatePGError(err, "用户组", "Failed to create role")
 	}
 	return nil
 }
 
+// getRoleSQL 按 id 查询用户组。
 const getRoleSQL = `
 SELECT id, app_id, name, note, is_public, created_at, updated_at
 FROM roles WHERE id = $1
 `
 
+// GetRole 按 id 查询用户组；不存在时返回 (nil, nil)。
 func GetRole(ctx context.Context, id int64) (*model.Role, *errs.Error) {
 	var r model.Role
 	err := db.R.QueryRow(ctx, getRoleSQL, id).Scan(
@@ -54,14 +58,15 @@ func GetRole(ctx context.Context, id int64) (*model.Role, *errs.Error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, errs.CreatePGError(err, "用户组", "Failed to get role").
-			AppendDetails("获取用户组失败")
+		return nil, errs.CreatePGError(err, "用户组", "Failed to get role")
 	}
 	return &r, nil
 }
 
+// countRolesSQL 统计某应用下的用户组数量。
 const countRolesSQL = `SELECT count(*) FROM roles WHERE app_id = $1`
 
+// listRolesSQL 分页列出某应用下的全部用户组（不区分是否公开）。
 const listRolesSQL = `
 SELECT id, app_id, name, note, is_public, created_at, updated_at
 FROM roles WHERE app_id = $1
@@ -69,8 +74,10 @@ ORDER BY id
 LIMIT $2 OFFSET $3
 `
 
+// countRolesVisibleToAppSQL 统计对某应用可见的用户组数量（本应用 ∪ 其他应用的公开组）。
 const countRolesVisibleToAppSQL = `SELECT count(*) FROM roles WHERE app_id = $1 OR is_public`
 
+// listRolesVisibleToAppSQL 分页列出对某应用可见的用户组，本应用的组排在前面。
 const listRolesVisibleToAppSQL = `
 SELECT id, app_id, name, note, is_public, created_at, updated_at
 FROM roles
@@ -79,34 +86,35 @@ ORDER BY (app_id <> $1), id
 LIMIT $2 OFFSET $3
 `
 
+// ListRolesVisibleToApp 分页查询对某应用可见的用户组（本应用 ∪ 其他应用的公开组），返回当前页与总数。
 func ListRolesVisibleToApp(ctx context.Context, appID int64, limit, offset int32) ([]*model.Role, int32, *errs.Error) {
 	limit, offset = search.NormalizePagination(limit, offset)
 
 	var count int32
-	if err := db.R.QueryRow(ctx, countRolesVisibleToAppSQL, appID).Scan(&count); err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组", "Failed to count visible roles").
-			AppendDetails("用户组列表获取失败")
+	if e := db.R.QueryRow(ctx, countRolesVisibleToAppSQL, appID).Scan(&count); e != nil {
+		return nil, 0, errs.CreatePGError(e, "用户组", "Failed to count visible roles")
 	}
 
-	rows, err := db.R.Query(ctx, listRolesVisibleToAppSQL, appID, limit, offset)
-	if err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组", "Failed to query visible roles").
-			AppendDetails("用户组列表获取失败")
-	}
-
-	roles, e := collectRoles(rows, "用户组列表")
+	rows, e := db.R.Query(ctx, listRolesVisibleToAppSQL, appID, limit, offset)
 	if e != nil {
-		return nil, 0, e
+		return nil, 0, errs.CreatePGError(e, "用户组", "Failed to query visible roles")
+	}
+
+	roles, err := collectRoles(rows, "用户组列表")
+	if err != nil {
+		return nil, 0, err
 	}
 	return roles, count, nil
 }
 
+// getRoleVisibleToAppSQL 按可见性查询用户组：本应用的组或其他应用的公开组。
 const getRoleVisibleToAppSQL = `
 SELECT id, app_id, name, note, is_public, created_at, updated_at
 FROM roles
 WHERE id = $1 AND (app_id = $2 OR is_public)
 `
 
+// GetRoleVisibleToApp 按可见性查询用户组；不可见时返回 (nil, nil)。
 func GetRoleVisibleToApp(ctx context.Context, appID, roleID int64) (*model.Role, *errs.Error) {
 	var r model.Role
 	err := db.R.QueryRow(ctx, getRoleVisibleToAppSQL, roleID, appID).Scan(
@@ -116,12 +124,12 @@ func GetRoleVisibleToApp(ctx context.Context, appID, roleID int64) (*model.Role,
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, errs.CreatePGError(err, "用户组", "Failed to get visible role").
-			AppendDetails("获取用户组失败")
+		return nil, errs.CreatePGError(err, "用户组", "Failed to get visible role")
 	}
 	return &r, nil
 }
 
+// ListRoles 分页查询某应用下的全部用户组（不区分是否公开），返回当前页与总数。
 func ListRoles(ctx context.Context, appID int64, limit, offset int32) ([]*model.Role, int32, *errs.Error) {
 	if limit <= 0 {
 		limit = RoleListDefaultLimit
@@ -134,24 +142,23 @@ func ListRoles(ctx context.Context, appID int64, limit, offset int32) ([]*model.
 	}
 
 	var count int32
-	if err := db.R.QueryRow(ctx, countRolesSQL, appID).Scan(&count); err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组", "Failed to count roles").
-			AppendDetails("用户组列表获取失败")
+	if e := db.R.QueryRow(ctx, countRolesSQL, appID).Scan(&count); e != nil {
+		return nil, 0, errs.CreatePGError(e, "用户组", "Failed to count roles")
 	}
 
-	rows, err := db.R.Query(ctx, listRolesSQL, appID, limit, offset)
-	if err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组", "Failed to query roles").
-			AppendDetails("用户组列表获取失败")
-	}
-
-	roles, e := collectRoles(rows, "用户组列表")
+	rows, e := db.R.Query(ctx, listRolesSQL, appID, limit, offset)
 	if e != nil {
-		return nil, 0, e
+		return nil, 0, errs.CreatePGError(e, "用户组", "Failed to query roles")
+	}
+
+	roles, err := collectRoles(rows, "用户组列表")
+	if err != nil {
+		return nil, 0, err
 	}
 	return roles, count, nil
 }
 
+// collectRoles 把查询结果收集为用户组列表并关闭 rows；item 用于构造错误详情。
 func collectRoles(rows pgx.Rows, item string) ([]*model.Role, *errs.Error) {
 	defer rows.Close()
 
@@ -159,34 +166,34 @@ func collectRoles(rows pgx.Rows, item string) ([]*model.Role, *errs.Error) {
 	for rows.Next() {
 		var r model.Role
 		if err := rows.Scan(&r.ID, &r.AppID, &r.Name, &r.Note, &r.Public, &r.CreatedAt, &r.UpdatedAt); err != nil {
-			return nil, errs.CreatePGError(err, item, "Failed to scan role").
-				AppendDetails(item + "获取失败")
+			return nil, errs.CreatePGError(err, item, "Failed to scan role")
 		}
 		roles = append(roles, &r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, errs.CreatePGError(err, item, "Failed to iterate roles").
-			AppendDetails(item + "获取失败")
+		return nil, errs.CreatePGError(err, item, "Failed to iterate roles")
 	}
 	return roles, nil
 }
 
+// updateRoleSQL 更新用户组名称、备注与公开标记。
 const updateRoleSQL = `UPDATE roles SET name = $2, note = $3, is_public = $4 WHERE id = $1`
 
+// UpdateRole 更新用户组名称、备注与公开标记；名称冲突由数据库唯一约束返回 conflict。
 func UpdateRole(ctx context.Context, id int64, name, note string, public bool) *errs.Error {
 	if _, err := db.R.Exec(ctx, updateRoleSQL, id, name, note, public); err != nil {
-		return errs.CreatePGError(err, "用户组", "Failed to update role").
-			AppendDetails("更新用户组失败")
+		return errs.CreatePGError(err, "用户组", "Failed to update role")
 	}
 	return nil
 }
 
+// deleteRoleSQL 删除用户组，组权限与组成员由外键级联清理。
 const deleteRoleSQL = `DELETE FROM roles WHERE id = $1`
 
+// DeleteRole 删除用户组；不存在的 id 也视为成功。
 func DeleteRole(ctx context.Context, id int64) *errs.Error {
 	if _, err := db.R.Exec(ctx, deleteRoleSQL, id); err != nil {
-		return errs.CreatePGError(err, "用户组", "Failed to delete role").
-			AppendDetails("删除用户组失败")
+		return errs.CreatePGError(err, "用户组", "Failed to delete role")
 	}
 	return nil
 }
@@ -195,32 +202,35 @@ func DeleteRole(ctx context.Context, id int64) *errs.Error {
 // 用户组权限 role_permissions
 // ---------------------------------------------------------------------------
 
+// addRolePermissionSQL 给用户组添加一条权限，重复添加幂等。
 const addRolePermissionSQL = `
 INSERT INTO role_permissions (role_id, permission_id)
 VALUES ($1, $2)
 ON CONFLICT (role_id, permission_id) DO NOTHING
 `
 
+// AddRolePermission 为用户组添加单条权限（重复添加幂等）。
 func AddRolePermission(ctx context.Context, roleID, permissionID int64) *errs.Error {
 	if _, err := db.R.Exec(ctx, addRolePermissionSQL, roleID, permissionID); err != nil {
-		return errs.CreatePGError(err, "用户组权限", "Failed to add role permission").
-			AppendDetails("添加用户组权限失败")
+		return errs.CreatePGError(err, "用户组权限", "Failed to add role permission")
 	}
 	return nil
 }
 
+// removeRolePermissionSQL 移除用户组与权限的关联。
 const removeRolePermissionSQL = `
 DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2
 `
 
+// RemoveRolePermission 移除用户组的单条权限；不存在时幂等成功。
 func RemoveRolePermission(ctx context.Context, roleID, permissionID int64) *errs.Error {
 	if _, err := db.R.Exec(ctx, removeRolePermissionSQL, roleID, permissionID); err != nil {
-		return errs.CreatePGError(err, "用户组权限", "Failed to remove role permission").
-			AppendDetails("移除用户组权限失败")
+		return errs.CreatePGError(err, "用户组权限", "Failed to remove role permission")
 	}
 	return nil
 }
 
+// listRolePermissionsSQL 列出某用户组直接拥有的权限定义。
 const listRolePermissionsSQL = `
 SELECT pd.id, pd.app_id, pd.value, pd.description, pd.requestable,
        pd.created_by, pd.created_at, pd.updated_at
@@ -230,11 +240,11 @@ WHERE rp.role_id = $1
 ORDER BY pd.id
 `
 
+// ListRolePermissions 列出用户组直接拥有的权限定义（不展开权限继承）。
 func ListRolePermissions(ctx context.Context, roleID int64) ([]*model.PermissionDef, *errs.Error) {
 	rows, err := db.R.Query(ctx, listRolePermissionsSQL, roleID)
 	if err != nil {
-		return nil, errs.CreatePGError(err, "用户组权限", "Failed to query role permissions").
-			AppendDetails("获取用户组权限失败")
+		return nil, errs.CreatePGError(err, "用户组权限", "Failed to query role permissions")
 	}
 	return collectPermissionDefs(rows, "用户组权限")
 }
@@ -243,6 +253,7 @@ func ListRolePermissions(ctx context.Context, roleID int64) ([]*model.Permission
 // 用户所在用户组 user_roles
 // ---------------------------------------------------------------------------
 
+// grantUserRoleSQL 写入用户组成员关系；重复授予时覆盖授予人与有效期。
 const grantUserRoleSQL = `
 INSERT INTO user_roles (user_id, role_id, granted_by, valid_from, valid_until)
 VALUES ($1, $2, $3, $4, $5)
@@ -252,30 +263,31 @@ SET granted_by  = EXCLUDED.granted_by,
     valid_until = EXCLUDED.valid_until
 `
 
+// GrantUserRole 授予用户组给用户（按 user_id + role_id upsert）；有效期由 valid_from/valid_until 控制。
 func GrantUserRole(ctx context.Context, ur *model.UserRole) *errs.Error {
 	if ur == nil {
-		return errs.BadRequestError().AppendDetails("参数不能为空", "授予用户组失败")
+		return errs.BadRequestError().AppendDetails("未提供参数")
 	}
 	if _, err := db.R.Exec(ctx, grantUserRoleSQL,
 		ur.UserID, ur.RoleID, ur.GrantedBy, ur.ValidFrom, ur.ValidUntil,
 	); err != nil {
-		return errs.CreatePGError(err, "用户所在用户组", "Failed to grant user role").
-			AppendDetails("授予用户组失败")
+		return errs.CreatePGError(err, "用户所在用户组", "Failed to grant user role")
 	}
 	return nil
 }
 
+// revokeUserRoleSQL 删除用户与用户组的成员关系。
 const revokeUserRoleSQL = `DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2`
 
+// RevokeUserRole 撤销用户组成员关系；不存在时幂等成功。
 func RevokeUserRole(ctx context.Context, userID, roleID int64) *errs.Error {
 	if _, err := db.R.Exec(ctx, revokeUserRoleSQL, userID, roleID); err != nil {
-		return errs.CreatePGError(err, "用户所在用户组", "Failed to revoke user role").
-			AppendDetails("撤销用户组失败")
+		return errs.CreatePGError(err, "用户所在用户组", "Failed to revoke user role")
 	}
 	return nil
 }
 
-// appID 传 nil 时返回该用户在所有应用下的有效用户组；不传 nil 时仅返回指定应用的。
+// listUserRolesSQL 查询用户当前有效的用户组；appID 为 nil 时返回所有应用，否则仅返回指定应用。
 const listUserRolesSQL = `
 SELECT r.id, r.app_id, r.name, r.note, r.created_at, r.updated_at
 FROM user_roles ur
@@ -287,17 +299,19 @@ WHERE ur.user_id = $1
 ORDER BY r.id
 `
 
+// ListUserRoles 查询用户当前有效的用户组，可按应用过滤（appID 为 nil 表示不限应用）。
 func ListUserRoles(ctx context.Context, userID int64, appID *int64) ([]*model.Role, *errs.Error) {
 	rows, err := db.R.Query(ctx, listUserRolesSQL, userID, appID)
 	if err != nil {
-		return nil, errs.CreatePGError(err, "用户所在用户组", "Failed to query user roles").
-			AppendDetails("用户所在用户组获取失败")
+		return nil, errs.CreatePGError(err, "用户所在用户组", "Failed to query user roles")
 	}
 	return collectRoles(rows, "用户所在用户组")
 }
 
+// countRoleUsersSQL 统计某用户组的成员数量。
 const countRoleUsersSQL = `SELECT count(*) FROM user_roles WHERE role_id = $1`
 
+// listRoleUserIDsSQL 分页列出某用户组的成员用户 ID，按加入时间倒序。
 const listRoleUserIDsSQL = `
 SELECT user_id
 FROM user_roles
@@ -306,7 +320,7 @@ ORDER BY created_at DESC, user_id DESC
 LIMIT $2 OFFSET $3
 `
 
-// 返回拥有该用户组的用户 ID 列表（分页），如需要完整用户信息可在此基础上再做 JOIN。
+// ListRoleUserIDs 分页查询某用户组的成员用户 ID；需要完整用户信息时可在此基础上再 JOIN。
 func ListRoleUserIDs(ctx context.Context, roleID int64, limit, offset int32) ([]int64, int32, *errs.Error) {
 	if limit <= 0 {
 		limit = RoleListDefaultLimit
@@ -320,14 +334,12 @@ func ListRoleUserIDs(ctx context.Context, roleID int64, limit, offset int32) ([]
 
 	var count int32
 	if err := db.R.QueryRow(ctx, countRoleUsersSQL, roleID).Scan(&count); err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to count role users").
-			AppendDetails("用户组成员列表获取失败")
+		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to count role users")
 	}
 
 	rows, err := db.R.Query(ctx, listRoleUserIDsSQL, roleID, limit, offset)
 	if err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to query role users").
-			AppendDetails("用户组成员列表获取失败")
+		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to query role users")
 	}
 	defer rows.Close()
 
@@ -335,14 +347,12 @@ func ListRoleUserIDs(ctx context.Context, roleID int64, limit, offset int32) ([]
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to scan role user").
-				AppendDetails("用户组成员列表获取失败")
+			return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to scan role user")
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to iterate role users").
-			AppendDetails("用户组成员列表获取失败")
+		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to iterate role users")
 	}
 	return ids, count, nil
 }

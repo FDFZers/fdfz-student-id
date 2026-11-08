@@ -1,3 +1,4 @@
+// Package search 实现基于 squirrel 的可配置搜索：构建参数化的计数与数据 SQL，并执行分页查询。
 package search
 
 import (
@@ -11,13 +12,16 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// psql 是统一使用 $n 占位符的 squirrel builder，所有条件均参数化，不拼接用户输入。
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 const (
-	DefaultLimit = 20
-	MaxLimit     = 500
+	DefaultLimit = 20  // 未指定 limit 时的默认分页大小
+	MaxLimit     = 500 // 单次查询允许的最大分页大小，超过会被截断
 )
 
+// GetInfo 把搜索配置转换为对外元信息。
+// 注意：Tags 的标签值来自 map 遍历，每次返回的顺序可能不同，客户端应视为集合。
 func GetInfo(cfg *SearchConfig) *SearchInfo {
 	fields := make([]string, 0, len(cfg.Fields))
 	for _, field := range cfg.Fields {
@@ -46,15 +50,19 @@ func GetInfo(cfg *SearchConfig) *SearchInfo {
 	}
 }
 
+// ExecSearch 执行搜索：先 COUNT 统计命中总数，再按分页查询数据并扫描为 T。
+// 注意：数据查询列需与 T 的 db tag 对齐（pgx.RowToAddrOfStructByName 按列名映射）。
 func ExecSearch[T any](ctx context.Context, cfg *SearchConfig, req *SearchRequest) (*SearchResult[T], *errs.Error) {
 	query, err := BuildSearch(cfg, req)
 	if err != nil {
 		return nil, err
 	}
+	// 统计总数
 	var count int32
-	if err := db.R.QueryRow(ctx, query.Count.SQL, query.Count.Args...).Scan(&count); err != nil {
-		return nil, errs.CreatePGError(err, cfg.Item, "Failed to execute search count query")
+	if e := db.R.QueryRow(ctx, query.Count.SQL, query.Count.Args...).Scan(&count); e != nil {
+		return nil, errs.CreatePGError(e, cfg.Item, "Failed to execute search count query")
 	}
+	// 查询当前页数据
 	rows, e := db.R.Query(ctx, query.Data.SQL, query.Data.Args...)
 	if e != nil {
 		return nil, errs.CreatePGError(e, cfg.Item, "Failed to execute search data query")
@@ -69,7 +77,11 @@ func ExecSearch[T any](ctx context.Context, cfg *SearchConfig, req *SearchReques
 	}, nil
 }
 
+// BuildSearch 根据配置与请求构建 COUNT 与数据查询两条参数化 SQL。
+// 依次处理：白名单校验、关键词匹配、标签过滤、附加条件、排序与分页。
+// 注意：所有字段/标签/排序标识都会先对照白名单，不合法时返回 bad_request。
 func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Error) {
+	// 建立白名单索引，便于按 ID 查找并拒绝未知取值
 	fieldsByID := make(map[string]Field, len(cfg.Fields))
 	for _, f := range cfg.Fields {
 		fieldsByID[f.ID] = f
@@ -87,6 +99,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		allowedMatch[m] = struct{}{}
 	}
 
+	// 解析匹配方法（缺省 contains）
 	var method MatchMethod
 	if req.MatchMethod == nil {
 		method = MatchMethodContains
@@ -94,9 +107,10 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		method = *req.MatchMethod
 	}
 	if _, ok := allowedMatch[method]; !ok {
-		return nil, errs.BadRequestError().AppendDetails("未知匹配方法：" + string(method))
+		return nil, errs.BadRequestError().AppendDetails("匹配方法不受支持：" + string(method))
 	}
 
+	// 解析大小写选项（缺省区分大小写）
 	var caseSensitive bool
 	if req.CaseSensitive == nil {
 		caseSensitive = true
@@ -104,6 +118,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		caseSensitive = *req.CaseSensitive
 	}
 
+	// 校验并展开参与关键词匹配的字段，缺省为全部可搜索字段
 	requested := req.Fields
 	if len(requested) == 0 {
 		requested = make([]string, 0, len(cfg.Fields))
@@ -115,7 +130,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 	for _, id := range requested {
 		f, ok := fieldsByID[id]
 		if !ok {
-			return nil, errs.BadRequestError().AppendDetails("未知搜索字段：" + id)
+			return nil, errs.BadRequestError().AppendDetails("搜索字段不存在：" + id)
 		}
 		searchFields = append(searchFields, f)
 	}
@@ -123,6 +138,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 	var conditions []sq.Sqlizer
 	trimmed := strings.TrimSpace(req.Query)
 
+	// 关键词条件：各字段之间用 OR 连接；没有有效条件时整个关键词条件省略
 	if trimmed != "" && len(searchFields) > 0 {
 		orParts := make([]sq.Sqlizer, 0, len(searchFields))
 		for _, f := range searchFields {
@@ -135,9 +151,10 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		}
 	}
 
+	// 先校验请求中出现的标签 ID，再按配置顺序构建标签条件
 	for tagID := range req.Tags {
 		if _, ok := tagsByID[tagID]; !ok {
-			return nil, errs.BadRequestError().AppendDetails("未知标签：" + tagID)
+			return nil, errs.BadRequestError().AppendDetails("标签不存在：" + tagID)
 		}
 	}
 
@@ -155,8 +172,10 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		}
 	}
 
+	// 拼接调用方固定的附加条件（软删除过滤、应用隔离等）
 	conditions = append(conditions, cfg.AdditionalWhere...)
 
+	// 构造 COUNT 与数据查询骨架
 	countB := psql.Select("COUNT(*)").From(cfg.Table)
 	dataB := psql.Select("*").From(cfg.Table)
 	if len(cfg.Columns) > 0 {
@@ -169,11 +188,12 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		dataB = dataB.Where(where)
 	}
 
+	// 排序：显式排序字段优先；否则仅在空 query 时使用默认排序列
 	switch {
 	case req.SortBy.Valid:
 		f, ok := sortableByID[req.SortBy.String]
 		if !ok {
-			return nil, errs.BadRequestError().AppendDetails("未知排序字段：" + req.SortBy.String)
+			return nil, errs.BadRequestError().AppendDetails("排序字段不存在：" + req.SortBy.String)
 		}
 		var dir string
 		var order SortOrder
@@ -188,7 +208,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		case SortOrderDescending:
 			dir = "DESC"
 		default:
-			return nil, errs.BadRequestError().AppendDetails("未知排序顺序：" + string(order))
+			return nil, errs.BadRequestError().AppendDetails("排序顺序不受支持：" + string(order))
 		}
 		dataB = dataB.OrderBy(fmt.Sprintf("%s %s", f.Column, dir))
 
@@ -196,6 +216,8 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		dataB = dataB.OrderBy(cfg.DefaultSortColumn)
 	}
 
+	// 分页：未提供 limit 用 DefaultLimit，越界按 MaxLimit 截断；offset 仅取正值
+	// 存疑：显式传入 limit <= 0 时会落到 MaxLimit，而不是像 NormalizePagination 那样回退 DefaultLimit。
 	var limit int64
 	if req.Limit.Valid {
 		limit = req.Limit.Int64
@@ -210,13 +232,14 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		dataB = dataB.Offset(uint64(req.Offset.Int64))
 	}
 
-	countSQL, countArgs, err := countB.ToSql()
-	if err != nil {
-		return nil, errs.CreateAndLogInternalError(err, "Failed to build search count query", "table", cfg.Table).AppendDetails("SQL 语句构建失败")
+	// 生成最终参数化 SQL
+	countSQL, countArgs, e := countB.ToSql()
+	if e != nil {
+		return nil, errs.CreateAndLogInternalError(e, "Failed to build search count query", "table", cfg.Table).AppendDetails("SQL 语句构建失败")
 	}
-	dataSQL, dataArgs, err := dataB.ToSql()
-	if err != nil {
-		return nil, errs.CreateAndLogInternalError(err, "Failed to build search data query", "table", cfg.Table).AppendDetails("SQL 语句构建失败")
+	dataSQL, dataArgs, e := dataB.ToSql()
+	if e != nil {
+		return nil, errs.CreateAndLogInternalError(e, "Failed to build search data query", "table", cfg.Table).AppendDetails("SQL 语句构建失败")
 	}
 
 	return &SearchQuery{
@@ -225,6 +248,9 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 	}, nil
 }
 
+// buildMatchCondition 为单个字段与关键词构建匹配条件，方法不受支持时返回 nil。
+// Numeric 字段先转 ::text 再匹配；区分大小写时用 LIKE/~，否则用 ILIKE/~*。
+// 注意：这里用字符串字面量比较 MatchMethod，修改 ENUM 声明时需同步。
 func buildMatchCondition(f Field, query string, method MatchMethod, caseSensitive bool) sq.Sqlizer {
 	col := f.Column
 	if f.Numeric {
@@ -240,30 +266,35 @@ func buildMatchCondition(f Field, query string, method MatchMethod, caseSensitiv
 
 	switch string(method) {
 	case "exact":
+		// 等值匹配；不区分大小写时两边转小写比较
 		if caseSensitive {
 			return sq.Eq{col: query}
 		}
 		return sq.Expr(fmt.Sprintf("lower(%s) = lower(?)", col), query)
 
 	case "contains":
+		// 包含匹配
 		return sq.Expr(
 			fmt.Sprintf("%s %s ?", col, likeOp),
 			"%"+escapeLike(query)+"%",
 		)
 
 	case "prefix":
+		// 前缀匹配
 		return sq.Expr(
 			fmt.Sprintf("%s %s ?", col, likeOp),
 			escapeLike(query)+"%",
 		)
 
 	case "suffix":
+		// 后缀匹配
 		return sq.Expr(
 			fmt.Sprintf("%s %s ?", col, likeOp),
 			"%"+escapeLike(query),
 		)
 
 	case "fuzzy":
+		// 按空白分词，每个词都要包含（AND）
 		words := strings.Fields(query)
 		if len(words) == 0 {
 			return nil
@@ -278,11 +309,13 @@ func buildMatchCondition(f Field, query string, method MatchMethod, caseSensitiv
 		return sq.And(parts)
 
 	case "regex":
+		// 正则匹配
 		return sq.Expr(fmt.Sprintf("%s %s ?", col, reOp), query)
 	}
 	return nil
 }
 
+// escapeLike 转义 LIKE 模式中的反斜杠、% 与 _，避免用户输入被当作通配符。
 func escapeLike(s string) string {
 	r := strings.NewReplacer(
 		`\`, `\\`,
@@ -292,6 +325,9 @@ func escapeLike(s string) string {
 	return r.Replace(s)
 }
 
+// buildTagCondition 把标签选择转换为列的 IN / NOT IN 条件。
+// ValueMap 是「列值 -> 标签值」，这里先反转出「标签值 -> 列值列表」再展开为 = ANY(...)。
+// include 与 exclude 同时存在时用 AND 连接；两者都为空时返回 nil（不产生条件）。
 func buildTagCondition(tag Tag, sel TagSelection) (sq.Sqlizer, *errs.Error) {
 	reverse := make(map[string][]string, len(tag.ValueMap))
 	for colVal, tagVal := range tag.ValueMap {
@@ -302,7 +338,7 @@ func buildTagCondition(tag Tag, sel TagSelection) (sq.Sqlizer, *errs.Error) {
 	for _, id := range sel.Include {
 		vals, ok := reverse[id]
 		if !ok {
-			return nil, errs.BadRequestError().AppendDetails(fmt.Sprintf("未知标签：%s.%s", tag.ID, id))
+			return nil, errs.BadRequestError().AppendDetails(fmt.Sprintf("标签不存在：%s.%s", tag.ID, id))
 		}
 		includeVals = append(includeVals, vals...)
 	}
@@ -311,7 +347,7 @@ func buildTagCondition(tag Tag, sel TagSelection) (sq.Sqlizer, *errs.Error) {
 	for _, id := range sel.Exclude {
 		vals, ok := reverse[id]
 		if !ok {
-			return nil, errs.BadRequestError().AppendDetails(fmt.Sprintf("未知标签：%s.%s", tag.ID, id))
+			return nil, errs.BadRequestError().AppendDetails(fmt.Sprintf("标签不存在：%s.%s", tag.ID, id))
 		}
 		excludeVals = append(excludeVals, vals...)
 	}

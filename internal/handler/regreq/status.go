@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 )
 
+// registerRequestStatusHandler 查询注册申请的审核状态，无需登录。
+// 凭申请 ID + Altcha 人机验证即可查询，只返回状态、审核意见与审核时间，不泄露表单内容。
 func registerRequestStatusHandler(c *gin.Context) *errs.Error {
 	if err := captcha.VerifyPayloadStr(c.Request.Context(), c.Query("altcha_payload")); err != nil {
 		return err
@@ -17,7 +19,7 @@ func registerRequestStatusHandler(c *gin.Context) *errs.Error {
 
 	id, e := uuid.Parse(c.Query("id"))
 	if e != nil {
-		return errs.BadRequestError().AppendDetails("无效的注册请求 ID")
+		return errs.BadRequestError().AppendDetails("注册请求 ID 格式错误")
 	}
 
 	req, err := user.GetRegisterRequestByID(c.Request.Context(), id)

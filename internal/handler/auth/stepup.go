@@ -16,6 +16,8 @@ import (
 	"github.com/guregu/null/v6"
 )
 
+// stepupInitHandler 为当前登录用户创建提权用鉴权会话，强制启用全部已绑定的二次验证方式。
+// 注意：临时会话不允许提权。
 func stepupInitHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
@@ -55,21 +57,25 @@ func stepupInitHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// stepupFinalizeReq 是提权完成的请求体。
 type stepupFinalizeReq struct {
-	SessionID uuid.UUID `json:"session_id"`
+	SessionID uuid.UUID `json:"session_id"` // 提权初始化返回的鉴权会话 ID
 }
 
+// stepupFinalizeHandler 在提权会话通过二次验证后签发短时效 stepup_token 并写入 Cookie。
+// 注意：会话必须属于当前用户且已通过二次验证；签发后删除鉴权会话，提权令牌由 Cookie 承载。
 func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 	var req stepupFinalizeReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if req.SessionID == uuid.Nil {
-		return errs.BadRequestError().AppendDetails("无效的鉴权会话 ID")
+		return errs.BadRequestError().AppendDetails("未提供鉴权会话 ID")
 	}
 
 	claims := handling.MustGetClaims(c)
 
+	// 校验提权会话的归属与状态
 	session, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
 	if err != nil {
 		return err
@@ -87,6 +93,7 @@ func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.IllegalStateError().AppendDetails("二次验证未通过")
 	}
 
+	// 签发提权令牌并写入 Cookie
 	stepupToken, e := crypto.GenerateJWT(uuid.New(), &model.TokenClaims{
 		UserID:    claims.UserID,
 		TokenType: model.TokenTypeStepup,

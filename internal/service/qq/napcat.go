@@ -1,4 +1,4 @@
-// Package qq 封装 NapCat（OneBot 11 HTTP）接口，用于拉取私聊消息与发送消息。
+// Package qq 封装 NapCat（OneBot 11 HTTP）接口，用于拉取 QQ 私聊消息以校验验证码，并预留主动发送私聊消息能力。
 package qq
 
 import (
@@ -15,30 +15,35 @@ import (
 )
 
 const (
-	defaultHistoryCount = 20
-	maxHistoryCount     = 50
-	httpTimeout         = 8 * time.Second
-	maxResponseBody     = 4 << 20
+	defaultHistoryCount = 20              // 默认拉取的历史消息条数
+	maxHistoryCount     = 50              // 单次拉取上限，超过时回退为默认条数
+	httpTimeout         = 8 * time.Second // 单次 NapCat 请求超时
+	maxResponseBody     = 4 << 20         // 响应体读取上限（4 MiB），避免异常响应占满内存
 )
 
+// Message 是从 NapCat 消息历史中提取出的单条私聊消息。
 type Message struct {
-	Time     int64
-	SenderQQ int64
-	Text     string
+	Time     int64  // 发送时间（Unix 秒）
+	SenderQQ int64  // 发送者 QQ 号
+	Text     string // 文本内容，仅拼接 text 类型的消息段
 }
 
+// apiResponse 是 OneBot 11 的通用响应包装。
 type apiResponse struct {
-	Status  string          `json:"status"`
-	RetCode int             `json:"retcode"`
-	Data    json.RawMessage `json:"data"`
-	Message string          `json:"message"`
-	Wording string          `json:"wording"`
+	Status  string          `json:"status"`  // ok 表示接口调用成功
+	RetCode int             `json:"retcode"` // 0 表示成功，非 0 为错误码
+	Data    json.RawMessage `json:"data"`    // 各接口的返回数据
+	Message string          `json:"message"` // 错误描述
+	Wording string          `json:"wording"` // 错误补充说明
 }
 
+// endpointURL 拼接 NapCat 基础地址与 API 路径，去掉基础地址末尾多余的 /。
 func endpointURL(path string) string {
 	return strings.TrimRight(strings.TrimSpace(cfg.C.NapCatEndpoint), "/") + path
 }
 
+// post 向 NapCat 发送 JSON 请求并解析 OneBot 11 响应。
+// 注意：非 2xx 状态码、status 非 ok 或 retcode 非 0 都会返回错误；配置 NAPCAT_TOKEN 时自动带 Bearer 认证。
 func post(ctx context.Context, path string, payload any) (json.RawMessage, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -53,6 +58,7 @@ func post(ctx context.Context, path string, payload any) (json.RawMessage, error
 		req.Header.Set("Authorization", "Bearer "+cfg.C.NapCatToken)
 	}
 
+	// 每次请求单独创建客户端，超时由 httpTimeout 控制
 	resp, err := (&http.Client{Timeout: httpTimeout}).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("qq: request failed: %w", err)
@@ -82,6 +88,8 @@ func post(ctx context.Context, path string, payload any) (json.RawMessage, error
 	return api.Data, nil
 }
 
+// GetFriendMsgHistory 拉取指定 QQ 好友最近 count 条私聊消息（机器人视角）。
+// count 非正数或超过上限时回退为默认条数；单条消息解析失败会被跳过而不是返回错误。
 func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, error) {
 	if count <= 0 || count > maxHistoryCount {
 		count = defaultHistoryCount
@@ -108,6 +116,7 @@ func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, 
 		return nil, fmt.Errorf("qq: unexpected message history shape: %w", err)
 	}
 
+	// 逐条解析，畸形消息跳过
 	messages := make([]Message, 0, len(items))
 	for _, item := range items {
 		msg, err := parseMessage(item)
@@ -119,6 +128,8 @@ func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, 
 	return messages, nil
 }
 
+// SendPrivateMessage 向指定 QQ 号发送私聊文本消息。
+// 注意：当前仓库内暂无调用方，2FA 验证码由用户主动发给机器人，保留该能力供后续通知类需求使用。
 func SendPrivateMessage(ctx context.Context, qq int64, message string) error {
 	_, err := post(ctx, "/send_private_msg", map[string]any{
 		"user_id": qq,
@@ -127,6 +138,7 @@ func SendPrivateMessage(ctx context.Context, qq int64, message string) error {
 	return err
 }
 
+// oneBotMessage 是 OneBot 11 消息对象中本包关心的字段。
 type oneBotMessage struct {
 	Time    int64  `json:"time"`
 	UserID  int64  `json:"user_id"`
@@ -137,6 +149,7 @@ type oneBotMessage struct {
 	Message json.RawMessage `json:"message"`
 }
 
+// parseMessage 把 OneBot 消息对象转换为 Message，优先取消息段文本与 sender.user_id，缺失时回退。
 func parseMessage(raw json.RawMessage) (Message, error) {
 	var m oneBotMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -153,6 +166,7 @@ func parseMessage(raw json.RawMessage) (Message, error) {
 	return Message{Time: m.Time, SenderQQ: sender, Text: text}, nil
 }
 
+// extractText 提取纯文本：兼容 OneBot 的纯字符串与消息段数组两种 message 形状，只拼接 text 段。
 func extractText(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

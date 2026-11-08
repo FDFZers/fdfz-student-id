@@ -1,3 +1,5 @@
+// Package permissions 实现权限管理相关的 HTTP 处理器：权限定义 CRUD、权限继承、权限定义/用户组搜索、
+// 权限目录重载，以及应用维度的用户组与用户授权接口。用户组的业务规则详见 docs/user-groups.md。
 package permissions
 
 import (
@@ -12,6 +14,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// InitRoutes 在 /permissions 下注册权限管理相关路由。
+// 应用维度接口用 RequireAppAccess 鉴权：拥有全局权限，或拥有 owned_apps 系列权限且是该应用所有者；
+// 全局维度接口用 RequirePermission 鉴权。
 func InitRoutes(internal *gin.RouterGroup) {
 	group := internal.Group("/permissions")
 
@@ -20,6 +25,7 @@ func InitRoutes(internal *gin.RouterGroup) {
 	globalRead := middleware.RequirePermission(perm.PermPermissionsRead)
 	globalWrite := middleware.RequirePermission(perm.PermPermissionsWrite)
 
+	// 应用维度的权限定义与继承
 	group.GET("/:appID/definitions/search/info", appRead, handling.Wrap("权限定义搜索信息获取失败", appPermissionSearchInfoHandler))
 	group.POST("/:appID/definitions/search/query", appRead, handling.Wrap("权限定义搜索失败", appPermissionSearchQueryHandler))
 	group.POST("/:appID/definitions", appWrite, handling.Wrap("权限定义创建失败", createAppPermissionHandler))
@@ -28,6 +34,7 @@ func InitRoutes(internal *gin.RouterGroup) {
 	group.GET("/:appID/definitions/:permID/implies", appRead, handling.Wrap("权限继承获取失败", getAppPermissionImpliesHandler))
 	group.PUT("/:appID/definitions/:permID/implies", appWrite, handling.Wrap("权限继承设置失败", setAppPermissionImpliesHandler))
 
+	// 应用维度的用户组、成员与组权限
 	group.GET("/:appID/groups/search/info", appRead, handling.Wrap("用户组搜索信息获取失败", appUserGroupSearchInfoHandler))
 	group.POST("/:appID/groups/search/query", appRead, handling.Wrap("用户组搜索失败", appUserGroupSearchQueryHandler))
 	group.POST("/:appID/groups", appWrite, handling.Wrap("用户组创建失败", createAppGroupHandler))
@@ -41,20 +48,24 @@ func InitRoutes(internal *gin.RouterGroup) {
 	group.POST("/:appID/groups/:groupID/users", appWrite, handling.Wrap("用户组成员授予失败", grantAppGroupUserHandler))
 	group.DELETE("/:appID/groups/:groupID/users/:userID", appWrite, handling.Wrap("用户组成员撤销失败", revokeAppGroupUserHandler))
 
+	// 应用维度的用户直接授权
 	group.GET("/:appID/users/:userID/grants", appRead, handling.Wrap("应用用户授权列表获取失败", listAppUserGrantsHandler))
 	group.POST("/:appID/users/:userID/grants", appWrite, handling.Wrap("应用用户授权失败", grantAppUserGrantHandler))
 	group.DELETE("/:appID/users/:userID/grants", appWrite, handling.Wrap("应用用户授权撤销失败", revokeAppUserGrantHandler))
 	group.GET("/:appID/users/:userID/effective", appRead, handling.Wrap("应用用户有效权限获取失败", getAppUserEffectivePermissionsHandler))
 
+	// 全局维度的权限定义与用户组搜索
 	group.GET("/definitions/search/info", globalRead, handling.Wrap("权限定义搜索信息获取失败", permissionSearchInfoHandler))
 	group.POST("/definitions/search/query", globalRead, handling.Wrap("权限定义搜索失败", permissionSearchQueryHandler))
 	group.GET("/groups/search/info", globalRead, handling.Wrap("用户组搜索信息获取失败", userGroupSearchInfoHandler))
 	group.POST("/groups/search/query", globalRead, handling.Wrap("用户组搜索失败", userGroupSearchQueryHandler))
 
+	// 权限目录重载
 	group.GET("/reload/status", globalRead, handling.Wrap("权限重载状态获取失败", getReloadStatusHandler))
 	group.POST("/reload", globalWrite, handling.Wrap("权限重载失败", reloadHandler))
 }
 
+// defJSON 把权限定义渲染为 API 响应。PermissionDef 本身只有 AppID，命名空间需由调用方按应用提供。
 func defJSON(def *model.PermissionDef, namespace string) gin.H {
 	return gin.H{
 		"id":          def.ID,
@@ -70,6 +81,7 @@ func defJSON(def *model.PermissionDef, namespace string) gin.H {
 	}
 }
 
+// defsJSON 把同一应用内的多个权限定义渲染为数组。
 func defsJSON(defs []*model.PermissionDef, namespace string) []gin.H {
 	data := make([]gin.H, 0, len(defs))
 	for _, def := range defs {
@@ -78,6 +90,7 @@ func defsJSON(defs []*model.PermissionDef, namespace string) []gin.H {
 	return data
 }
 
+// defsJSONMultiApp 为跨应用查询批量补全命名空间；会查询全部未删除应用，仅适合管理端小批量结果。
 func defsJSONMultiApp(c *gin.Context, defs []*model.PermissionDef) ([]gin.H, *errs.Error) {
 	apps, err := appsvc.ListAllApps(c.Request.Context())
 	if err != nil {
@@ -95,6 +108,7 @@ func defsJSONMultiApp(c *gin.Context, defs []*model.PermissionDef) ([]gin.H, *er
 	return data, nil
 }
 
+// groupJSON 把用户组（Role）渲染为 API 响应。
 func groupJSON(role *model.Role) gin.H {
 	return gin.H{
 		"id":         role.ID,
@@ -107,6 +121,7 @@ func groupJSON(role *model.Role) gin.H {
 	}
 }
 
+// groupUserJSON 把用户组成员渲染为 API 响应。
 func groupUserJSON(user *userperm.RoleUser) gin.H {
 	return gin.H{
 		"user_id":     user.UserID,
@@ -120,6 +135,7 @@ func groupUserJSON(user *userperm.RoleUser) gin.H {
 	}
 }
 
+// groupUsersJSON 把用户组成员列表渲染为数组。
 func groupUsersJSON(users []*userperm.RoleUser) []gin.H {
 	data := make([]gin.H, 0, len(users))
 	for _, user := range users {
@@ -128,6 +144,7 @@ func groupUsersJSON(users []*userperm.RoleUser) []gin.H {
 	return data
 }
 
+// grantJSON 把用户直接授权记录渲染为 API 响应。
 func grantJSON(grant *model.UserPermissionGrant) gin.H {
 	return gin.H{
 		"id":                 grant.ID,
@@ -143,6 +160,7 @@ func grantJSON(grant *model.UserPermissionGrant) gin.H {
 	}
 }
 
+// grantsJSON 把用户直接授权列表渲染为数组。
 func grantsJSON(grants []*model.UserPermissionGrant) []gin.H {
 	data := make([]gin.H, 0, len(grants))
 	for _, grant := range grants {

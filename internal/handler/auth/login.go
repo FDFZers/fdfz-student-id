@@ -21,16 +21,20 @@ import (
 	"github.com/google/uuid"
 )
 
+// loginInitRequestReq 是登录初始化的请求体。
 type loginInitRequestReq struct {
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	IsTemporary   bool   `json:"is_temporary"`
-	AltchaPayload string `json:"altcha_payload"`
+	Username      string `json:"username"`       // 用户名
+	Password      string `json:"password"`       // 密码
+	IsTemporary   bool   `json:"is_temporary"`   // 是否申请临时会话
+	AltchaPayload string `json:"altcha_payload"` // Altcha 人机验证载荷
 }
 
+// loginInitHandler 校验用户名密码、封禁状态与 Altcha，创建登录用鉴权会话并返回可用的二次验证方式。
+// 注意：不需要二次验证（校园 IP 或未绑定任何方式）时直接返回 passed=true，由 finalize 建会话；
+// 用户不存在时也执行一次密码哈希，避免通过响应耗时枚举账号。
 func loginInitHandler(c *gin.Context) *errs.Error {
 	var req loginInitRequestReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
@@ -50,7 +54,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 		return err
 	} else if usr == nil {
 		crypto.BurnPasswordVerifyCost()
-		return errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败")
+		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 
 	if err := auth.ValidateUserPassword(c.Request.Context(), usr.ID, req.Password); err != nil {
@@ -65,6 +69,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 		return handling.BannedError(ban)
 	}
 
+	// 校园 IP 内登录免二次验证，其余场景按已绑定的方式启用验证。
 	_, isSchoolIP := cfg.C.SchoolIPs[c.ClientIP()]
 	session, err := auth.CreateAuthSession(c.Request.Context(), auth.AuthSessionTypeLogin, isSchoolIP, usr.ID, req.IsTemporary)
 	if err != nil {
@@ -90,16 +95,20 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// loginFinalizeRequestReq 是登录完成的请求体。
 type loginFinalizeRequestReq struct {
-	SessionID uuid.UUID `json:"session_id"`
+	SessionID uuid.UUID `json:"session_id"` // 登录初始化返回的鉴权会话 ID
 }
 
+// loginFinalizeHandler 完成登录：校验鉴权会话状态，创建用户会话并签发访问令牌、写入 Cookie。
+// 注意：会话必须已通过二次验证；登录成功会取消冷静期内的账号注销，若注销已到期则先执行注销再拒绝登录。
 func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	var req loginFinalizeRequestReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
+	// 校验鉴权会话状态
 	authSession, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
 	if err != nil {
 		return err
@@ -114,6 +123,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.IllegalStateError().AppendDetails("二次验证未通过")
 	}
 
+	// 二次校验封禁状态，防止用户在校验密码后被封禁
 	ban, err := user.GetUserBan(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return err
@@ -129,21 +139,23 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	} else if cancelled {
 		slog.Info("Cancelled scheduled account deletion on login", "user_id", authSession.UserID)
 	}
-	// 可能注销已到期
+	// 注销可能已到期：先执行注销，再按凭据错误返回，避免泄露账号已注销
 	finalized, err := user.FinalizeOverdueAccountDeletion(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return err
 	} else if finalized {
 		slog.Info("Finalized overdue account deletion on login", "user_id", authSession.UserID)
-		return errs.ForbiddenError().AppendDetails("用户名或密码错误", "密码验证失败").Seal()
+		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 
+	// 创建用户会话并生成会话令牌
 	sessionToken, e := crypto.GenerateCode(128, crypto.TokenCharset)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to generate session token").AppendDetails("令牌生成失败")
 	}
 	sessionTokenHash := crypto.HashSHA512(sessionToken)
 
+	// 临时会话与普通会话使用不同的会话过期时间
 	var dur time.Duration
 	if authSession.IsTemporary {
 		dur = cfg.C.TempSessionTokenTTL
@@ -161,6 +173,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// rollback 在后续步骤失败时删除刚创建的会话，避免留下无法使用的会话记录
 	rollback := func(err *errs.Error) *errs.Error {
 		if deleteErr := auth.DeleteSession(c.Request.Context(), session.UUID); deleteErr != nil {
 			return err.AppendDetails("登录失败且回退失败，请联系管理员").AppendDetails(deleteErr.Info.Details...).Seal()
@@ -168,6 +181,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 解析权限与所属应用，签发访问令牌
 	perms, err := userperm.ListUserEffectivePermissions(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return rollback(err)
@@ -188,11 +202,13 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return rollback(errs.CreateAndLogInternalError(e, "Failed to generate access token").AppendDetails("令牌生成失败"))
 	}
 
+	// 刷新会话客户端信息并写入 Cookie
 	exp, err := auth.UpdateSessionClient(c, session.UUID, sessionTokenHash)
 	if err != nil {
 		return rollback(err)
 	}
 
+	// 登录用鉴权会话已完成使命，删除失败只记录日志，不影响登录结果
 	if err := auth.DeleteAuthSession(c.Request.Context(), authSession); err != nil {
 		slog.Warn("Failed to delete login auth session", "error", err.Info.Error, "session_id", authSession.ID)
 	}
@@ -203,10 +219,12 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// refreshTokenHandler 用 session_token Cookie 换发新的访问令牌，同时轮换会话令牌。
+// 注意：临时会话刷新不会延长会话过期时间；会话被撤销或过期后需要重新登录。
 func refreshTokenHandler(c *gin.Context) *errs.Error {
 	sessionToken, e := c.Cookie("session_token")
 	if errors.Is(e, http.ErrNoCookie) {
-		return errs.NotFoundError().AppendDetails("会话令牌不存在").Seal()
+		return errs.NotFoundError().AppendDetails("未提供会话令牌")
 	} else if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to get session token cookie").AppendDetails("会话令牌获取失败")
 	}
@@ -215,11 +233,15 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 
 	session, err := auth.GetSessionByTokenHash(c.Request.Context(), hash)
 	if err != nil {
+		// 存疑：GetSessionByTokenHash 无记录时返回 not_found，此处被包装成 internal_error，
+		// 过期或非法的会话令牌会返回 500 而非 401，客户端无法据此引导重新登录。
 		return errs.CreateAndLogInternalError(err, "Failed to get session by token hash").AppendDetails("会话获取失败")
 	} else if session == nil {
+		// 存疑：底层查询无记录时返回错误而非 nil，此分支可能不可达。
 		return errs.NotFoundError().AppendDetails("会话不存在或已过期")
 	}
 
+	// 校验用户仍然存在且未被封禁
 	usr, err := user.GetUserByID(c.Request.Context(), session.UserID)
 	if err != nil {
 		return err
@@ -235,9 +257,10 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 		return handling.BannedError(ban)
 	}
 
+	// 轮换会话令牌并重新签发访问令牌
 	sessionToken, e = crypto.GenerateCode(128, crypto.TokenCharset)
 	if e != nil {
-		return errs.CreateAndLogInternalError(e, "Failed to generate session token").AppendDetails("令牌生成失败", "登录失败").Seal()
+		return errs.CreateAndLogInternalError(e, "Failed to generate session token").AppendDetails("令牌生成失败")
 	}
 	sessionTokenHash := crypto.HashSHA512(sessionToken)
 
@@ -261,6 +284,7 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 		return errs.CreateAndLogInternalError(e, "Failed to generate access token").AppendDetails("令牌生成失败")
 	}
 
+	// 更新会话客户端信息并重写 Cookie
 	exp, err := auth.UpdateSessionClient(c, session.UUID, sessionTokenHash)
 	if err != nil {
 		return err
@@ -272,12 +296,14 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// logoutHandler 撤销当前访问令牌对应的用户会话，并清除会话相关 Cookie。
+// 注意：访问令牌本身无状态，撤销后仍可能在剩余有效期内（默认 10 分钟）被接受。
 func logoutHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
-	sessionID, err := uuid.Parse(claims.ID)
-	if err != nil {
-		return errs.InvalidTokenError().AppendDetails("无效的会话")
+	sessionID, e := uuid.Parse(claims.ID)
+	if e != nil {
+		return errs.InvalidTokenError().AppendDetails("会话 ID 格式错误")
 	}
 
 	if err := auth.RevokeSession(c.Request.Context(), sessionID); err != nil {

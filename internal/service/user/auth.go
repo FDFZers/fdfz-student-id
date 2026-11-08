@@ -14,10 +14,12 @@ import (
 // 获取密码
 // ---------------------------------------------------------------------------
 
+// getUserPasswordSQL 查询用户密码哈希（argon2id）。
 const getUserPasswordSQL = `
 SELECT user_id, password, updated_at FROM user_passwords WHERE user_id = $1
 `
 
+// GetUserPassword 查询用户的密码哈希；用户没有密码记录时返回 404。
 func GetUserPassword(ctx context.Context, userID int64) (*model.UserPassword, *errs.Error) {
 	var pwd model.UserPassword
 	err := db.R.QueryRow(ctx, getUserPasswordSQL, userID).
@@ -32,6 +34,7 @@ func GetUserPassword(ctx context.Context, userID int64) (*model.UserPassword, *e
 // 密码设置
 // ---------------------------------------------------------------------------
 
+// upsertUserPasswordSQL 按 user_id 插入或覆盖密码哈希。
 const upsertUserPasswordSQL = `
 INSERT INTO user_passwords (user_id, password)
 VALUES ($1, $2)
@@ -40,6 +43,7 @@ DO UPDATE SET password = EXCLUDED.password
 RETURNING updated_at
 `
 
+// UpsertUserPassword 写入或覆盖用户密码哈希，并回填更新时间；pwd.Password 必须已哈希。
 func UpsertUserPassword(ctx context.Context, pwd *model.UserPassword) *errs.Error {
 	err := db.R.QueryRow(ctx, upsertUserPasswordSQL,
 		pwd.UserID,
@@ -55,10 +59,12 @@ func UpsertUserPassword(ctx context.Context, pwd *model.UserPassword) *errs.Erro
 // 获取 TOTP
 // ---------------------------------------------------------------------------
 
+// getUserTotpSQL 查询用户的 TOTP 密钥。
 const getUserTotpSQL = `
 SELECT user_id, secret, updated_at FROM user_totp WHERE user_id = $1
 `
 
+// GetUserTOTP 查询用户的 TOTP 密钥；未绑定过 TOTP 时返回 nil，不返回错误。
 func GetUserTOTP(ctx context.Context, userID int64) (*model.UserTOTP, *errs.Error) {
 	var t model.UserTOTP
 	err := db.R.QueryRow(ctx, getUserTotpSQL, userID).
@@ -76,6 +82,7 @@ func GetUserTOTP(ctx context.Context, userID int64) (*model.UserTOTP, *errs.Erro
 // 设置 TOTP
 // ---------------------------------------------------------------------------
 
+// upsertUserTotpSQL 按 user_id 插入或覆盖 TOTP 密钥。
 const upsertUserTotpSQL = `
 INSERT INTO user_totp (user_id, secret)
 VALUES ($1, $2)
@@ -84,6 +91,7 @@ DO UPDATE SET secret = EXCLUDED.secret
 RETURNING updated_at
 `
 
+// UpsertUserTotp 写入或覆盖用户 TOTP 密钥，并回填更新时间。
 func UpsertUserTotp(ctx context.Context, t *model.UserTOTP) *errs.Error {
 	err := db.R.Pool.QueryRow(ctx, upsertUserTotpSQL, t.UserID, t.Secret).
 		Scan(&t.UpdatedAt)
@@ -98,10 +106,12 @@ func UpsertUserTotp(ctx context.Context, t *model.UserTOTP) *errs.Error {
 // 删除 TOTP
 // ---------------------------------------------------------------------------
 
+// deleteUserTotpSQL 删除用户的 TOTP 密钥记录。
 const deleteUserTotpSQL = `
 DELETE FROM user_totp WHERE user_id = $1
 `
 
+// DeleteUserTotp 删除用户 TOTP 密钥；未绑定过 TOTP 时删除 0 行也视为成功（幂等）。
 func DeleteUserTotp(ctx context.Context, userID int64) *errs.Error {
 	if _, err := db.R.Pool.Exec(ctx, deleteUserTotpSQL, userID); err != nil {
 		return errs.CreatePGError(err, "TOTP", "Failed to delete user TOTP").

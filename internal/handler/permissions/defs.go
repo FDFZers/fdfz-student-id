@@ -15,12 +15,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// createAppPermissionRequestBody 是创建权限定义的请求体；Permission 为完整权限串（含命名空间）。
 type createAppPermissionRequestBody struct {
 	Permission  string `json:"permission"`
 	Description string `json:"description"`
 	Requestable bool   `json:"requestable"`
 }
 
+// createAppPermissionHandler 在指定应用下创建权限定义。
+// 权限串必须解析合法且属于该应用的命名空间；成功后由重载器异步刷新权限目录。
 func createAppPermissionHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	app, err := handling.ResolveApp(c)
@@ -29,25 +32,27 @@ func createAppPermissionHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body createAppPermissionRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
+	// 解析并校验权限串（必须属于当前应用的命名空间）
 	parsed, e := perm.ParsePermission(body.Permission)
 	if e != nil {
-		return errs.BadRequestError().AppendDetails("权限格式错误", "创建权限定义失败")
+		return errs.BadRequestError().AppendDetails("权限格式错误")
 	}
 	if parsed.Namespace != app.Namespace {
-		return errs.BadRequestError().AppendDetails("权限命名空间不可用", "创建权限定义失败")
+		return errs.BadRequestError().AppendDetails("权限命名空间不可用")
 	}
 	value := strings.Join(parsed.Nodes, ".")
 	if err := handling.ValidatePermissionValue(value); err != nil {
-		return err.AppendDetails("创建权限定义失败")
+		return err
 	}
 	if err := handling.ValidatePermissionDescription(body.Description); err != nil {
-		return err.AppendDetails("创建权限定义失败")
+		return err
 	}
 
+	// 组装权限定义并写入数据库
 	def := &model.PermissionDef{
 		AppID:       app.ID,
 		Value:       value,
@@ -63,11 +68,13 @@ func createAppPermissionHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// updateAppPermissionRequestBody 是更新权限定义的请求体；字段为 nil 表示不修改，两者都为 nil 时报错。
 type updateAppPermissionRequestBody struct {
 	Description *string `json:"description"`
 	Requestable *bool   `json:"requestable"`
 }
 
+// updateAppPermissionHandler 更新权限定义的描述与是否可申请；权限值与所属应用不可修改。
 func updateAppPermissionHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -79,13 +86,14 @@ func updateAppPermissionHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body updateAppPermissionRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if body.Description == nil && body.Requestable == nil {
 		return errs.BadRequestError().AppendDetails("没有需要更新的字段")
 	}
 
+	// 确认权限定义存在且属于该应用
 	def, err := userperm.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
 	if err != nil {
 		return err
@@ -94,6 +102,7 @@ func updateAppPermissionHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("权限定义不存在")
 	}
 
+	// 合并请求中提供的字段，未提供的保持原值
 	description := def.Description
 	if body.Description != nil {
 		description = *body.Description
@@ -103,8 +112,9 @@ func updateAppPermissionHandler(c *gin.Context) *errs.Error {
 		requestable = *body.Requestable
 	}
 
+	// 校验并写回数据库
 	if err := handling.ValidatePermissionDescription(description); err != nil {
-		return err.AppendDetails("更新权限定义失败")
+		return err
 	}
 
 	if err := userperm.UpdatePermissionDef(c.Request.Context(), permissionID, description, requestable); err != nil {
@@ -117,6 +127,8 @@ func updateAppPermissionHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// deleteAppPermissionHandler 删除权限定义。
+// 数据库会级联清理该定义的继承边与用户组关联；目录在异步重载后才更新。
 func deleteAppPermissionHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {

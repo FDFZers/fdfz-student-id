@@ -12,16 +12,20 @@ import (
 	"github.com/guregu/null/v6"
 )
 
+// updateVisibilitiesReq 资料字段可见性修改请求；字段为空表示不修改。
 type updateVisibilitiesReq struct {
 	RealName  *model.Visibility `json:"real_name"`
 	Followers *model.Visibility `json:"followers"`
 	Following *model.Visibility `json:"following"`
 }
 
+// empty 判断是否没有任何可见性字段需要修改。
 func (r *updateVisibilitiesReq) empty() bool {
 	return r == nil || (r.RealName == nil && r.Followers == nil && r.Following == nil)
 }
 
+// updateProfileReq 用户资料修改请求；所有字段均为指针，nil 表示不修改。
+// 其中 username/real_name/school/student_num 只能由有 users.* 权限的管理方修改，用户本人不能修改。
 type updateProfileReq struct {
 	Nickname     *string                `json:"nickname"`
 	Signature    *string                `json:"signature"`
@@ -34,6 +38,7 @@ type updateProfileReq struct {
 	StudentNum *string       `json:"student_num"`
 }
 
+// empty 判断请求是否未提供任何需要修改的字段。
 func (r *updateProfileReq) empty() bool {
 	return r.Nickname == nil &&
 		r.Signature == nil &&
@@ -45,6 +50,9 @@ func (r *updateProfileReq) empty() bool {
 		r.StudentNum == nil
 }
 
+// updateUserProfileHandler 修改目标用户资料：逐字段校验权限与取值后整体写库，并返回过滤后的资料。
+// 需修改自己时使用 user.profile.update.* 权限，修改他人时使用 users.profile.update.* 权限。
+// 注意：先读后写、非事务流程，并发修改同一用户时后写覆盖先写。
 func updateUserProfileHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
@@ -52,8 +60,10 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 解析请求并拒绝空更新
+
 	var req updateProfileReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if req.empty() {
@@ -68,6 +78,8 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 	}
 
 	isSelf := claims.UserID == targetID
+
+	// 逐字段校验权限：SelfPerm 为空表示不允许本人修改
 
 	fields := []struct {
 		Field     string
@@ -93,9 +105,11 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 			required = field.SelfPerm
 		}
 		if required == "" || !perm.HasPermission(claims, required) {
-			return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
+			return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 		}
 	}
+
+	// 应用文本类字段修改，空字符串表示清空可空字段
 
 	if req.Nickname != nil {
 		if *req.Nickname == "" {
@@ -137,6 +151,9 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 			*field.Dest = *field.Value
 		}
 	}
+
+	// 身份类字段改动需要校验；用户名/真名/学校沿用原值时跳过重复校验
+
 	if req.Username != nil && *req.Username != target.Username {
 		if err := handling.ValidateUsername(*req.Username); err != nil {
 			return err
@@ -166,6 +183,8 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 		}
 	}
 
+	// 学生必须保有学号，非学生一律清空学号
+
 	if target.Type == model.UserTypeStudent {
 		if !target.StudentNum.Valid {
 			return errs.BadRequestError().AppendDetails("学生账号必须提供学号")
@@ -173,6 +192,8 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 	} else {
 		target.StudentNum = null.String{}
 	}
+
+	// 写库并返回过滤后的最新资料
 
 	if err := user.UpdateUser(c.Request.Context(), target); err != nil {
 		return err

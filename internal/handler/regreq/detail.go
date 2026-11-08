@@ -12,15 +12,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// getRegisterRequestHandler 查询单条注册申请详情，需要 register_requests.read 权限。
+// 注意：响应包含表单中的身份信息与审核信息，但不返回密码哈希。
 func getRegisterRequestHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	if !perm.HasPermission(claims, perm.PermRegisterRequestRead) {
-		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
+		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
 	id, e := uuid.Parse(c.Param("id"))
 	if e != nil {
-		return errs.BadRequestError().AppendDetails("无效的注册请求 ID")
+		return errs.BadRequestError().AppendDetails("注册请求 ID 格式错误")
 	}
 
 	request, err := user.GetRegisterRequestByID(c.Request.Context(), id)
@@ -48,15 +50,17 @@ func getRegisterRequestHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// getRegisterRequestProofImageHandler 获取注册申请的佐证图片：校验权限后 302 重定向到 filestore 地址。
+// 注意：只校验注册申请存在，不校验图片是否已上传成功，文件缺失时由 filestore 返回 404。
 func getRegisterRequestProofImageHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	if !perm.HasPermission(claims, perm.PermRegisterRequestRead) {
-		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
+		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
 	id, e := uuid.Parse(c.Param("id"))
 	if e != nil {
-		return errs.BadRequestError().AppendDetails("无效的注册请求 ID")
+		return errs.BadRequestError().AppendDetails("注册请求 ID 格式错误")
 	}
 
 	request, err := user.GetRegisterRequestByID(c.Request.Context(), id)

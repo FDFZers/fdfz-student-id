@@ -20,11 +20,14 @@ import (
 )
 
 var (
-	jwtPrivateKey *rsa.PrivateKey
-	jwtPublicKey  *rsa.PublicKey
-	JWKS          string
+	jwtPrivateKey *rsa.PrivateKey // 签发访问令牌/提权令牌用的 RSA 私钥
+	jwtPublicKey  *rsa.PublicKey  // 校验令牌签名用的 RSA 公钥
+	// JWKS 是由公钥生成的 JWK Set JSON，通过 /auth/jwks 暴露给其他服务离线校验签名。
+	JWKS string
 )
 
+// LoadJWTKeys 从 SHARED_DIR/certs/jwt 读取 RSA 私钥/公钥，并生成带 kid 与 RS512 算法的 JWKS。
+// 注意：必须在签发/校验令牌前调用一次；任一文件缺失或解析失败都会导致服务启动失败。
 func LoadJWTKeys() error {
 	dir := path.Join(cfg.C.SharedDir, "certs", "jwt")
 	privBytes, err := os.ReadFile(path.Join(dir, "private.pem"))
@@ -68,6 +71,8 @@ func LoadJWTKeys() error {
 	return nil
 }
 
+// GenerateJWT 使用 RS512 签发 JWT，jti 取传入的 id，签发者固定为 fdfz-student-id。
+// 注意：签发前会复制并排序权限/所属应用列表，保证相同授权得到稳定的令牌内容，不会修改入参。
 func GenerateJWT(id uuid.UUID, claims *model.TokenClaims, ttl time.Duration) (string, error) {
 	now := time.Now()
 
@@ -91,6 +96,8 @@ func GenerateJWT(id uuid.UUID, claims *model.TokenClaims, ttl time.Duration) (st
 	return token.SignedString(jwtPrivateKey)
 }
 
+// ParseJWT 校验签名算法（RS512）、签发者、过期时间并返回 claims，允许 5 秒时钟偏差。
+// 注意：不校验 token_type，调用方需按用途自行判断（如提权令牌要求 TokenTypeStepup）。
 func ParseJWT(tokenString string) (*model.RegisteredTokenClaims, error) {
 	token, err := jwt.ParseWithClaims(
 		tokenString,

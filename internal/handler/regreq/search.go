@@ -11,6 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// searchCfg 注册申请搜索配置：可搜索字段、可排序字段、标签（状态/用户类型/学校）与返回列。
+// 注意：Columns 含 password 是因为 RegisterRequest 模型带密码哈希字段；响应构造时已显式剔除，不对外返回。
 var searchCfg = search.SearchConfig{
 	Table:             "register_requests",
 	Item:              "注册请求",
@@ -22,32 +24,37 @@ var searchCfg = search.SearchConfig{
 	DefaultSortColumn: "id",
 }
 
+// searchInfo 注册申请搜索能力的静态描述，供前端渲染搜索表单。
 var searchInfo = search.GetInfo(&searchCfg)
 
+// SearchInfoHandler 返回注册申请搜索的字段、匹配方法、可排序字段与标签取值；需要 register_requests.list 权限。
 func SearchInfoHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	if !perm.HasPermission(claims, perm.PermRegisterRequestList) {
-		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
+		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 	c.JSON(http.StatusOK, searchInfo)
 	return nil
 }
 
+// SearchQueryHandler 执行注册申请搜索，返回总数与申请摘要（不含密码哈希）；需要 register_requests.list 权限。
 func SearchQueryHandler(c *gin.Context) *errs.Error {
 	var req search.SearchRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
 	claims := handling.MustGetClaims(c)
 	if !perm.HasPermission(claims, perm.PermRegisterRequestList) {
-		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
+		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
 	requests, err := search.ExecSearch[model.RegisterRequest](c, &searchCfg, &req)
 	if err != nil {
 		return err
 	}
+
+	// 逐条构造对外字段，显式剔除 password
 
 	filtered := make([]*gin.H, 0, len(requests.Data))
 	for _, request := range requests.Data {

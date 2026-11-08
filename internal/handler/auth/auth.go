@@ -11,6 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// InitRoutes 注册认证相关路由：公开的 JWKS 与 Altcha Challenge 挂在 api 组，
+// 注册、登录、刷新、登出、密码重置、验证与提权等敏感操作挂在 internal 组。
+// 每个处理器都经 handling.Wrap 统一追加端点级失败文案。
 func InitRoutes(api, internal *gin.RouterGroup) {
 	a := api.Group("/auth")
 	i := internal.Group("/auth")
@@ -31,9 +34,11 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/verify/qq/verify", handling.Wrap("QQ 验证失败", verifyQQHandler))
 	i.POST("/verify/totp", handling.Wrap("TOTP 验证失败", verifyTOTPHandler))
 
+	// 提权接口要求已登录（有效访问令牌），是否具备提权令牌由各业务接口另行校验。
 	i.POST("/stepup/init", middleware.RequireToken(), handling.Wrap("二次验证初始化失败", stepupInitHandler))
 	i.POST("/stepup/finalize", middleware.RequireToken(), handling.Wrap("二次验证失败", stepupFinalizeHandler))
 
+	// JWKS 供其他服务离线校验本服务签发的 JWT。
 	a.GET("/jwks", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
 		c.String(http.StatusOK, crypto.JWKS)
@@ -41,6 +46,7 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	a.GET("/challenge", handling.Wrap("Altcha Challenge 生成失败", challengeHandler))
 }
 
+// challengeHandler 生成 Altcha 人机验证 Challenge，供前端完成工作量证明后随表单回传。
 func challengeHandler(c *gin.Context) *errs.Error {
 	challenge, err := captcha.CreateChallenge()
 	if err != nil {

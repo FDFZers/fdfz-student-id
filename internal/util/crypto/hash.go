@@ -16,6 +16,8 @@ import (
 // Sha512
 // ---------------------------------------------------------------------------
 
+// HashSHA512 计算 SHA-512 并编码为小写十六进制串，用于会话令牌等随机串的存储摘要。
+// 注意：这里是对高熵随机串做单向摘要，无需加盐；密码必须使用 Argon2id。
 func HashSHA512(token string) string {
 	sum := sha512.Sum512([]byte(token))
 	return hex.EncodeToString(sum[:])
@@ -26,13 +28,14 @@ func HashSHA512(token string) string {
 // ---------------------------------------------------------------------------
 
 const (
-	argonTime    = 3
-	argonMemory  = 64 * 1024 // 64 MiB in KiB
-	argonThreads = 4
-	argonKeyLen  = 32
-	argonSaltLen = 32
+	argonTime    = 3         // 迭代次数
+	argonMemory  = 64 * 1024 // 内存开销，单位 KiB（64 MiB）
+	argonThreads = 4         // 并行度
+	argonKeyLen  = 32        // 输出摘要长度（字节）
+	argonSaltLen = 32        // 随机盐长度（字节）
 )
 
+// HashArgon2ID 用 Argon2id 和随机盐哈希密码，返回 PHC 格式字符串（含参数、盐与摘要）。
 func HashArgon2ID(str string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
@@ -49,6 +52,8 @@ func HashArgon2ID(str string) (string, error) {
 	return encoded, nil
 }
 
+// VerifyArgon2ID 按 PHC 字符串中的参数重新计算 Argon2id 摘要并做常量时间比较。
+// 注意：哈希参数从存储的字符串读取，旧参数的哈希仍可校验；字符串格式非法时返回 error。
 func VerifyArgon2ID(str, encodedHash string) (bool, error) {
 	params, salt, hash, err := decodeArgon2IDHash(encodedHash)
 	if err != nil {
@@ -63,16 +68,20 @@ func VerifyArgon2ID(str, encodedHash string) (bool, error) {
 	return false, nil
 }
 
+// BurnPasswordVerifyCost 对固定串执行一次 Argon2id 校验。
+// 用于用户不存在等分支，拉平与「密码错误」分支的响应耗时，防止通过时延枚举账号。
 func BurnPasswordVerifyCost() {
 	_, _ = VerifyArgon2ID("dummy-password-for-timing-equalization", "$argon2id$v=19$m=65536,t=3,p=4$A/VMpUldqzUMDLbcsbpY+h5JSyK7nMhY/laPBS2n2hs=$mQcGzal+0cYbaOXUo9MO9jzhXFFG3+r2XtkX5Bh05Ww=")
 }
 
+// params 是 Argon2id PHC 字符串中记录的哈希参数。
 type params struct {
 	memory  uint32
 	time    uint32
 	threads uint8
 }
 
+// decodeArgon2IDHash 解析 PHC 格式的 Argon2id 哈希，返回参数、盐与原始摘要。
 func decodeArgon2IDHash(encodedHash string) (*params, []byte, []byte, error) {
 	parts := strings.Split(encodedHash, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {

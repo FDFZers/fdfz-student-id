@@ -12,9 +12,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// deleteAccountHandler 注销当前账号：撤销全部会话与提权令牌，写入 7 天冷静期后清理 Cookie。
+// 注意：冷静期内重新登录会取消注销，到期后由定时任务完成软删除。
 func deleteAccountHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
+	// 立即撤销全部登录会话与提权令牌，避免冷静期内会话继续可用
 	if err := auth.RevokeAllUserSessions(c.Request.Context(), claims.UserID); err != nil {
 		return err
 	}
@@ -22,11 +25,13 @@ func deleteAccountHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 写入冷静期截止时间，重复调用不会延长已排定的时间
 	scheduledAt, err := user.ScheduleAccountDeletion(c.Request.Context(), claims.UserID, user.AccountDeletionDelay)
 	if err != nil {
 		return err
 	}
 
+	// 清理当前请求的登录 Cookie，返回排定的注销时间
 	handling.ClearSessionCookies(c)
 
 	slog.Info("Account deletion scheduled", "user_id", claims.UserID, "scheduled_at", scheduledAt)
@@ -37,12 +42,15 @@ func deleteAccountHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// deleteUserHandler 管理员删除指定用户：撤销其会话与提权令牌后立即软删除。
+// 注意：需要 users.delete 权限，且不能删除自己；删除后用户记录仍保留，供外键引用。
 func deleteUserHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
+	// 校验目标用户 ID
 	targetID, e := strconv.ParseInt(c.Param("id"), 10, 64)
 	if e != nil || targetID <= 0 {
-		return errs.BadRequestError().AppendDetails("无效的用户 ID")
+		return errs.BadRequestError().AppendDetails("用户 ID 格式错误")
 	}
 	if targetID == claims.UserID {
 		return errs.BadRequestError().AppendDetails("不能删除自己")
@@ -52,6 +60,7 @@ func deleteUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 撤销目标用户会话与提权令牌，防止删除后令牌继续生效
 	if err := auth.RevokeAllUserSessions(c.Request.Context(), targetID); err != nil {
 		return err
 	}
@@ -59,6 +68,7 @@ func deleteUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 软删除用户并清理关联数据（密码、TOTP、用户组、权限授予等）
 	if err := user.DeleteUser(c.Request.Context(), targetID); err != nil {
 		return err
 	}

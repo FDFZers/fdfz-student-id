@@ -18,16 +18,19 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// permissionDefColumns 权限定义的查询列，供拼接各条 SQL 使用。
 const permissionDefColumns = `
 id, app_id, value, description, requestable, created_by, created_at, updated_at
 `
 
+// appPermissionDefSQL 按「id + 应用」查询权限定义，用于应用维度的归属校验。
 const appPermissionDefSQL = `
 SELECT ` + permissionDefColumns + `
 FROM permission_defs
 WHERE id = $1 AND app_id = $2
 `
 
+// GetPermissionDefInApp 按应用归属查询权限定义；不存在或不属于该应用时返回 (nil, nil)。
 func GetPermissionDefInApp(ctx context.Context, appID, permissionID int64) (*model.PermissionDef, *errs.Error) {
 	var d model.PermissionDef
 	err := db.R.QueryRow(ctx, appPermissionDefSQL, permissionID, appID).Scan(
@@ -38,18 +41,20 @@ func GetPermissionDefInApp(ctx context.Context, appID, permissionID int64) (*mod
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, errs.CreatePGError(err, "权限定义", "Failed to get permission def in app").
-			AppendDetails("获取权限定义失败")
+		return nil, errs.CreatePGError(err, "权限定义", "Failed to get permission def in app")
 	}
 	return &d, nil
 }
 
+// appRoleSQL 按「id + 应用」查询用户组，用于应用维度的归属校验。
 const appRoleSQL = `
 SELECT id, app_id, name, note, is_public, created_at, updated_at
 FROM roles
 WHERE id = $1 AND app_id = $2
 `
 
+// GetRoleInApp 按应用归属查询用户组；不存在或不属于该应用时返回 (nil, nil)。
+// 注意：应用维度需要“本应用 ∪ 公开用户组”的可见性判断时，请使用 GetRoleVisibleToApp。
 func GetRoleInApp(ctx context.Context, appID, roleID int64) (*model.Role, *errs.Error) {
 	var r model.Role
 	err := db.R.QueryRow(ctx, appRoleSQL, roleID, appID).Scan(
@@ -59,8 +64,7 @@ func GetRoleInApp(ctx context.Context, appID, roleID int64) (*model.Role, *errs.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, errs.CreatePGError(err, "用户组", "Failed to get role in app").
-			AppendDetails("获取用户组失败")
+		return nil, errs.CreatePGError(err, "用户组", "Failed to get role in app")
 	}
 	return &r, nil
 }
@@ -69,10 +73,12 @@ func GetRoleInApp(ctx context.Context, appID, roleID int64) (*model.Role, *errs.
 // 全局列表
 // ---------------------------------------------------------------------------
 
+// countAllPermissionDefsSQL 统计权限定义数量；appID 为 nil 时统计全部应用。
 const countAllPermissionDefsSQL = `
 SELECT count(*) FROM permission_defs WHERE ($1::bigint IS NULL OR app_id = $1)
 `
 
+// listAllPermissionDefsSQL 分页列出权限定义；appID 为 nil 时跨应用查询。
 const listAllPermissionDefsSQL = `
 SELECT ` + permissionDefColumns + `
 FROM permission_defs
@@ -81,30 +87,31 @@ ORDER BY id
 LIMIT $2 OFFSET $3
 `
 
+// ListAllPermissionDefs 分页查询权限定义，appID 为 nil 时跨应用查询，返回当前页与总数。
 func ListAllPermissionDefs(ctx context.Context, appID *int64, limit, offset int32) ([]*model.PermissionDef, int32, *errs.Error) {
 	limit, offset = search.NormalizePagination(limit, offset)
 
 	var count int32
-	if err := db.R.QueryRow(ctx, countAllPermissionDefsSQL, appID).Scan(&count); err != nil {
-		return nil, 0, errs.CreatePGError(err, "权限定义", "Failed to count permission defs").
-			AppendDetails("权限定义列表获取失败")
+	if e := db.R.QueryRow(ctx, countAllPermissionDefsSQL, appID).Scan(&count); e != nil {
+		return nil, 0, errs.CreatePGError(e, "权限定义", "Failed to count permission defs")
 	}
 
-	rows, err := db.R.Query(ctx, listAllPermissionDefsSQL, appID, limit, offset)
-	if err != nil {
-		return nil, 0, errs.CreatePGError(err, "权限定义", "Failed to query permission defs").
-			AppendDetails("权限定义列表获取失败")
-	}
-
-	defs, e := collectPermissionDefs(rows, "权限定义列表")
+	rows, e := db.R.Query(ctx, listAllPermissionDefsSQL, appID, limit, offset)
 	if e != nil {
-		return nil, 0, e
+		return nil, 0, errs.CreatePGError(e, "权限定义", "Failed to query permission defs")
+	}
+
+	defs, err := collectPermissionDefs(rows, "权限定义列表")
+	if err != nil {
+		return nil, 0, err
 	}
 	return defs, count, nil
 }
 
+// countAllRolesSQL 统计用户组数量；appID 为 nil 时统计全部应用。
 const countAllRolesSQL = `SELECT count(*) FROM roles WHERE ($1::bigint IS NULL OR app_id = $1)`
 
+// listAllRolesSQL 分页列出用户组；appID 为 nil 时跨应用查询。
 const listAllRolesSQL = `
 SELECT id, app_id, name, note, is_public, created_at, updated_at
 FROM roles
@@ -113,24 +120,23 @@ ORDER BY id
 LIMIT $2 OFFSET $3
 `
 
+// ListAllRoles 分页查询用户组，appID 为 nil 时跨应用查询，返回当前页与总数。
 func ListAllRoles(ctx context.Context, appID *int64, limit, offset int32) ([]*model.Role, int32, *errs.Error) {
 	limit, offset = search.NormalizePagination(limit, offset)
 
 	var count int32
-	if err := db.R.QueryRow(ctx, countAllRolesSQL, appID).Scan(&count); err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组", "Failed to count roles").
-			AppendDetails("用户组列表获取失败")
+	if e := db.R.QueryRow(ctx, countAllRolesSQL, appID).Scan(&count); e != nil {
+		return nil, 0, errs.CreatePGError(e, "用户组", "Failed to count roles")
 	}
 
-	rows, err := db.R.Query(ctx, listAllRolesSQL, appID, limit, offset)
-	if err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组", "Failed to query roles").
-			AppendDetails("用户组列表获取失败")
-	}
-
-	roles, e := collectRoles(rows, "用户组列表")
+	rows, e := db.R.Query(ctx, listAllRolesSQL, appID, limit, offset)
 	if e != nil {
-		return nil, 0, e
+		return nil, 0, errs.CreatePGError(e, "用户组", "Failed to query roles")
+	}
+
+	roles, err := collectRoles(rows, "用户组列表")
+	if err != nil {
+		return nil, 0, err
 	}
 	return roles, count, nil
 }
@@ -139,33 +145,39 @@ func ListAllRoles(ctx context.Context, appID *int64, limit, offset int32) ([]*mo
 // 完整权限串解析
 // ---------------------------------------------------------------------------
 
+// resolvePermissionValuesSQL 按应用与权限值批量查询权限定义。
 const resolvePermissionValuesSQL = `
 SELECT ` + permissionDefColumns + `
 FROM permission_defs
 WHERE app_id = $1 AND value = ANY($2::text[])
 `
 
+// parseFullPermission 解析「命名空间:节点...」形式的完整权限串并校验命名空间，
+// 返回去掉命名空间、以 "." 连接的权限值。
 func parseFullPermission(value, namespace string) (string, *errs.Error) {
 	parsed, err := perm.ParsePermission(value)
 	if err != nil {
 		return "", errs.BadRequestError().AppendDetails(
-			fmt.Sprintf("权限“%s”格式非法", value), "解析权限失败",
+			fmt.Sprintf("权限“%s”格式错误", value),
 		)
 	}
 	if namespace != "" && parsed.Namespace != namespace {
 		return "", errs.BadRequestError().AppendDetails(
-			fmt.Sprintf("权限“%s”的命名空间不是“%s”", value, namespace), "解析权限失败",
+			fmt.Sprintf("权限“%s”不属于该应用", value),
 		)
 	}
 	return strings.Join(parsed.Nodes, "."), nil
 }
 
+// ResolvePermissionValues 把一批完整权限串解析为当前应用的权限定义列表，顺序与输入一致。
+// 任一条目格式错误、不属于该应用或权限定义不存在时整体失败。
 func ResolvePermissionValues(ctx context.Context, appID int64, namespace string, values []string) ([]*model.PermissionDef, *errs.Error) {
+	// 解析完整权限串，去掉命名空间并校验归属应用。
 	paths := make([]string, 0, len(values))
 	for _, value := range values {
-		path, e := parseFullPermission(value, namespace)
-		if e != nil {
-			return nil, e
+		path, err := parseFullPermission(value, namespace)
+		if err != nil {
+			return nil, err
 		}
 		paths = append(paths, path)
 	}
@@ -174,14 +186,14 @@ func ResolvePermissionValues(ctx context.Context, appID int64, namespace string,
 		return make([]*model.PermissionDef, 0), nil
 	}
 
-	rows, err := db.R.Query(ctx, resolvePermissionValuesSQL, appID, paths)
-	if err != nil {
-		return nil, errs.CreatePGError(err, "权限定义", "Failed to query permission defs by values").
-			AppendDetails("解析权限失败")
-	}
-	defs, e := collectPermissionDefs(rows, "权限定义")
+	// 批量查询定义，再按输入顺序回填并校验存在性。
+	rows, e := db.R.Query(ctx, resolvePermissionValuesSQL, appID, paths)
 	if e != nil {
-		return nil, e
+		return nil, errs.CreatePGError(e, "权限定义", "Failed to query permission defs by values")
+	}
+	defs, err := collectPermissionDefs(rows, "权限定义")
+	if err != nil {
+		return nil, err
 	}
 
 	byValue := make(map[string]*model.PermissionDef, len(defs))
@@ -194,13 +206,13 @@ func ResolvePermissionValues(ctx context.Context, appID int64, namespace string,
 		d, ok := byValue[path]
 		if !ok {
 			return nil, errs.NotFoundError().AppendDetails(
-				fmt.Sprintf("权限“%s”不存在", values[i]), "解析权限失败",
+				fmt.Sprintf("权限“%s”不存在", values[i]),
 			)
 		}
 		if d.AppID != appID {
 			// 查询条件已限定 app_id，这里仅作防御性校验。
 			return nil, errs.NotFoundError().AppendDetails(
-				fmt.Sprintf("权限“%s”不属于该应用", values[i]), "解析权限失败",
+				fmt.Sprintf("权限“%s”不属于该应用", values[i]),
 			)
 		}
 		result = append(result, d)
@@ -208,43 +220,47 @@ func ResolvePermissionValues(ctx context.Context, appID int64, namespace string,
 	return result, nil
 }
 
+// ResolvePermissionValue 把单个完整权限串（如 "app:network.read"）解析为权限定义。
+// 先按命名空间找到应用，再按权限值查询定义。
 func ResolvePermissionValue(ctx context.Context, value string) (*model.PermissionDef, *errs.Error) {
-	parsed, err := perm.ParsePermission(value)
-	if err != nil {
+	parsed, e := perm.ParsePermission(value)
+	if e != nil {
 		return nil, errs.BadRequestError().AppendDetails(
-			fmt.Sprintf("权限“%s”格式非法", value), "解析权限失败",
+			fmt.Sprintf("权限“%s”格式错误", value),
 		)
 	}
 
-	application, e := appsvc.GetAppByNamespace(ctx, parsed.Namespace)
-	if e != nil {
-		return nil, e.AppendDetails("解析权限失败")
+	application, err := appsvc.GetAppByNamespace(ctx, parsed.Namespace)
+	if err != nil {
+		return nil, err
 	}
 	if application == nil {
 		return nil, errs.NotFoundError().AppendDetails(
-			fmt.Sprintf("应用“%s”不存在", parsed.Namespace), "解析权限失败",
+			fmt.Sprintf("应用“%s”不存在", parsed.Namespace),
 		)
 	}
 
 	path := strings.Join(parsed.Nodes, ".")
-	def, e := getPermissionDefByValue(ctx, application.ID, path)
-	if e != nil {
-		return nil, e.AppendDetails("解析权限失败")
+	def, err := getPermissionDefByValue(ctx, application.ID, path)
+	if err != nil {
+		return nil, err
 	}
 	if def == nil {
 		return nil, errs.NotFoundError().AppendDetails(
-			fmt.Sprintf("权限“%s”不存在", value), "解析权限失败",
+			fmt.Sprintf("权限“%s”不存在", value),
 		)
 	}
 	return def, nil
 }
 
+// getPermissionDefByValueSQL 按应用与权限值查询权限定义。
 const getPermissionDefByValueSQL = `
 SELECT ` + permissionDefColumns + `
 FROM permission_defs
 WHERE app_id = $1 AND value = $2
 `
 
+// getPermissionDefByValue 按应用与权限值查询权限定义；不存在时返回 (nil, nil)。
 func getPermissionDefByValue(ctx context.Context, appID int64, value string) (*model.PermissionDef, *errs.Error) {
 	var d model.PermissionDef
 	err := db.R.QueryRow(ctx, getPermissionDefByValueSQL, appID, value).Scan(
@@ -255,8 +271,7 @@ func getPermissionDefByValue(ctx context.Context, appID int64, value string) (*m
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return nil, errs.CreatePGError(err, "权限定义", "Failed to get permission def by value").
-			AppendDetails("获取权限定义失败")
+		return nil, errs.CreatePGError(err, "权限定义", "Failed to get permission def by value")
 	}
 	return &d, nil
 }
@@ -265,14 +280,17 @@ func getPermissionDefByValue(ctx context.Context, appID int64, value string) (*m
 // 权限继承（写入，带循环依赖检测）
 // ---------------------------------------------------------------------------
 
+// lockPermissionImpliesSQL 按应用加事务级 advisory lock，串行化同一应用的继承写入。
 const lockPermissionImpliesSQL = `
 SELECT pg_advisory_xact_lock(hashtextextended('permission_implies:' || $1::bigint::text, 0))
 `
 
+// selectPermissionDefsByIDsSQL 批量查询权限定义的 id 与应用归属。
 const selectPermissionDefsByIDsSQL = `
 SELECT id, app_id FROM permission_defs WHERE id = ANY($1::bigint[])
 `
 
+// listAppImpliesEdgesSQL 读取某应用内全部继承边，用于替换前重建内存图。
 const listAppImpliesEdgesSQL = `
 SELECT pi.permission_id, pi.implied_permission_id
 FROM permission_implies pi
@@ -280,21 +298,26 @@ JOIN permission_defs pd ON pd.id = pi.permission_id
 WHERE pd.app_id = $1
 `
 
+// deletePermissionImpliesSQL 删除某权限的全部直接出边（Set 语义为整体替换）。
 const deletePermissionImpliesSQL = `DELETE FROM permission_implies WHERE permission_id = $1`
 
+// insertPermissionImpliesSQL 批量插入继承边，冲突时忽略。
 const insertPermissionImpliesSQL = `
 INSERT INTO permission_implies (permission_id, implied_permission_id)
 SELECT $1, unnest($2::bigint[])
 ON CONFLICT (permission_id, implied_permission_id) DO NOTHING
 `
 
+// SetPermissionImplies 用 impliedIDs 整体替换某权限的直接继承关系。
+// 写入前校验所有权限定义属于同一应用，并在应用级 advisory lock 内检测循环继承。
+// 成功后触发权限目录异步重载。
 func SetPermissionImplies(ctx context.Context, appID, permissionID int64, impliedIDs []int64) *errs.Error {
 	// 去重并前置拒绝自继承，避免无意义的事务。
 	seen := make(map[int64]struct{}, len(impliedIDs))
 	unique := make([]int64, 0, len(impliedIDs))
 	for _, impliedID := range impliedIDs {
 		if impliedID == permissionID {
-			return errs.BadRequestError().AppendDetails("权限不能继承自身", "设置权限继承失败")
+			return errs.BadRequestError().AppendDetails("权限不能继承自身")
 		}
 		if _, ok := seen[impliedID]; ok {
 			continue
@@ -305,16 +328,14 @@ func SetPermissionImplies(ctx context.Context, appID, permissionID int64, implie
 
 	tx, err := db.R.Begin(ctx)
 	if err != nil {
-		return errs.CreatePGError(err, "权限继承", "Failed to begin transaction").
-			AppendDetails("设置权限继承失败")
+		return errs.CreatePGError(err, "权限继承", "Failed to begin transaction")
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
 
 	if _, err := tx.Exec(ctx, lockPermissionImpliesSQL, appID); err != nil {
-		return errs.CreatePGError(err, "权限继承", "Failed to acquire permission implies lock").
-			AppendDetails("设置权限继承失败")
+		return errs.CreatePGError(err, "权限继承", "Failed to acquire permission implies lock")
 	}
 
 	// 校验涉及的权限定义均存在且属于该应用。
@@ -325,40 +346,37 @@ func SetPermissionImplies(ctx context.Context, appID, permissionID int64, implie
 	appByDefID := make(map[int64]int64, len(candidates))
 	rows, err := tx.Query(ctx, selectPermissionDefsByIDsSQL, candidates)
 	if err != nil {
-		return errs.CreatePGError(err, "权限继承", "Failed to query permission defs").
-			AppendDetails("设置权限继承失败")
+		return errs.CreatePGError(err, "权限继承", "Failed to query permission defs")
 	}
 	for rows.Next() {
 		var id, defAppID int64
-		if scanErr := rows.Scan(&id, &defAppID); scanErr != nil {
+		if err := rows.Scan(&id, &defAppID); err != nil {
 			rows.Close()
-			return errs.CreatePGError(scanErr, "权限继承", "Failed to scan permission def").
-				AppendDetails("设置权限继承失败")
+			return errs.CreatePGError(err, "权限继承", "Failed to scan permission def")
 		}
 		appByDefID[id] = defAppID
 	}
-	if rowsErr := rows.Err(); rowsErr != nil {
+	if err := rows.Err(); err != nil {
 		rows.Close()
-		return errs.CreatePGError(rowsErr, "权限继承", "Failed to iterate permission defs").
-			AppendDetails("设置权限继承失败")
+		return errs.CreatePGError(err, "权限继承", "Failed to iterate permission defs")
 	}
 	rows.Close()
 
 	if defAppID, ok := appByDefID[permissionID]; !ok {
-		return errs.NotFoundError().AppendDetails("权限定义不存在", "设置权限继承失败")
+		return errs.NotFoundError().AppendDetails("权限定义不存在")
 	} else if defAppID != appID {
-		return errs.NotFoundError().AppendDetails("权限定义不属于该应用", "设置权限继承失败")
+		return errs.NotFoundError().AppendDetails("权限定义不属于该应用")
 	}
 	for _, impliedID := range unique {
 		defAppID, ok := appByDefID[impliedID]
 		if !ok {
 			return errs.NotFoundError().AppendDetails(
-				fmt.Sprintf("需要继承的权限（ID %d）不存在", impliedID), "设置权限继承失败",
+				fmt.Sprintf("权限定义（ID %d）不存在", impliedID),
 			)
 		}
 		if defAppID != appID {
 			return errs.BadRequestError().AppendDetails(
-				fmt.Sprintf("需要继承的权限（ID %d）不属于该应用", impliedID), "权限继承不能跨应用", "设置权限继承失败",
+				fmt.Sprintf("权限定义（ID %d）不属于该应用", impliedID), "权限继承不能跨应用",
 			)
 		}
 	}
@@ -367,22 +385,19 @@ func SetPermissionImplies(ctx context.Context, appID, permissionID int64, implie
 	edges := make(map[int64][]int64)
 	edgeRows, err := tx.Query(ctx, listAppImpliesEdgesSQL, appID)
 	if err != nil {
-		return errs.CreatePGError(err, "权限继承", "Failed to query permission implies").
-			AppendDetails("设置权限继承失败")
+		return errs.CreatePGError(err, "权限继承", "Failed to query permission implies")
 	}
 	for edgeRows.Next() {
 		var from, to int64
-		if scanErr := edgeRows.Scan(&from, &to); scanErr != nil {
+		if err := edgeRows.Scan(&from, &to); err != nil {
 			edgeRows.Close()
-			return errs.CreatePGError(scanErr, "权限继承", "Failed to scan permission implies").
-				AppendDetails("设置权限继承失败")
+			return errs.CreatePGError(err, "权限继承", "Failed to scan permission implies")
 		}
 		edges[from] = append(edges[from], to)
 	}
-	if rowsErr := edgeRows.Err(); rowsErr != nil {
+	if err := edgeRows.Err(); err != nil {
 		edgeRows.Close()
-		return errs.CreatePGError(rowsErr, "权限继承", "Failed to iterate permission implies").
-			AppendDetails("设置权限继承失败")
+		return errs.CreatePGError(err, "权限继承", "Failed to iterate permission implies")
 	}
 	edgeRows.Close()
 	delete(edges, permissionID)
@@ -392,37 +407,35 @@ func SetPermissionImplies(ctx context.Context, appID, permissionID int64, implie
 	for _, impliedID := range unique {
 		if perm.WouldCreateCycle(edges, permissionID, impliedID) {
 			return errs.BadRequestError().AppendDetails(
-				"权限继承存在循环依赖", "设置权限继承失败",
+				"权限存在循环继承",
 				fmt.Sprintf("权限（ID %d）继承权限（ID %d）会形成环", permissionID, impliedID),
 			)
 		}
 		edges[permissionID] = append(edges[permissionID], impliedID)
 	}
 
-	// 写入新继承关系。
+	// 写入新继承关系并提交。
 	if _, err := tx.Exec(ctx, deletePermissionImpliesSQL, permissionID); err != nil {
-		return errs.CreatePGError(err, "权限继承", "Failed to delete permission implies").
-			AppendDetails("设置权限继承失败")
+		return errs.CreatePGError(err, "权限继承", "Failed to delete permission implies")
 	}
 	if len(unique) > 0 {
 		if _, err := tx.Exec(ctx, insertPermissionImpliesSQL, permissionID, unique); err != nil {
-			return errs.CreatePGError(err, "权限继承", "Failed to insert permission implies").
-				AppendDetails("设置权限继承失败")
+			return errs.CreatePGError(err, "权限继承", "Failed to insert permission implies")
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return errs.CreatePGError(err, "权限继承", "Failed to commit transaction").
-			AppendDetails("设置权限继承失败")
+		return errs.CreatePGError(err, "权限继承", "Failed to commit transaction")
 	}
 	perm.NotifyReload()
 	return nil
 }
 
 // ---------------------------------------------------------------------------
-// 权限继承
+// 权限继承（读取与传递展开）
 // ---------------------------------------------------------------------------
 
+// listDirectImpliesInAppSQL 列出某权限在同一应用内直接继承的权限定义。
 const listDirectImpliesInAppSQL = `
 SELECT ` + permissionDefColumns + `
 FROM permission_implies pi
@@ -431,6 +444,7 @@ WHERE pi.permission_id = $1 AND pd.app_id = $2
 ORDER BY pd.id
 `
 
+// listTransitiveImpliesInAppSQL 递归展开某权限在同一应用内的传递继承（不含自身）。
 const listTransitiveImpliesInAppSQL = `
 WITH RECURSIVE implied AS (
     SELECT implied_permission_id AS id
@@ -449,6 +463,7 @@ WHERE pd.app_id = $2 AND pd.id <> $1
 ORDER BY pd.id
 `
 
+// listImpliedByInAppSQL 列出同一应用内直接继承某权限的权限定义。
 const listImpliedByInAppSQL = `
 SELECT ` + permissionDefColumns + `
 FROM permission_implies pi
@@ -457,53 +472,53 @@ WHERE pi.implied_permission_id = $1 AND pd.app_id = $2
 ORDER BY pd.id
 `
 
+// ListImplies 查询某权限的直接继承、传递继承列表；两者都限制在当前应用内。
 func ListImplies(ctx context.Context, appID, permissionID int64) ([]*model.PermissionDef, []*model.PermissionDef, *errs.Error) {
-	if _, e := requirePermissionDefInApp(ctx, appID, permissionID); e != nil {
-		return nil, nil, e
+	if _, err := requirePermissionDefInApp(ctx, appID, permissionID); err != nil {
+		return nil, nil, err
 	}
 
-	directRows, err := db.R.Query(ctx, listDirectImpliesInAppSQL, permissionID, appID)
-	if err != nil {
-		return nil, nil, errs.CreatePGError(err, "权限继承", "Failed to query direct permission implies").
-			AppendDetails("获取权限继承失败")
-	}
-	direct, e := collectPermissionDefs(directRows, "权限继承")
+	directRows, e := db.R.Query(ctx, listDirectImpliesInAppSQL, permissionID, appID)
 	if e != nil {
-		return nil, nil, e
+		return nil, nil, errs.CreatePGError(e, "权限继承", "Failed to query direct permission implies")
+	}
+	direct, err := collectPermissionDefs(directRows, "权限继承")
+	if err != nil {
+		return nil, nil, err
 	}
 
-	transitiveRows, err := db.R.Query(ctx, listTransitiveImpliesInAppSQL, permissionID, appID)
-	if err != nil {
-		return nil, nil, errs.CreatePGError(err, "权限继承", "Failed to query transitive permission implies").
-			AppendDetails("获取权限继承失败")
-	}
-	transitive, e := collectPermissionDefs(transitiveRows, "权限继承")
+	transitiveRows, e := db.R.Query(ctx, listTransitiveImpliesInAppSQL, permissionID, appID)
 	if e != nil {
-		return nil, nil, e
+		return nil, nil, errs.CreatePGError(e, "权限继承", "Failed to query transitive permission implies")
+	}
+	transitive, err := collectPermissionDefs(transitiveRows, "权限继承")
+	if err != nil {
+		return nil, nil, err
 	}
 	return direct, transitive, nil
 }
 
+// ListImpliedBy 列出同一应用内直接继承某权限的权限定义。
 func ListImpliedBy(ctx context.Context, appID, permissionID int64) ([]*model.PermissionDef, *errs.Error) {
-	if _, e := requirePermissionDefInApp(ctx, appID, permissionID); e != nil {
-		return nil, e
+	if _, err := requirePermissionDefInApp(ctx, appID, permissionID); err != nil {
+		return nil, err
 	}
 
-	rows, err := db.R.Query(ctx, listImpliedByInAppSQL, permissionID, appID)
-	if err != nil {
-		return nil, errs.CreatePGError(err, "权限继承", "Failed to query implied-by permissions").
-			AppendDetails("获取权限继承失败")
+	rows, e := db.R.Query(ctx, listImpliedByInAppSQL, permissionID, appID)
+	if e != nil {
+		return nil, errs.CreatePGError(e, "权限继承", "Failed to query implied-by permissions")
 	}
 	return collectPermissionDefs(rows, "权限继承")
 }
 
+// requirePermissionDefInApp 校验权限定义存在且属于指定应用，返回该定义。
 func requirePermissionDefInApp(ctx context.Context, appID, permissionID int64) (*model.PermissionDef, *errs.Error) {
 	def, err := GetPermissionDefInApp(ctx, appID, permissionID)
 	if err != nil {
 		return nil, err
 	}
 	if def == nil {
-		return nil, errs.NotFoundError().AppendDetails("权限定义不存在", "获取权限继承失败")
+		return nil, errs.NotFoundError().AppendDetails("权限定义不存在")
 	}
 	return def, nil
 }
@@ -512,20 +527,25 @@ func requirePermissionDefInApp(ctx context.Context, appID, permissionID int64) (
 // 用户组权限
 // ---------------------------------------------------------------------------
 
+// selectRolesInAppSQL 校验用户组存在且属于指定应用。
 const selectRolesInAppSQL = `SELECT id FROM roles WHERE id = $1 AND app_id = $2`
 
+// deleteRolePermissionsInAppSQL 删除用户组在当前应用内的全部组权限。
 const deleteRolePermissionsInAppSQL = `
 DELETE FROM role_permissions
 WHERE role_id = $1
   AND permission_id IN (SELECT id FROM permission_defs WHERE app_id = $2)
 `
 
+// insertRolePermissionsSQL 批量插入组权限，冲突时忽略。
 const insertRolePermissionsSQL = `
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT $1, unnest($2::bigint[])
 ON CONFLICT (role_id, permission_id) DO NOTHING
 `
 
+// AddRolePermissions 向用户组追加一批权限（只增不减，重复添加幂等）。
+// 注意：调用方需自行保证权限定义属于目标应用，本函数不做应用归属校验。
 func AddRolePermissions(ctx context.Context, roleID int64, permissionIDs []int64) *errs.Error {
 	if len(permissionIDs) == 0 {
 		return nil
@@ -542,12 +562,13 @@ func AddRolePermissions(ctx context.Context, roleID int64, permissionIDs []int64
 	}
 
 	if _, err := db.R.Exec(ctx, insertRolePermissionsSQL, roleID, unique); err != nil {
-		return errs.CreatePGError(err, "用户组权限", "Failed to add role permissions").
-			AppendDetails("添加用户组权限失败")
+		return errs.CreatePGError(err, "用户组权限", "Failed to add role permissions")
 	}
 	return nil
 }
 
+// SetRolePermissions 用 permissionIDs 整体替换用户组在当前应用内的组权限。
+// 事务内校验用户组与权限定义的应用归属；成功后不触发权限目录重载（角色变化不改变目录）。
 func SetRolePermissions(ctx context.Context, appID, roleID int64, permissionIDs []int64) *errs.Error {
 	// 去重，避免重复插入。
 	seen := make(map[int64]struct{}, len(permissionIDs))
@@ -562,43 +583,40 @@ func SetRolePermissions(ctx context.Context, appID, roleID int64, permissionIDs 
 
 	tx, err := db.R.Begin(ctx)
 	if err != nil {
-		return errs.CreatePGError(err, "用户组权限", "Failed to begin transaction").
-			AppendDetails("设置用户组权限失败")
+		return errs.CreatePGError(err, "用户组权限", "Failed to begin transaction")
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
 
+	// 校验用户组属于该应用。
 	var foundRoleID int64
 	err = tx.QueryRow(ctx, selectRolesInAppSQL, roleID, appID).Scan(&foundRoleID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return errs.NotFoundError().AppendDetails("用户组不存在", "设置用户组权限失败")
+			return errs.NotFoundError().AppendDetails("用户组不存在")
 		}
-		return errs.CreatePGError(err, "用户组权限", "Failed to get role in app").
-			AppendDetails("设置用户组权限失败")
+		return errs.CreatePGError(err, "用户组权限", "Failed to get role in app")
 	}
 
+	// 校验权限定义均存在且属于该应用。
 	if len(unique) > 0 {
 		appByDefID := make(map[int64]int64, len(unique))
-		rows, qErr := tx.Query(ctx, selectPermissionDefsByIDsSQL, unique)
-		if qErr != nil {
-			return errs.CreatePGError(qErr, "用户组权限", "Failed to query permission defs").
-				AppendDetails("设置用户组权限失败")
+		rows, err := tx.Query(ctx, selectPermissionDefsByIDsSQL, unique)
+		if err != nil {
+			return errs.CreatePGError(err, "用户组权限", "Failed to query permission defs")
 		}
 		for rows.Next() {
 			var id, defAppID int64
-			if scanErr := rows.Scan(&id, &defAppID); scanErr != nil {
+			if err := rows.Scan(&id, &defAppID); err != nil {
 				rows.Close()
-				return errs.CreatePGError(scanErr, "用户组权限", "Failed to scan permission def").
-					AppendDetails("设置用户组权限失败")
+				return errs.CreatePGError(err, "用户组权限", "Failed to scan permission def")
 			}
 			appByDefID[id] = defAppID
 		}
-		if rowsErr := rows.Err(); rowsErr != nil {
+		if err := rows.Err(); err != nil {
 			rows.Close()
-			return errs.CreatePGError(rowsErr, "用户组权限", "Failed to iterate permission defs").
-				AppendDetails("设置用户组权限失败")
+			return errs.CreatePGError(err, "用户组权限", "Failed to iterate permission defs")
 		}
 		rows.Close()
 
@@ -606,31 +624,29 @@ func SetRolePermissions(ctx context.Context, appID, roleID int64, permissionIDs 
 			defAppID, ok := appByDefID[permissionID]
 			if !ok {
 				return errs.NotFoundError().AppendDetails(
-					fmt.Sprintf("权限定义（ID %d）不存在", permissionID), "设置用户组权限失败",
+					fmt.Sprintf("权限定义（ID %d）不存在", permissionID),
 				)
 			}
 			if defAppID != appID {
 				return errs.BadRequestError().AppendDetails(
-					fmt.Sprintf("权限定义（ID %d）不属于该应用", permissionID), "设置用户组权限失败",
+					fmt.Sprintf("权限定义（ID %d）不属于该应用", permissionID),
 				)
 			}
 		}
 	}
 
+	// 替换用户组的组权限并提交。
 	if _, err := tx.Exec(ctx, deleteRolePermissionsInAppSQL, roleID, appID); err != nil {
-		return errs.CreatePGError(err, "用户组权限", "Failed to delete role permissions").
-			AppendDetails("设置用户组权限失败")
+		return errs.CreatePGError(err, "用户组权限", "Failed to delete role permissions")
 	}
 	if len(unique) > 0 {
 		if _, err := tx.Exec(ctx, insertRolePermissionsSQL, roleID, unique); err != nil {
-			return errs.CreatePGError(err, "用户组权限", "Failed to insert role permissions").
-				AppendDetails("设置用户组权限失败")
+			return errs.CreatePGError(err, "用户组权限", "Failed to insert role permissions")
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return errs.CreatePGError(err, "用户组权限", "Failed to commit transaction").
-			AppendDetails("设置用户组权限失败")
+		return errs.CreatePGError(err, "用户组权限", "Failed to commit transaction")
 	}
 	return nil
 }
@@ -639,19 +655,22 @@ func SetRolePermissions(ctx context.Context, appID, roleID int64, permissionIDs 
 // 用户组成员
 // ---------------------------------------------------------------------------
 
+// RoleUser 是用户组成员列表项：成员关系（授予人、有效期）加上用户基本资料。
 type RoleUser struct {
-	UserID     int64       `json:"user_id"`
-	Username   string      `json:"username"`
-	Nickname   null.String `json:"nickname"`
-	Deleted    bool        `json:"deleted"`
-	GrantedBy  null.Int64  `json:"granted_by"`
-	ValidFrom  null.Time   `json:"valid_from"`
-	ValidUntil null.Time   `json:"valid_until"`
-	CreatedAt  time.Time   `json:"created_at"`
+	UserID     int64       `json:"user_id"`     // 用户 ID
+	Username   string      `json:"username"`    // 用户名
+	Nickname   null.String `json:"nickname"`    // 昵称，NULL 表示未设置
+	Deleted    bool        `json:"deleted"`     // 用户是否已注销（软删除）
+	GrantedBy  null.Int64  `json:"granted_by"`  // 授予人用户 ID，NULL 表示系统
+	ValidFrom  null.Time   `json:"valid_from"`  // 成员关系生效时间，NULL 表示立即生效
+	ValidUntil null.Time   `json:"valid_until"` // 成员关系过期时间，NULL 表示永久有效
+	CreatedAt  time.Time   `json:"created_at"`  // 成员关系创建时间
 }
 
+// countRoleUsersSQLForManage 统计某用户组的成员数量。
 const countRoleUsersSQLForManage = `SELECT count(*) FROM user_roles WHERE role_id = $1`
 
+// listRoleUsersSQL 分页列出某用户组的成员（附带用户资料），按加入时间倒序。
 const listRoleUsersSQL = `
 SELECT ur.user_id, u.username, u.nickname, (u.deleted_at IS NOT NULL) AS deleted,
        ur.granted_by, ur.valid_from, ur.valid_until, ur.created_at
@@ -662,37 +681,34 @@ ORDER BY ur.created_at DESC, ur.user_id DESC
 LIMIT $2 OFFSET $3
 `
 
+// ListRoleUsers 分页查询某用户组的成员（含已注销用户），返回当前页与总数。
 func ListRoleUsers(ctx context.Context, roleID int64, limit, offset int32) ([]*RoleUser, int32, *errs.Error) {
 	limit, offset = search.NormalizePagination(limit, offset)
 
 	var count int32
 	if err := db.R.QueryRow(ctx, countRoleUsersSQLForManage, roleID).Scan(&count); err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to count role users").
-			AppendDetails("用户组成员列表获取失败")
+		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to count role users")
 	}
 
 	rows, err := db.R.Query(ctx, listRoleUsersSQL, roleID, limit, offset)
 	if err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to query role users").
-			AppendDetails("用户组成员列表获取失败")
+		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to query role users")
 	}
 	defer rows.Close()
 
 	users := make([]*RoleUser, 0)
 	for rows.Next() {
 		var u RoleUser
-		if scanErr := rows.Scan(
+		if err := rows.Scan(
 			&u.UserID, &u.Username, &u.Nickname, &u.Deleted,
 			&u.GrantedBy, &u.ValidFrom, &u.ValidUntil, &u.CreatedAt,
-		); scanErr != nil {
-			return nil, 0, errs.CreatePGError(scanErr, "用户组成员", "Failed to scan role user").
-				AppendDetails("用户组成员列表获取失败")
+		); err != nil {
+			return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to scan role user")
 		}
 		users = append(users, &u)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to iterate role users").
-			AppendDetails("用户组成员列表获取失败")
+		return nil, 0, errs.CreatePGError(err, "用户组成员", "Failed to iterate role users")
 	}
 	return users, count, nil
 }
@@ -701,11 +717,13 @@ func ListRoleUsers(ctx context.Context, roleID int64, limit, offset int32) ([]*R
 // 应用范围：应用直接授予用户的权限
 // ---------------------------------------------------------------------------
 
+// countUserPermissionGrantsInAppSQL 统计某应用直接授予某用户的权限数量。
 const countUserPermissionGrantsInAppSQL = `
 SELECT count(*) FROM user_permission_grants
 WHERE user_id = $1 AND granted_by_app_id = $2
 `
 
+// listUserPermissionGrantsInAppSQL 分页列出某应用直接授予某用户的权限，按 id 倒序。
 const listUserPermissionGrantsInAppSQL = `
 SELECT id, user_id, permission, granted_by_user_id, granted_by_app_id,
        valid_from, valid_until, note, created_at, updated_at
@@ -715,6 +733,7 @@ ORDER BY id DESC
 LIMIT $3 OFFSET $4
 `
 
+// ListUserPermissionGrantsInApp 分页查询某应用直接授予某用户的权限列表。
 func ListUserPermissionGrantsInApp(
 	ctx context.Context,
 	userID, appID int64,
@@ -723,19 +742,17 @@ func ListUserPermissionGrantsInApp(
 	limit, offset = search.NormalizePagination(limit, offset)
 
 	var count int32
-	if err := db.R.QueryRow(ctx, countUserPermissionGrantsInAppSQL, userID, appID).Scan(&count); err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户授权", "Failed to count app user permission grants").
-			AppendDetails("应用用户授权列表获取失败")
+	if e := db.R.QueryRow(ctx, countUserPermissionGrantsInAppSQL, userID, appID).Scan(&count); e != nil {
+		return nil, 0, errs.CreatePGError(e, "用户授权", "Failed to count app user permission grants")
 	}
 
-	rows, err := db.R.Query(ctx, listUserPermissionGrantsInAppSQL, userID, appID, limit, offset)
-	if err != nil {
-		return nil, 0, errs.CreatePGError(err, "用户授权", "Failed to query app user permission grants").
-			AppendDetails("应用用户授权列表获取失败")
-	}
-	grants, e := collectUserPermissionGrants(rows, "应用用户授权列表")
+	rows, e := db.R.Query(ctx, listUserPermissionGrantsInAppSQL, userID, appID, limit, offset)
 	if e != nil {
-		return nil, 0, e
+		return nil, 0, errs.CreatePGError(e, "用户授权", "Failed to query app user permission grants")
+	}
+	grants, err := collectUserPermissionGrants(rows, "应用用户授权列表")
+	if err != nil {
+		return nil, 0, err
 	}
 	return grants, count, nil
 }

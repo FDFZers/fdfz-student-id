@@ -15,13 +15,17 @@ import (
 	"github.com/guregu/null/v6"
 )
 
+// getUserBanHandler 查询指定用户的封禁信息：未登录不可调用，需带令牌。
+// 查自己需要 user.ban.read，查他人需要 users.ban.read；无封禁时返回 banned=false。
 func getUserBanHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetIDStr := c.Param("id")
 	targetID, e := strconv.ParseInt(targetIDStr, 10, 64)
 	if e != nil {
-		return errs.BadRequestError().AppendDetails("无效的用户 ID")
+		return errs.BadRequestError().AppendDetails("用户 ID 格式错误")
 	}
+
+	// 按「查自己」与「查他人」区分所需权限
 
 	var allowed bool
 	if targetID == claims.UserID {
@@ -30,7 +34,7 @@ func getUserBanHandler(c *gin.Context) *errs.Error {
 		allowed = perm.HasPermission(claims, perm.PermUsersBanRead)
 	}
 	if !allowed {
-		return errs.PermissionDeniedError().AppendDetails("权限不足", "鉴权失败").Seal()
+		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
 	ban, err := user.GetUserBan(c.Request.Context(), targetID)
@@ -51,11 +55,14 @@ func getUserBanHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// banUserReq 封禁请求体；end_time 为空表示永久封禁。
 type banUserReq struct {
 	Reason  string    `json:"reason"`
 	EndTime null.Time `json:"end_time"`
 }
 
+// banUserHandler 封禁指定用户：校验原因与结束时间、确认目标用户存在后写入封禁记录并记录审计日志。
+// 注意：不能封禁自己；新封禁会先禁用该用户已有的启用中封禁记录。
 func banUserHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
@@ -66,8 +73,10 @@ func banUserHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("不能封禁自己")
 	}
 
+	// 校验请求体与封禁原因、结束时间
+
 	var req banUserReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateBanReason(req.Reason); err != nil {
@@ -80,6 +89,8 @@ func banUserHandler(c *gin.Context) *errs.Error {
 	if err := handling.EnsureUserExists(c, targetID); err != nil {
 		return err
 	}
+
+	// 写入封禁记录并输出审计日志
 
 	newBan := &model.UserBan{
 		UserID:  targetID,
@@ -104,6 +115,8 @@ func banUserHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// unbanUserHandler 解除指定用户的封禁：确认目标用户存在后禁用其启用中的封禁记录。
+// 注意：不能解封自己；对未封禁用户执行不会报错（幂等）。
 func unbanUserHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")

@@ -1,3 +1,5 @@
+// Package security 实现账号安全相关的内部接口：邮箱/TOTP/QQ 绑定与解绑、修改密码、会话管理与账号注销。
+// 路由统一挂在 /api/internal/security 下：除会话列表外均要求提权令牌，端点级失败文案由 handling.Wrap 追加。
 package security
 
 import (
@@ -8,15 +10,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// 绑定验证码错误次数的 Redis 计数维度，需与 auth 服务中使用的 key 保持一致。
 const (
 	bindEmailAttemptsKind = "email"
 	bindTOTPAttemptsKind  = "totp"
 	bindQQAttemptsKind    = "qq"
 )
 
+// InitRoutes 注册账号安全相关路由。
+// 注意：危险操作要求提权令牌，会话相关接口还叠加了用户组权限校验。
 func InitRoutes(internal *gin.RouterGroup) {
 	group := internal.Group("/security")
 
+	// 邮箱、TOTP、QQ 的绑定与解绑
 	group.POST("/email/init", middleware.RequireStepupToken(), handling.Wrap("邮箱绑定失败", emailBindInitHandler))
 	group.POST("/email/verify", middleware.RequireStepupToken(), handling.Wrap("邮箱绑定失败", emailBindVerifyHandler))
 	group.DELETE("/email", middleware.RequireStepupToken(), handling.Wrap("邮箱解绑失败", emailUnbindHandler))
@@ -27,11 +33,12 @@ func InitRoutes(internal *gin.RouterGroup) {
 	group.POST("/qq/verify", middleware.RequireStepupToken(), handling.Wrap("QQ 绑定失败", qqBindVerifyHandler))
 	group.DELETE("/qq", middleware.RequireStepupToken(), handling.Wrap("QQ 解绑失败", qqUnbindHandler))
 
+	// 修改密码、注销账号与管理员删除用户
 	group.POST("/password/change", middleware.RequireStepupToken(), handling.Wrap("修改密码失败", changePasswordHandler))
 	group.DELETE("/account", middleware.RequireStepupToken(), handling.Wrap("账号注销失败", deleteAccountHandler))
-
 	group.DELETE("/profile/:id", middleware.RequirePermission(perm.PermUsersDelete), handling.Wrap("用户删除失败", deleteUserHandler))
 
+	// 会话列表与撤销：会话列表只要求访问令牌，撤销要求提权令牌
 	group.GET("/session", middleware.RequireToken(), handling.Wrap("会话列表获取失败", listSessionsHandler))
 	group.DELETE("/session", middleware.RequireStepupToken(), handling.Wrap("会话撤销失败", revokeSessionsHandler))
 	group.DELETE("/session/:id", middleware.RequireStepupToken(), handling.Wrap("会话撤销失败", revokeSessionHandler))

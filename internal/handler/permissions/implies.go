@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// buildImpliesResponse 构造权限继承信息响应：直接继承、传递继承以及反查（被哪些权限继承）。
 func buildImpliesResponse(c *gin.Context, app *model.OAuthApp, def *model.PermissionDef) *errs.Error {
 	ctx := c.Request.Context()
 
@@ -32,6 +33,7 @@ func buildImpliesResponse(c *gin.Context, app *model.OAuthApp, def *model.Permis
 	return nil
 }
 
+// getAppPermissionImpliesHandler 返回指定权限定义的继承信息（直接、传递与被继承）。
 func getAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -53,10 +55,13 @@ func getAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 	return buildImpliesResponse(c, app, def)
 }
 
+// setAppPermissionImpliesRequestBody 是设置直接继承关系的请求体；Implies 为完整权限串列表，语义为整体替换。
 type setAppPermissionImpliesRequestBody struct {
 	Implies []string `json:"implies"`
 }
 
+// setAppPermissionImpliesHandler 整体替换权限定义的直接继承关系。
+// 注意：传入空数组会清空全部直接继承；循环依赖检测由服务层在事务内完成。
 func setAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -68,7 +73,7 @@ func setAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body setAppPermissionImpliesRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 

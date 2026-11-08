@@ -1,4 +1,4 @@
-// Package auth 实现认证相关的 HTTP 处理器。
+// Package auth 实现注册、登录、二次验证、令牌刷新与密码重置等认证相关的 HTTP 处理器。
 package auth
 
 import (
@@ -19,21 +19,24 @@ import (
 	"github.com/guregu/null/v6"
 )
 
+// createRegisterRequestReq 是注册申请的请求体（multipart 表单，包含佐证图片）。
 type createRegisterRequestReq struct {
-	Username      string         `form:"username"`
-	Nickname      string         `form:"nickname"`
-	Type          model.UserType `form:"type" binding:"required"`
-	StudentNum    string         `form:"student_num"`
-	RealName      string         `form:"real_name"`
-	School        model.School   `form:"school" binding:"required"`
-	Password      string         `form:"password"`
-	AltchaPayload string         `form:"altcha_payload"`
+	Username      string         `form:"username"`       // 用户名
+	Nickname      string         `form:"nickname"`       // 昵称，留空或与用户名相同时不保存
+	Type          model.UserType `form:"type"`           // 用户类型
+	StudentNum    string         `form:"student_num"`    // 学号，学生类型必填
+	RealName      string         `form:"real_name"`      // 真实姓名
+	School        model.School   `form:"school"`         // 学校
+	Password      string         `form:"password"`       // 密码
+	AltchaPayload string         `form:"altcha_payload"` // Altcha 人机验证载荷
 }
 
+// createRegisterHandler 创建注册申请并上传佐证图片；注册申请需管理员审核通过后才创建用户。
+// 注意：先创建注册申请再上传图片，图片上传失败时会回滚删除申请记录。
 func createRegisterHandler(c *gin.Context) *errs.Error {
 	// 解析请求
 	var req createRegisterRequestReq
-	if err := c.ShouldBind(&req); err != nil {
+	if e := c.ShouldBind(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
@@ -46,15 +49,15 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	form, err := c.MultipartForm()
-	if err != nil {
+	form, e := c.MultipartForm()
+	if e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
 	fileHeaders := form.File["proof_image"]
 	switch {
 	case len(fileHeaders) == 0:
-		return errs.BadRequestError().AppendDetails("请上传证明身份的佐证图片")
+		return errs.BadRequestError().AppendDetails("未提供佐证图片")
 	case len(fileHeaders) > 1:
 		return errs.BadRequestError().AppendDetails("佐证图片最多上传 1 张")
 	}
@@ -65,9 +68,10 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		studentNum = null.StringFrom(req.StudentNum)
 	}
 
+	// 校验注册表单字段
 	if req.Type == model.UserTypeStudent {
 		if !studentNum.Valid {
-			return errs.BadRequestError().AppendDetails("学生账号需提供学号")
+			return errs.BadRequestError().AppendDetails("学生账号未提供学号")
 		}
 		if err := handling.ValidateStudentNum(studentNum.String); err != nil {
 			return err
@@ -105,20 +109,20 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		nickname = null.StringFrom(req.Nickname)
 	}
 
-	// 用户名冲突与学号冲突统一使用同一句模糊提示
+	// 注意：用户名冲突与学号冲突统一使用同一句模糊提示，避免被用来探测用户名/学号是否被占用。
 	if taken, err := user.IsUsernameTaken(c.Request.Context(), req.Username); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to check username availability").AppendDetails("用户名占用信息查询失败")
 	} else if taken {
-		return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试", "注册请求创建失败")
+		return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试")
 	}
 
 	// 密码哈希
-	pwdHash, err := crypto.HashArgon2ID(req.Password)
-	if err != nil {
-		return errs.CreateAndLogInternalError(err, "Failed to hash password").AppendDetails("密码哈希失败")
+	pwdHash, e := crypto.HashArgon2ID(req.Password)
+	if e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to hash password").AppendDetails("密码哈希失败")
 	}
 
-	// 创建注册请求
+	// 创建注册申请
 	r := &model.RegisterRequest{
 		Username:   req.Username,
 		Nickname:   nickname,
@@ -133,14 +137,14 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 上传佐证图片
+	// 上传佐证图片，失败时回滚删除注册申请
 	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
 		Slug:     "/student_id/proof_images/" + r.ID.String(),
 		FileName: r.ID.String() + strings.ToLower(path.Ext(fileHeader.Filename)),
 		AppID:    null.IntFrom(1),
 	}); err != nil {
-		if deleteErr := user.DeleteRegisterRequest(c.Request.Context(), r.ID); deleteErr != nil {
-			return deleteErr.AppendDetails("注册失败且回退失败，请联系管理员").Seal()
+		if err := user.DeleteRegisterRequest(c.Request.Context(), r.ID); err != nil {
+			return err.AppendDetails("注册失败且回退失败，请联系管理员").Seal()
 		}
 		return err
 	}

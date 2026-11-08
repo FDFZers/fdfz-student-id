@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// respondGroupPermissions 查询并写出用户组直接拥有的权限定义列表（跨应用补充命名空间）。
 func respondGroupPermissions(c *gin.Context, groupID int64) *errs.Error {
 	defs, err := userperm.ListRolePermissions(c.Request.Context(), groupID)
 	if err != nil {
@@ -33,12 +34,14 @@ func respondGroupPermissions(c *gin.Context, groupID int64) *errs.Error {
 	return nil
 }
 
+// createAppGroupRequestBody 是创建用户组的请求体。
 type createAppGroupRequestBody struct {
 	Name   string `json:"name"`
 	Note   string `json:"note"`
 	Public bool   `json:"public"`
 }
 
+// createAppGroupHandler 处理用户组创建：校验名称与备注后写入当前应用。
 func createAppGroupHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -46,14 +49,14 @@ func createAppGroupHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body createAppGroupRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateUserGroupName(body.Name); err != nil {
-		return err.AppendDetails("创建用户组失败")
+		return err
 	}
 	if err := handling.ValidateUserGroupNote(body.Note); err != nil {
-		return err.AppendDetails("创建用户组失败")
+		return err
 	}
 
 	role := &model.Role{
@@ -70,6 +73,7 @@ func createAppGroupHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// getAppGroupHandler 处理用户组详情查询：本应用的组或其他应用的公开组均可见。
 func getAppGroupHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -92,12 +96,14 @@ func getAppGroupHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// updateAppGroupRequestBody 是更新用户组的请求体，字段为 nil 表示不修改。
 type updateAppGroupRequestBody struct {
 	Name   *string `json:"name"`
 	Note   *string `json:"note"`
 	Public *bool   `json:"public"`
 }
 
+// updateAppGroupHandler 处理用户组更新：只能更新本应用的用户组，未提供的字段保持原值。
 func updateAppGroupHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -109,7 +115,7 @@ func updateAppGroupHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body updateAppGroupRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if body.Name == nil && body.Note == nil && body.Public == nil {
@@ -124,6 +130,7 @@ func updateAppGroupHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
+	// 未提供的字段沿用当前值。
 	name := role.Name
 	if body.Name != nil {
 		name = *body.Name
@@ -138,10 +145,10 @@ func updateAppGroupHandler(c *gin.Context) *errs.Error {
 	}
 
 	if err := handling.ValidateUserGroupName(name); err != nil {
-		return err.AppendDetails("更新用户组失败")
+		return err
 	}
 	if err := handling.ValidateUserGroupNote(note); err != nil {
-		return err.AppendDetails("更新用户组失败")
+		return err
 	}
 
 	if err := userperm.UpdateRole(c.Request.Context(), groupID, name, note, public); err != nil {
@@ -155,6 +162,7 @@ func updateAppGroupHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// deleteAppGroupHandler 处理用户组删除：只能删除本应用的用户组，组权限与成员级联清理。
 func deleteAppGroupHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -181,6 +189,7 @@ func deleteAppGroupHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// listAppGroupPermissionsHandler 处理组权限查询：本应用的组与其他应用的公开组均可见。
 func listAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -202,10 +211,12 @@ func listAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	return respondGroupPermissions(c, groupID)
 }
 
+// setAppGroupPermissionsRequestBody 是整体替换组权限的请求体，权限为完整权限串。
 type setAppGroupPermissionsRequestBody struct {
 	Permissions []string `json:"permissions"`
 }
 
+// setAppGroupPermissionsHandler 处理组权限整体替换：只能修改本应用用户组，权限须属于当前应用。
 func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -217,7 +228,7 @@ func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body setAppGroupPermissionsRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
@@ -245,10 +256,12 @@ func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	return respondGroupPermissions(c, groupID)
 }
 
+// addAppGroupPermissionsRequestBody 是追加组权限的请求体，权限为完整权限串。
 type addAppGroupPermissionsRequestBody struct {
 	Permissions []string `json:"permissions"`
 }
 
+// addAppGroupPermissionsHandler 处理组权限追加：空权限列表直接成功，重复权限由服务层去重。
 func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -260,7 +273,7 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body addAppGroupPermissionsRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
@@ -271,6 +284,7 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	if role == nil {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
+	// 存疑：公开用户组可能属于其他应用，此校验会放行，随后向其他应用的用户组追加当前应用的权限。
 	if role.AppID != app.ID && !role.Public {
 		// 防御性校验：GetRoleVisibleToApp 已保证不可见即 nil。
 		return errs.NotFoundError().AppendDetails("用户组不存在")
@@ -292,6 +306,7 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	return respondGroupPermissions(c, groupID)
 }
 
+// listAppGroupUsersHandler 处理用户组成员列表查询：本应用的组与其他应用的公开组均可见。
 func listAppGroupUsersHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -324,12 +339,14 @@ func listAppGroupUsersHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// grantAppGroupUserRequestBody 是授予用户组的请求体，有效期为可选的时间区间。
 type grantAppGroupUserRequestBody struct {
 	UserID     int64      `json:"user_id"`
 	ValidFrom  *time.Time `json:"valid_from"`
 	ValidUntil *time.Time `json:"valid_until"`
 }
 
+// grantAppGroupUserHandler 处理用户组授予：只能向本应用的用户组添加成员，授予人为当前操作者。
 func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	app, err := handling.ResolveApp(c)
@@ -341,17 +358,19 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 解析请求体并校验用户 ID 与有效期区间。
 	var body grantAppGroupUserRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if body.UserID <= 0 {
-		return errs.BadRequestError().AppendDetails("无效的用户 ID")
+		return errs.BadRequestError().AppendDetails("用户 ID 格式错误")
 	}
 	if err := handling.ValidateValidRange(body.ValidFrom, body.ValidUntil); err != nil {
-		return err.AppendDetails("用户组成员授予失败")
+		return err
 	}
 
+	// 校验用户组与目标用户均存在。
 	role, err := userperm.GetRoleInApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
@@ -367,6 +386,7 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户不存在")
 	}
 
+	// 写入成员关系并回显成员信息。
 	grant := &model.UserRole{
 		UserID:     body.UserID,
 		RoleID:     groupID,
@@ -395,6 +415,7 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// revokeAppGroupUserHandler 处理用户组成员撤销：只能撤销本应用用户组的成员关系，重复撤销幂等成功。
 func revokeAppGroupUserHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {

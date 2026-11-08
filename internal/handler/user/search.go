@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// searchCfg 用户搜索配置：可搜索字段、可排序字段、标签（用户类型/学校）与返回列。
+// 查询结果交给 filterProfiles 过滤，因此 SQL 返回的完整用户记录不会被直接暴露给前端。
 var searchCfg = search.SearchConfig{
 	Table:             "users",
 	Item:              "用户",
@@ -21,16 +23,20 @@ var searchCfg = search.SearchConfig{
 	DefaultSortColumn: "id",
 }
 
+// searchInfo 用户搜索能力的静态描述，供前端渲染搜索表单。
 var searchInfo = search.GetInfo(&searchCfg)
 
+// searchInfoHandler 返回用户搜索的字段、匹配方法、可排序字段与标签取值。
 func searchInfoHandler(c *gin.Context) *errs.Error {
 	c.JSON(http.StatusOK, searchInfo)
 	return nil
 }
 
+// searchQueryHandler 执行用户搜索并返回总数与过滤后的用户资料；需要 users.list 权限。
+// 注意：搜索会返回已软删除用户（deleted_at 非空），由 filterProfiles 输出 deleted 标记。
 func searchQueryHandler(c *gin.Context) *errs.Error {
 	var req search.SearchRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 

@@ -1,3 +1,4 @@
+// Package email 通过 SMTP 发送 HTML 验证码邮件，支持登录/重置密码/二次验证与邮箱绑定场景。
 package email
 
 import (
@@ -12,9 +13,13 @@ import (
 	"time"
 )
 
+// fs 内嵌 templates 目录下的 HTML 邮件模板。
+//
 //go:embed templates/*.html
 var fs embed.FS
 
+// send 组装 MIME 邮件并通过 SMTP_* 配置发送。
+// 主题按 RFC 2047 编码，正文为 HTML；发送失败时返回底层错误。
 func send(to, subject, htmlBody string) error {
 	a := smtp.PlainAuth("", cfg.C.SMTP.Username, cfg.C.SMTP.Password, cfg.C.SMTP.Host)
 
@@ -33,6 +38,8 @@ func send(to, subject, htmlBody string) error {
 	return smtp.SendMail(cfg.C.SMTP.Host+":"+cfg.C.SMTP.Port, a, cfg.C.SMTP.From, []string{to}, []byte(msg.String()))
 }
 
+// SendCode 按鉴权会话类型选择文案，渲染验证码模板并发送。
+// 注意：typ 必须是登录、重置密码或二次验证之一，其他取值返回错误。
 func SendCode(to, code string, typ auth.AuthSessionType) error {
 	data, err := fs.ReadFile("templates/code.html")
 	if err != nil {
@@ -78,6 +85,7 @@ func SendCode(to, code string, typ auth.AuthSessionType) error {
 	return send(to, title+" - 复旦附中学生 ID", r.Replace(str))
 }
 
+// SendBindEmailCode 发送邮箱绑定验证码邮件。
 func SendBindEmailCode(to, code string) error {
 	data, err := fs.ReadFile("templates/code.html")
 	if err != nil {

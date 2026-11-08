@@ -18,13 +18,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// emailBindInitReq 邮箱绑定发起请求体。
 type emailBindInitReq struct {
 	Email string `json:"email"`
 }
 
+// emailBindInitHandler 发起邮箱绑定：检查邮箱可用后生成验证码，暂存待绑定记录并发送邮件。
 func emailBindInitHandler(c *gin.Context) *errs.Error {
 	var req emailBindInitReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateEmail(req.Email); err != nil {
@@ -33,6 +35,7 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 
 	claims := handling.MustGetClaims(c)
 
+	// 校验邮箱是否已绑定当前用户或已被其他用户占用
 	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
@@ -49,6 +52,7 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 		return errs.ConflictError().AppendDetails("该邮箱已被其他用户绑定")
 	}
 
+	// 检查邮箱发送频控与用户、全站发送配额
 	if err := auth.TryAcquireEmailRateLimit(c.Request.Context(), req.Email); err != nil {
 		return err
 	}
@@ -57,6 +61,7 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 生成验证码并暂存待绑定记录，10 分钟内有效
 	code, e := crypto.GenerateCode(6, crypto.CodeCharset)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to generate email bind code").
@@ -67,9 +72,10 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	if err := email.SendBindEmailCode(req.Email, code); err != nil {
+	// 邮件发送失败时清除待绑定记录，避免用户拿到无法校验的验证码
+	if e := email.SendBindEmailCode(req.Email, code); e != nil {
 		auth.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
-		return errs.CreateAndLogInternalError(err, "Failed to send email bind code").
+		return errs.CreateAndLogInternalError(e, "Failed to send email bind code").
 			AppendDetails("邮件发送失败")
 	}
 
@@ -77,31 +83,36 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// emailBindVerifyReq 邮箱绑定校验请求体。
 type emailBindVerifyReq struct {
 	Email string `json:"email"`
 	Code  string `json:"code"`
 }
 
+// emailBindVerifyHandler 校验邮箱绑定验证码：通过后把邮箱写入用户邮箱表，并清理待绑定状态。
 func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req emailBindVerifyReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateEmail(req.Email); err != nil {
 		return err
 	}
 	if req.Code == "" {
-		return errs.BadRequestError().AppendDetails("验证码不能为空")
+		return errs.BadRequestError().AppendDetails("未提供验证码")
 	}
 
 	claims := handling.MustGetClaims(c)
 
+	// 读取待绑定记录，未发起或已过期时拒绝
 	pending, err := auth.GetPendingEmailBind(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if pending == nil {
 		return errs.IllegalStateError().AppendDetails("邮箱绑定未发起或已过期")
 	}
+
+	// 请求邮箱必须与待绑定记录一致，避免校验通过后绑定到其他邮箱
 	if !strings.EqualFold(pending.Email, req.Email) {
 		return errs.BadRequestError().AppendDetails("邮箱与绑定请求不一致")
 	}
@@ -110,6 +121,7 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 常量时间比较验证码，错误时累计失败次数
 	if subtle.ConstantTimeCompare([]byte(pending.Code), []byte(req.Code)) != 1 {
 		if err := recordBindFailure(c.Request.Context(), bindEmailAttemptsKind, claims.UserID); err != nil {
 			return err
@@ -117,6 +129,7 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 		return errs.ForbiddenError().AppendDetails("验证码错误")
 	}
 
+	// 校验通过：换绑邮箱（旧记录软删除）并清理待绑定状态与失败计数
 	if err := user.SetUserEmail(c.Request.Context(), &model.UserEmail{
 		UserID: claims.UserID,
 		Email:  pending.Email,
@@ -131,6 +144,7 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// emailUnbindHandler 解绑当前用户的邮箱：邮箱记录软删除，保留历史。
 func emailUnbindHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
@@ -148,15 +162,17 @@ func emailUnbindHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// totpBindInitHandler 发起 TOTP 绑定：生成密钥与 otpauth URL，并暂存待校验密钥。
 func totpBindInitHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if existing != nil {
-		return errs.ConflictError().AppendDetails("已绑定 TOTP")
+		return errs.ConflictError().AppendDetails("TOTP 已绑定")
 	}
 
+	// 生成密钥并暂存待绑定记录，10 分钟内未校验即失效
 	secret, otpAuthURL, e := crypto.GenerateTOTP(uint64(claims.UserID))
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to generate TOTP secret").
@@ -167,6 +183,7 @@ func totpBindInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// secret 与 url 一次性返回给前端展示，后续校验只比对 secret
 	c.JSON(http.StatusOK, gin.H{
 		"secret": secret,
 		"url":    otpAuthURL,
@@ -174,13 +191,15 @@ func totpBindInitHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// totpBindVerifyReq TOTP 绑定校验请求体。
 type totpBindVerifyReq struct {
 	Code string `json:"code"`
 }
 
+// totpBindVerifyHandler 校验 TOTP 验证码：通过后把密钥写入用户 TOTP 表，并清理待绑定状态。
 func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req totpBindVerifyReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateTOTPCode(req.Code); err != nil {
@@ -189,6 +208,7 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 
 	claims := handling.MustGetClaims(c)
 
+	// 读取待校验密钥，未发起或已过期时拒绝
 	pending, err := auth.GetPendingTOTPBind(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
@@ -200,18 +220,20 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	ok2, e := crypto.VerifyTOTP(pending.Secret, req.Code)
+	// 校验 TOTP，允许 1 个周期的时钟偏差；错误时累计失败次数
+	valid, e := crypto.VerifyTOTP(pending.Secret, req.Code)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to verify TOTP code").
 			AppendDetails("TOTP 校验失败")
 	}
-	if !ok2 {
+	if !valid {
 		if err := recordBindFailure(c.Request.Context(), bindTOTPAttemptsKind, claims.UserID); err != nil {
 			return err
 		}
 		return errs.ForbiddenError().AppendDetails("验证码错误")
 	}
 
+	// 校验通过：写入密钥并清理待绑定状态与失败计数
 	if err := user.UpsertUserTotp(c.Request.Context(), &model.UserTOTP{
 		UserID: claims.UserID,
 		Secret: pending.Secret,
@@ -226,6 +248,7 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// totpUnbindHandler 解绑当前用户的 TOTP：直接删除密钥记录。
 func totpUnbindHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
@@ -243,13 +266,16 @@ func totpUnbindHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// qqBindInitReq QQ 绑定发起请求体。
 type qqBindInitReq struct {
 	QQ string `json:"qq"`
 }
 
+// qqBindInitHandler 发起 QQ 绑定：检查 QQ 可用后生成验证码并暂存，验证码返回给用户自行发送。
+// 存疑：发起阶段没有发送频控或配额限制，只在校验阶段限制拉取频率。
 func qqBindInitHandler(c *gin.Context) *errs.Error {
 	var req qqBindInitReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateQQ(req.QQ); err != nil {
@@ -258,6 +284,7 @@ func qqBindInitHandler(c *gin.Context) *errs.Error {
 
 	claims := handling.MustGetClaims(c)
 
+	// 校验 QQ 是否已绑定当前用户或已被其他用户占用
 	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
@@ -274,6 +301,7 @@ func qqBindInitHandler(c *gin.Context) *errs.Error {
 		return errs.ConflictError().AppendDetails("该 QQ 已被其他用户绑定")
 	}
 
+	// 生成验证码并暂存待绑定记录，10 分钟内有效
 	code, e := crypto.GenerateCode(6, crypto.CodeCharset)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to generate QQ bind code").
@@ -284,20 +312,23 @@ func qqBindInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 验证码由用户使用待绑定的 QQ 主动发送给机器人，服务端拉取好友消息进行校验
+	// 验证码由用户使用待绑定的 QQ 主动发送给机器人，服务端稍后拉取好友消息校验
 	c.JSON(http.StatusOK, gin.H{
 		"code": code,
 	})
 	return nil
 }
 
+// qqBindVerifyReq QQ 绑定校验请求体。
 type qqBindVerifyReq struct {
 	QQ string `json:"qq"`
 }
 
+// qqBindVerifyHandler 校验 QQ 绑定：拉取 NapCat 好友消息，在待绑定有效期内匹配验证码。
+// 注意：只认待绑定发起后 PendingBindDuration 内的消息，避免历史消息被重放。
 func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req qqBindVerifyReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateQQ(req.QQ); err != nil {
@@ -306,6 +337,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 
 	claims := handling.MustGetClaims(c)
 
+	// 读取待绑定记录并核对 QQ
 	pending, err := auth.GetPendingQQBind(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
@@ -320,6 +352,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 限制单个 QQ 的拉取频率，防止频繁查询 NapCat
 	if err := auth.TryAcquireQQRateLimit(c.Request.Context(), pending.QQ); err != nil {
 		return err
 	}
@@ -333,6 +366,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 			AppendDetails("NapCat 错误")
 	}
 
+	// 只在待绑定有效期内、且文本与验证码完全一致的消息中匹配
 	cutoff := time.Now().Add(-auth.PendingBindDuration).Unix()
 	matched := false
 	for _, msg := range messages {
@@ -345,6 +379,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 		}
 	}
 
+	// 未匹配到验证码时累计失败次数
 	if !matched {
 		if err := recordBindFailure(c.Request.Context(), bindQQAttemptsKind, claims.UserID); err != nil {
 			return err
@@ -353,6 +388,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 			AppendDetails("未识别到验证码，请使用该 QQ 向机器人发送验证码")
 	}
 
+	// 匹配成功：写入 QQ（旧记录软删除）并清理待绑定状态与失败计数
 	if err := user.SetUserQQ(c.Request.Context(), &model.UserQQ{
 		UserID: claims.UserID,
 		QQ:     pending.QQ,
@@ -367,6 +403,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// qqUnbindHandler 解绑当前用户的 QQ：QQ 记录软删除，保留历史。
 func qqUnbindHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
@@ -384,21 +421,24 @@ func qqUnbindHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// checkBindAttempts 检查绑定验证码错误次数是否已达上限；kind 为绑定方式，见包级常量。
+// 注意：失败计数在首次失败时设置 PendingBindDuration 过期，到期自动清零。
 func checkBindAttempts(ctx context.Context, kind string, userID int64) *errs.Error {
 	attempts, err := auth.GetBindAttempts(ctx, kind, userID)
 	if err != nil {
-		return err.AppendDetails("绑定失败").Seal()
+		return err
 	}
 	if attempts >= auth.MaxBindAttempts {
 		return errs.RateLimitExceededError().
-			AppendDetails("验证码错误次数过多，请重新发起绑定", "绑定失败").Seal()
+			AppendDetails("验证码错误次数过多，请重新发起绑定")
 	}
 	return nil
 }
 
+// recordBindFailure 记录一次绑定验证码错误，达到上限后由 checkBindAttempts 拦截。
 func recordBindFailure(ctx context.Context, kind string, userID int64) *errs.Error {
 	if _, err := auth.IncreaseBindAttempts(ctx, kind, userID); err != nil {
-		return err.AppendDetails("绑定失败").Seal()
+		return err
 	}
 	return nil
 }

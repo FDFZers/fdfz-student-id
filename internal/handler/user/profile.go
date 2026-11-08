@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// getUserProfileByUsernameHandler 按用户名查询用户资料。
+// 用户不存在（含已软删除）时返回 404，否则交给 filterProfiles 按权限与可见性裁剪后返回。
 func getUserProfileByUsernameHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetUsername := c.Param("username")
@@ -29,6 +31,8 @@ func getUserProfileByUsernameHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// getUserProfileByIDHandler 按用户 ID 查询用户资料；未带 :id 路径参数时查询当前登录用户。
+// 用户不存在（含已软删除）时返回 404，否则交给 filterProfiles 按权限与可见性裁剪后返回。
 func getUserProfileByIDHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")

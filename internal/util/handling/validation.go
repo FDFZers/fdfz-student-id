@@ -13,90 +13,135 @@ import (
 	"github.com/dlclark/regexp2"
 )
 
-var regexUsername = regexp2.MustCompile(`\A[a-zA-Z0-9_-]{4,32}\z`, regexp2.None)
-var regexNickname = regexp2.MustCompile(`\A.{1,32}\z`, regexp2.None)
-var regexRealName = regexp2.MustCompile(`\A[\u4e00-\u9fff\u00b7]{1,4}\z`, regexp2.None)
-var regexStudentNum = regexp2.MustCompile(`\A(?:\d{8}|\d{6}0\d{2})\z`, regexp2.None) // 青分学号9位
-var regexEmail = regexp2.MustCompile(`\A(?=[\s\S]{1,254}\z)([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\"(\[\]!#-[^-~ \t]|(\\[\t -~]))+\")@([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\[[\t -Z^-~]*])\z`, regexp2.None)
-var regexPassword = regexp2.MustCompile(`\A(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?\x60~]{8,32}\z`, regexp2.None)
-var regexTOTPCode = regexp2.MustCompile(`\A\d{6}\z`, regexp2.None)
-var regexQQ = regexp2.MustCompile(`\A[1-9]\d{4,11}\z`, regexp2.None) // 5-12 位非 0 开头数字
+// 各类输入的格式校验规则。统一使用 regexp2 的 \A...\z 全串匹配。
+var (
+	// regexUsername 用户名：4-32 位字母、数字、下划线或连字符。
+	regexUsername = regexp2.MustCompile(`\A[a-zA-Z0-9_-]{4,32}\z`, regexp2.None)
+	// regexNickname 昵称：1-32 个字符（不限制内容）。
+	regexNickname = regexp2.MustCompile(`\A.{1,32}\z`, regexp2.None)
+	// regexRealName 姓名：1-4 个汉字，允许间隔号「·」（少数民族姓名）。
+	regexRealName = regexp2.MustCompile(`\A[\u4e00-\u9fff\u00b7]{1,4}\z`, regexp2.None)
+	// regexStudentNum 学号：8 位数字，或青分学号（6 位数字 + 0 + 2 位数字，共 9 位）。
+	regexStudentNum = regexp2.MustCompile(`\A(?:\d{8}|\d{6}0\d{2})\z`, regexp2.None)
+	// regexEmail 邮箱：限制总长 254，采用 RFC 5322 的宽松子集。
+	regexEmail = regexp2.MustCompile(`\A(?=[\s\S]{1,254}\z)([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\"(\[\]!#-[^-~ \t]|(\\[\t -~]))+\")@([!#-'*+/-9=?A-Z^-~-]+(\.[!#-'*+/-9=?A-Z^-~-]+)*|\[[\t -Z^-~]*])\z`, regexp2.None)
+	// regexPassword 密码：8-32 位，至少包含大写字母、小写字母和数字，允许常见符号。
+	regexPassword = regexp2.MustCompile(`\A(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?\x60~]{8,32}\z`, regexp2.None)
+	// regexTOTPCode TOTP 验证码：6 位数字。
+	regexTOTPCode = regexp2.MustCompile(`\A\d{6}\z`, regexp2.None)
+	// regexQQ QQ 号：5-12 位、非 0 开头的数字。
+	regexQQ = regexp2.MustCompile(`\A[1-9]\d{4,11}\z`, regexp2.None)
+)
+
+// emailBlockedDomains 禁止注册/绑定使用的邮箱域名（校内域名不允许作为联系方式）。
 var emailBlockedDomains = map[string]struct{}{
 	"fdfz.top": {},
 }
 
+// ValidateUsername 校验用户名格式；为空时视为未提供。
 func ValidateUsername(username string) *errs.Error {
+	if username == "" {
+		return errs.BadRequestError().AppendDetails("未提供用户名")
+	}
 	if ok, err := regexUsername.MatchString(username); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate username").AppendDetails("用户名校验失败")
 	} else if !ok {
-		return errs.BadRequestError().AppendDetails("无效的用户名")
+		return errs.BadRequestError().AppendDetails("用户名格式错误")
 	}
 	return nil
 }
 
+// ValidateNickname 校验昵称格式；为空时视为未提供。
 func ValidateNickname(nickname string) *errs.Error {
+	if nickname == "" {
+		return errs.BadRequestError().AppendDetails("未提供昵称")
+	}
 	if ok, err := regexNickname.MatchString(nickname); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate nickname").AppendDetails("昵称校验失败")
 	} else if !ok {
-		return errs.BadRequestError().AppendDetails("无效的昵称")
+		return errs.BadRequestError().AppendDetails("昵称格式错误")
 	}
 	return nil
 }
 
+// ValidateRealName 校验真实姓名格式；为空时视为未提供。
 func ValidateRealName(realName string) *errs.Error {
+	if realName == "" {
+		return errs.BadRequestError().AppendDetails("未提供姓名")
+	}
 	if ok, err := regexRealName.MatchString(realName); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate real name").AppendDetails("姓名校验失败")
 	} else if !ok {
-		return errs.BadRequestError().AppendDetails("无效的姓名")
+		return errs.BadRequestError().AppendDetails("姓名格式错误")
 	}
 	return nil
 }
 
+// ValidateStudentNum 校验学号格式；为空时视为未提供。
 func ValidateStudentNum(studentNum string) *errs.Error {
+	if studentNum == "" {
+		return errs.BadRequestError().AppendDetails("未提供学号")
+	}
 	if ok, err := regexStudentNum.MatchString(studentNum); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate student num").AppendDetails("学号校验失败")
 	} else if !ok {
-		return errs.BadRequestError().AppendDetails("无效的学号")
+		return errs.BadRequestError().AppendDetails("学号格式错误")
 	}
 	return nil
 }
 
+// ValidateEmail 校验邮箱格式，并拒绝使用校内域名（emailBlockedDomains）。
 func ValidateEmail(email string) *errs.Error {
+	if email == "" {
+		return errs.BadRequestError().AppendDetails("未提供邮箱")
+	}
 	if ok, err := regexEmail.MatchString(email); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate email").AppendDetails("邮箱校验失败")
 	} else if !ok {
-		return errs.BadRequestError().AppendDetails("无效的邮箱")
+		return errs.BadRequestError().AppendDetails("邮箱格式错误")
 	}
 
+	// 正则通过后再检查域名黑名单
 	parts := strings.SplitN(email, "@", 2)
 	if len(parts) == 2 {
 		domain := strings.ToLower(parts[1])
 		if _, ok := emailBlockedDomains[domain]; ok {
-			return errs.BadRequestError().AppendDetails("无法使用此邮箱域名")
+			return errs.BadRequestError().AppendDetails("不能使用该邮箱域名")
 		}
 	}
 
 	return nil
 }
 
+// ValidateQQ 校验 QQ 号格式；为空时视为未提供。
 func ValidateQQ(qq string) *errs.Error {
+	if qq == "" {
+		return errs.BadRequestError().AppendDetails("未提供 QQ 号")
+	}
 	if ok, err := regexQQ.MatchString(qq); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate QQ").AppendDetails("QQ 号校验失败")
 	} else if !ok {
-		return errs.BadRequestError().AppendDetails("无效的 QQ 号")
+		return errs.BadRequestError().AppendDetails("QQ 号格式错误")
 	}
 	return nil
 }
 
+// ValidatePassword 校验密码强度（长度与字符种类）。
 func ValidatePassword(password string) *errs.Error {
+	if password == "" {
+		return errs.BadRequestError().AppendDetails("未提供密码")
+	}
 	if ok, err := regexPassword.MatchString(password); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate password").AppendDetails("密码校验失败")
 	} else if !ok {
-		return errs.BadRequestError().AppendDetails("无效的密码")
+		return errs.BadRequestError().AppendDetails("密码格式错误")
 	}
 	return nil
 }
 
+// ValidateMIMEType 读取文件头前 512 字节检测 MIME 类型，不在 allowedTypes 中则返回 415。
+// 注意：检测会打开并读取上传文件，调用后文件指针不可复用。
+// 存疑：空文件读取会返回 io.EOF，当前走 500 分支，可能应返回「未提供文件」。
 func ValidateMIMEType(fileHeader *multipart.FileHeader, allowedTypes map[string]struct{}) *errs.Error {
 	file, err := fileHeader.Open()
 	if err != nil {
@@ -114,66 +159,80 @@ func ValidateMIMEType(fileHeader *multipart.FileHeader, allowedTypes map[string]
 	fileType := http.DetectContentType(buffer)
 
 	if _, ok := allowedTypes[fileType]; !ok {
-		return errs.UnsupportedMediaTypeError().AppendDetails("无效的文件类型")
+		return errs.UnsupportedMediaTypeError().AppendDetails("文件类型不受支持")
 	}
 
 	return nil
 }
 
+// ValidateSchool 校验学校枚举取值。
 func ValidateSchool(school model.School) *errs.Error {
 	if !school.IsValid() {
-		return errs.BadRequestError().AppendDetails("无效的学校")
+		return errs.BadRequestError().AppendDetails("学校取值错误")
 	}
 	return nil
 }
 
+// ValidateUserType 校验用户类型枚举取值。
 func ValidateUserType(typ model.UserType) *errs.Error {
 	if !typ.IsValid() {
-		return errs.BadRequestError().AppendDetails("无效的用户类型")
+		return errs.BadRequestError().AppendDetails("用户类型取值错误")
 	}
 	return nil
 }
 
+// ValidateVisibility 校验资料可见性枚举取值。
 func ValidateVisibility(visibility model.Visibility) *errs.Error {
 	if !visibility.IsValid() {
-		return errs.BadRequestError().AppendDetails("无效的可见性设置")
+		return errs.BadRequestError().AppendDetails("可见性取值错误")
 	}
 	return nil
 }
 
+// ValidateSignature 校验个性签名长度（允许为空）。
 func ValidateSignature(signature string) *errs.Error {
 	if utf8.RuneCountInString(signature) > 128 {
-		return errs.BadRequestError().AppendDetails("无效的个性签名")
+		return errs.BadRequestError().AppendDetails("个性签名过长")
 	}
 	return nil
 }
 
+// ValidateBio 校验个人简介长度（允许为空）。
 func ValidateBio(bio string) *errs.Error {
 	if utf8.RuneCountInString(bio) > 2048 {
-		return errs.BadRequestError().AppendDetails("无效的个人简介")
+		return errs.BadRequestError().AppendDetails("个人简介过长")
 	}
 	return nil
 }
 
+// ValidateBanReason 校验封禁原因：不能为空白，最长 256 个字符。
 func ValidateBanReason(reason string) *errs.Error {
-	if strings.TrimSpace(reason) == "" || utf8.RuneCountInString(reason) > 256 {
-		return errs.BadRequestError().AppendDetails("无效的封禁原因")
+	if strings.TrimSpace(reason) == "" {
+		return errs.BadRequestError().AppendDetails("未提供封禁原因")
+	}
+	if utf8.RuneCountInString(reason) > 256 {
+		return errs.BadRequestError().AppendDetails("封禁原因过长")
 	}
 	return nil
 }
 
+// ValidateTOTPCode 校验 TOTP 验证码格式（6 位数字）；为空时视为未提供。
 func ValidateTOTPCode(code string) *errs.Error {
+	if code == "" {
+		return errs.BadRequestError().AppendDetails("未提供 TOTP 验证码")
+	}
 	if ok, err := regexTOTPCode.MatchString(code); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate totp code").AppendDetails("TOTP 验证码校验失败")
 	} else if !ok {
-		return errs.BadRequestError().AppendDetails("无效的 TOTP 验证码")
+		return errs.BadRequestError().AppendDetails("TOTP 验证码格式错误")
 	}
 	return nil
 }
 
+// ValidatePermissionValue 校验权限值（不含命名空间的节点串）：不能为空，最长 96 个字符。
 func ValidatePermissionValue(value string) *errs.Error {
 	if value == "" {
-		return errs.BadRequestError().AppendDetails("权限值为空")
+		return errs.BadRequestError().AppendDetails("未提供权限值")
 	}
 	if utf8.RuneCountInString(value) > 96 {
 		return errs.BadRequestError().AppendDetails("权限值过长")
@@ -181,6 +240,7 @@ func ValidatePermissionValue(value string) *errs.Error {
 	return nil
 }
 
+// ValidatePermissionDescription 校验权限描述长度（允许为空）。
 func ValidatePermissionDescription(description string) *errs.Error {
 	if utf8.RuneCountInString(description) > 256 {
 		return errs.BadRequestError().AppendDetails("权限描述过长")
@@ -188,9 +248,10 @@ func ValidatePermissionDescription(description string) *errs.Error {
 	return nil
 }
 
+// ValidateUserGroupName 校验用户组名称：不能为空，最长 128 个字符。
 func ValidateUserGroupName(name string) *errs.Error {
 	if name == "" {
-		return errs.BadRequestError().AppendDetails("用户组名为空")
+		return errs.BadRequestError().AppendDetails("未提供用户组名")
 	}
 	if utf8.RuneCountInString(name) > 128 {
 		return errs.BadRequestError().AppendDetails("用户组名过长")
@@ -198,6 +259,7 @@ func ValidateUserGroupName(name string) *errs.Error {
 	return nil
 }
 
+// ValidateUserGroupNote 校验用户组备注长度（允许为空）。
 func ValidateUserGroupNote(note string) *errs.Error {
 	if utf8.RuneCountInString(note) > 256 {
 		return errs.BadRequestError().AppendDetails("用户组备注过长")
@@ -205,29 +267,32 @@ func ValidateUserGroupNote(note string) *errs.Error {
 	return nil
 }
 
+// ValidateGrantPermission 校验授权使用的完整权限串（含命名空间）。
 func ValidateGrantPermission(permission string) *errs.Error {
 	if permission == "" {
-		return errs.BadRequestError().AppendDetails("权限名为空")
+		return errs.BadRequestError().AppendDetails("未提供权限")
 	}
 	if _, err := perm.ParsePermission(permission); err != nil {
-		return errs.BadRequestError().AppendDetails("无效的权限名")
+		return errs.BadRequestError().AppendDetails("权限格式错误")
 	}
 	if utf8.RuneCountInString(permission) > 128 {
-		return errs.BadRequestError().AppendDetails("权限名过长")
+		return errs.BadRequestError().AppendDetails("权限过长")
 	}
 	return nil
 }
 
+// ValidateGrantNote 校验授权备注长度（允许为空）。
 func ValidateGrantNote(note string) *errs.Error {
 	if utf8.RuneCountInString(note) > 256 {
-		return errs.BadRequestError().AppendDetails("备注过长")
+		return errs.BadRequestError().AppendDetails("授权备注过长")
 	}
 	return nil
 }
 
+// ValidateValidRange 校验授权有效期区间：validUntil 必须晚于 validFrom。
 func ValidateValidRange(validFrom, validUntil *time.Time) *errs.Error {
 	if validFrom != nil && validUntil != nil && !validUntil.After(*validFrom) {
-		return errs.BadRequestError().AppendDetails("有效期无效")
+		return errs.BadRequestError().AppendDetails("有效期范围错误")
 	}
 	return nil
 }

@@ -1,3 +1,4 @@
+// Package schedule 注册并运行后台定时任务（会话、封禁与账号注销的过期清理）。
 package schedule
 
 import (
@@ -9,9 +10,12 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// ScheduleCron 创建 cron 实例并注册全部定时任务；调用方负责启动与停止。
+// 注意：任务内使用 context.Background()，不随单个请求取消；清理失败只记录日志。
 func ScheduleCron() (*cron.Cron, error) {
 	c := cron.New()
 
+	// 每天 02:00 清理过期的鉴权会话
 	_, err := c.AddFunc("0 2 * * *", func() {
 		_, err := auth.DeleteStaleSessions(context.Background())
 		if err != nil {
@@ -22,6 +26,7 @@ func ScheduleCron() (*cron.Cron, error) {
 		return nil, err
 	}
 
+	// 每 10 分钟清理已到期的用户封禁
 	_, err = c.AddFunc("*/10 * * * *", func() {
 		_, err := user.CleanupExpiredBans(context.Background())
 		if err != nil {
@@ -32,6 +37,7 @@ func ScheduleCron() (*cron.Cron, error) {
 		return nil, err
 	}
 
+	// 每 10 分钟完成已到冷静期的账号注销
 	_, err = c.AddFunc("*/10 * * * *", func() {
 		count, err := user.FinalizeDueAccountDeletions(context.Background())
 		if err != nil {

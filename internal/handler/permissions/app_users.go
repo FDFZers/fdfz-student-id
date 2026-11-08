@@ -16,6 +16,7 @@ import (
 	"github.com/guregu/null/v6"
 )
 
+// listAppUserGrantsHandler 处理应用维度直接授权列表查询：只返回本应用授予该用户的权限。
 func listAppUserGrantsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -42,6 +43,7 @@ func listAppUserGrantsHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// grantAppUserGrantRequestBody 是应用直接授权用户的请求体，有效期为可选的时间区间。
 type grantAppUserGrantRequestBody struct {
 	Permission string     `json:"permission"`
 	ValidFrom  *time.Time `json:"valid_from"`
@@ -49,6 +51,7 @@ type grantAppUserGrantRequestBody struct {
 	Note       string     `json:"note"`
 }
 
+// grantAppUserGrantHandler 处理应用直接授权：权限必须是当前应用的权限定义，授予来源记为当前应用。
 func grantAppUserGrantHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	app, err := handling.ResolveApp(c)
@@ -60,18 +63,19 @@ func grantAppUserGrantHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 解析请求体并校验权限名、备注与有效期区间。
 	var body grantAppUserGrantRequestBody
-	if bindErr := c.ShouldBindJSON(&body); bindErr != nil {
+	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 	if err := handling.ValidateGrantPermission(body.Permission); err != nil {
-		return err.AppendDetails("应用用户授权失败")
+		return err
 	}
 	if err := handling.ValidateGrantNote(body.Note); err != nil {
-		return err.AppendDetails("应用用户授权失败")
+		return err
 	}
 	if err := handling.ValidateValidRange(body.ValidFrom, body.ValidUntil); err != nil {
-		return err.AppendDetails("应用用户授权失败")
+		return err
 	}
 
 	// 权限必须属于该应用（同时完成归属校验）。
@@ -103,6 +107,7 @@ func grantAppUserGrantHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// revokeAppUserGrantHandler 处理应用直接授权撤销：权限由查询参数传入，只能撤销本应用授予的授权。
 func revokeAppUserGrantHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -118,10 +123,10 @@ func revokeAppUserGrantHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("未提供权限")
 	}
 
-	if parsed, err := perm.ParsePattern(permStr); err != nil {
+	if parsed, e := perm.ParsePattern(permStr); e != nil {
 		return errs.BadRequestError().AppendDetails("权限格式错误")
 	} else if parsed.Namespace != app.Namespace {
-		return errs.BadRequestError().AppendDetails("权限命名空间错误")
+		return errs.BadRequestError().AppendDetails("权限不属于该应用")
 	}
 
 	existing, err := userperm.GetUserPermissionGrant(c.Request.Context(), userID, permStr)
@@ -140,6 +145,7 @@ func revokeAppUserGrantHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
+// getAppUserEffectivePermissionsHandler 处理应用维度有效权限查询：只返回当前应用命名空间下的权限。
 func getAppUserEffectivePermissionsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {

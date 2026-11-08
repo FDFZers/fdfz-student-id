@@ -1,3 +1,4 @@
+// Package db 提供 PostgreSQL / Redis 连接、数据库迁移与 Redis 缓存读写辅助。
 package db
 
 import (
@@ -11,13 +12,19 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Repo 聚合 PostgreSQL 与 Redis 连接，进程内统一通过包级变量 R 访问。
 type Repo struct {
 	*PDB
 	*RDB
 }
 
+// R 是全局数据库仓库单例，由 cmd/server 在启动阶段初始化。
+// 注意：R 必须先于 HTTP 服务与定时任务初始化，否则使用处会空指针。
 var R *Repo
 
+// GetRedisFound 读取并反序列化 Redis 缓存，额外返回是否命中缓存。
+// 命中空值标记时返回 (nil, true, nil)，用于区分「未缓存」与「缓存了空结果」。
+// 注意：缓存数据损坏时直接返回错误，不回源查询。
 func GetRedisFound[T any](
 	ctx context.Context,
 	key string,
@@ -45,6 +52,8 @@ func GetRedisFound[T any](
 	return nil, false, nil
 }
 
+// GetRedis 读取并反序列化 Redis 缓存，未命中时返回 (nil, nil)。
+// 需要区分「未缓存」与「缓存空值」时改用 GetRedisFound。
 func GetRedis[T any](
 	ctx context.Context,
 	key string,
@@ -53,6 +62,7 @@ func GetRedis[T any](
 	return data, err
 }
 
+// SetRedis 序列化 value 并以 duration 为有效期写入 Redis。
 func SetRedis[T any](
 	ctx context.Context,
 	key string,
@@ -71,6 +81,9 @@ func SetRedis[T any](
 	return nil
 }
 
+// GetCached 按「读缓存 — 回源 — 回填缓存」的旁路模式查询数据。
+// queryFn 返回 (nil, nil) 表示源数据不存在，此时写入空值标记 RedisEmptyMark 防止缓存穿透。
+// 注意：缓存写入失败被有意忽略，不影响本次读取结果。
 func GetCached[T any](
 	ctx context.Context,
 	item, key string,
