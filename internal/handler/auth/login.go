@@ -148,6 +148,13 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 
+	// 用户可能在初始化与完成登录之间被删除：按凭据错误返回，避免为已删除账号创建会话
+	if usr, err := user.GetUserByID(c.Request.Context(), authSession.UserID); err != nil {
+		return err
+	} else if usr == nil {
+		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
+	}
+
 	// 创建用户会话并生成会话令牌
 	sessionToken, e := crypto.GenerateCode(128, crypto.TokenCharset)
 	if e != nil {
@@ -224,7 +231,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 func refreshTokenHandler(c *gin.Context) *errs.Error {
 	sessionToken, e := c.Cookie("session_token")
 	if errors.Is(e, http.ErrNoCookie) {
-		return errs.NotFoundError().AppendDetails("未提供会话令牌")
+		return errs.InvalidTokenError().AppendDetails("未提供会话令牌")
 	} else if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to get session token cookie").AppendDetails("会话令牌获取失败")
 	}
@@ -233,12 +240,11 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 
 	session, err := auth.GetSessionByTokenHash(c.Request.Context(), hash)
 	if err != nil {
-		// 存疑：GetSessionByTokenHash 无记录时返回 not_found，此处被包装成 internal_error，
-		// 过期或非法的会话令牌会返回 500 而非 401，客户端无法据此引导重新登录。
-		return errs.CreateAndLogInternalError(err, "Failed to get session by token hash").AppendDetails("会话获取失败")
-	} else if session == nil {
-		// 存疑：底层查询无记录时返回错误而非 nil，此分支可能不可达。
-		return errs.NotFoundError().AppendDetails("会话不存在或已过期")
+		return err.AppendDetails("会话获取失败")
+	}
+	// 会话不存在/已过期/已撤销时 service 返回 nil，应告知客户端重新登录。
+	if session == nil {
+		return errs.InvalidTokenError().AppendDetails("会话不存在或已过期")
 	}
 
 	// 校验用户仍然存在且未被封禁

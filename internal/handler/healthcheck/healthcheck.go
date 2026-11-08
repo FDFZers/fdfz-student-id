@@ -44,15 +44,19 @@ func check(ctx context.Context) HealthStatus {
 
 	allUp := true
 
+	// 先取一次全局仓库快照：db.R 本身为 nil 时（例如尚未初始化就被探针访问）不能直接解引用，
+	// 否则会 panic 导致整个进程崩溃，而不是返回 503。
+	repo := db.R
+
 	// PostgreSQL
 	wg.Go(func() {
 		start := time.Now()
 		check := Check{}
 
-		if db.R.PDB == nil {
+		if repo == nil || repo.PDB == nil {
 			check = Check{Status: "DOWN", Message: "postgres connection is nil"}
 		} else {
-			err := db.R.PDB.Ping(ctx)
+			err := repo.PDB.Ping(ctx)
 			dur := time.Since(start)
 			check.Duration = dur.String()
 			if err != nil {
@@ -76,10 +80,10 @@ func check(ctx context.Context) HealthStatus {
 		start := time.Now()
 		check := Check{}
 
-		if db.R.RDB == nil {
+		if repo == nil || repo.RDB == nil {
 			check = Check{Status: "DOWN", Message: "redis client is nil"}
 		} else {
-			err := db.R.RDB.Ping(ctx).Err()
+			err := repo.RDB.Ping(ctx).Err()
 			dur := time.Since(start)
 			check.Duration = dur.String()
 			if err != nil {

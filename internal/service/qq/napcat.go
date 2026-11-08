@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,8 +95,13 @@ func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, 
 	if count <= 0 || count > maxHistoryCount {
 		count = defaultHistoryCount
 	}
+	// OneBot 11 的 user_id 是数字类型
+	userID, err := strconv.ParseInt(qq, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("qq: invalid qq number %q: %w", qq, err)
+	}
 	data, err := post(ctx, "/get_friend_msg_history", map[string]any{
-		"user_id": qq,
+		"user_id": userID,
 		"count":   count,
 	})
 	if err != nil {

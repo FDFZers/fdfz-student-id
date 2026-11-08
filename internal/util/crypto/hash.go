@@ -68,10 +68,13 @@ func VerifyArgon2ID(str, encodedHash string) (bool, error) {
 	return false, nil
 }
 
+// burnPasswordHash 是 BurnPasswordVerifyCost 使用的固定 PHC 哈希，参数与 HashArgon2ID 一致。
+const burnPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$A/VMpUldqzUMDLbcsbpY+h5JSyK7nMhY/laPBS2n2hs$mQcGzal+0cYbaOXUo9MO9jzhXFFG3+r2XtkX5Bh05Ww"
+
 // BurnPasswordVerifyCost 对固定串执行一次 Argon2id 校验。
 // 用于用户不存在等分支，拉平与「密码错误」分支的响应耗时，防止通过时延枚举账号。
 func BurnPasswordVerifyCost() {
-	_, _ = VerifyArgon2ID("dummy-password-for-timing-equalization", "$argon2id$v=19$m=65536,t=3,p=4$A/VMpUldqzUMDLbcsbpY+h5JSyK7nMhY/laPBS2n2hs=$mQcGzal+0cYbaOXUo9MO9jzhXFFG3+r2XtkX5Bh05Ww=")
+	_, _ = VerifyArgon2ID("dummy-password-for-timing-equalization", burnPasswordHash)
 }
 
 // params 是 Argon2id PHC 字符串中记录的哈希参数。

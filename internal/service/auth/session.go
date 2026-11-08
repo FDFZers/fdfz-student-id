@@ -3,8 +3,10 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fdfz-student-id/internal/cfg"
 	"time"
+	"unicode/utf8"
 
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
@@ -12,7 +14,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
+
+const maxLastUserAgentBytes = 512
 
 // ---------------------------------------------------------------------------
 // 创建会话
@@ -23,7 +28,7 @@ const createSessionSQL = `
 INSERT INTO user_sessions (
     user_id, session_token_hash, is_temporary, expires_at, last_ip, last_user_agent
 ) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING uuid, created_at, updated_at
+RETURNING id, created_at, updated_at
 `
 
 // CreateSession 在 user_sessions 表创建用户会话，并把数据库生成的时间戳回写到 s。
@@ -52,24 +57,24 @@ func CreateSession(ctx context.Context, s *model.UserSession) *errs.Error {
 
 // getSessionByUUIDSQL 按 uuid 查询会话，包含已过期与已撤销的记录。
 const getSessionByUUIDSQL = `
-SELECT uuid, user_id, session_token_hash, is_temporary,
+SELECT id, user_id, session_token_hash, is_temporary,
     created_at, updated_at, expires_at, last_used_at, revoked_at,
     host(last_ip) AS last_ip, last_user_agent
 FROM user_sessions
-WHERE uuid = $1
+WHERE id = $1
 `
 
 // getSessionByTokenHashSQL 按会话令牌哈希查询仍有效（未撤销且未过期）的会话。
 const getSessionByTokenHashSQL = `
-SELECT uuid, user_id, session_token_hash, is_temporary,
+SELECT id, user_id, session_token_hash, is_temporary,
     created_at, updated_at, expires_at, last_used_at, revoked_at,
     host(last_ip) AS last_ip, last_user_agent
 FROM user_sessions
 WHERE session_token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
 `
 
-// GetSessionByUUID 按会话 uuid 查询用户会话。
-// 注意：记录不存在时返回 not_found 错误而不是 (nil, nil)，调用方应据此区分「不存在」。
+// GetSessionByUUID 按会话 uuid 查询用户会话（包含已过期与已撤销的记录）。
+// 记录不存在时返回 (nil, nil)，由调用方决定如何响应（通常转 404 或 401）。
 func GetSessionByUUID(
 	ctx context.Context,
 	id uuid.UUID,
@@ -89,13 +94,16 @@ func GetSessionByUUID(
 		&s.LastUserAgent,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, errs.CreatePGError(err, "用户会话", "Failed to get session by uuid")
 	}
 	return &s, nil
 }
 
 // GetSessionByTokenHash 按会话令牌哈希查询仍有效的用户会话，用于刷新访问令牌。
-// 注意：默认只返回未撤销且未过期的会话；记录不存在时返回 not_found 错误。
+// 默认只返回未撤销且未过期的会话；记录不存在、已撤销或已过期时返回 (nil, nil)。
 func GetSessionByTokenHash(
 	ctx context.Context,
 	tokenHash string,
@@ -115,6 +123,9 @@ func GetSessionByTokenHash(
 		&s.LastUserAgent,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, errs.CreatePGError(err, "用户会话", "Failed to get session by session token hash")
 	}
 	return &s, nil
@@ -126,7 +137,7 @@ func GetSessionByTokenHash(
 
 // listUserSessionsSQL 列出用户当前有效的会话，最近使用的排在前面。
 const listUserSessionsSQL = `
-SELECT uuid, user_id, session_token_hash, is_temporary,
+SELECT id, user_id, session_token_hash, is_temporary,
     created_at, updated_at, expires_at, last_used_at, revoked_at,
     host(last_ip) AS last_ip, last_user_agent
 FROM user_sessions
@@ -187,7 +198,7 @@ SET last_used_at = now(),
         WHEN is_temporary = false THEN $5
         ELSE expires_at
     END
-WHERE uuid = $1 AND revoked_at IS NULL
+WHERE id = $1 AND revoked_at IS NULL
 RETURNING expires_at
 `
 
@@ -198,8 +209,17 @@ func UpdateSessionClient(
 	id uuid.UUID,
 	sessionTokenHash string,
 ) (time.Time, *errs.Error) {
+	lastUserAgent := c.Request.UserAgent()
+	if len(lastUserAgent) > maxLastUserAgentBytes {
+		maxBytes := maxLastUserAgentBytes
+		for maxBytes > 0 && !utf8.RuneStart(lastUserAgent[maxBytes]) {
+			maxBytes--
+		}
+		lastUserAgent = lastUserAgent[:maxBytes]
+	}
+
 	var expiresAt time.Time
-	err := db.R.QueryRow(c.Request.Context(), updateSessionClientSQL, id, sessionTokenHash, c.ClientIP(), c.Request.UserAgent(), time.Now().Add(cfg.C.PermSessionTokenTTL)).Scan(&expiresAt)
+	err := db.R.QueryRow(c.Request.Context(), updateSessionClientSQL, id, sessionTokenHash, c.ClientIP(), lastUserAgent, time.Now().Add(cfg.C.PermSessionTokenTTL)).Scan(&expiresAt)
 	if err != nil {
 		return expiresAt, errs.CreatePGError(err, "用户会话", "Failed to update session")
 	}
@@ -214,16 +234,19 @@ func UpdateSessionClient(
 const revokeSessionSQL = `
 UPDATE user_sessions
 SET revoked_at = now()
-WHERE uuid = $1 AND revoked_at IS NULL
+WHERE id = $1 AND revoked_at IS NULL
 RETURNING session_token_hash
 `
 
 // RevokeSession 撤销指定会话（登出）。
-// 注意：已撤销的会话不会重复更新，此时再撤销会返回 not_found 错误。
+// 注意：会话已撤销或不存时视为成功，使登出保持幂等；只有数据库错误才返回错误。
 func RevokeSession(ctx context.Context, id uuid.UUID) *errs.Error {
 	var tokenHash string
 	err := db.R.QueryRow(ctx, revokeSessionSQL, id).Scan(&tokenHash)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
 		return errs.CreatePGError(err, "用户会话", "Failed to revoke session")
 	}
 	return nil
@@ -234,7 +257,7 @@ const revokeAllUserSessionsSQL = `
 UPDATE user_sessions
 SET revoked_at = now()
 WHERE user_id = $1 AND revoked_at IS NULL
-RETURNING uuid, session_token_hash
+RETURNING id, session_token_hash
 `
 
 // RevokeAllUserSessions 撤销指定用户的全部有效会话（改密、注销等场景）。
@@ -262,7 +285,7 @@ func RevokeAllUserSessions(ctx context.Context, userID int64) *errs.Error {
 const revokeOtherUserSessionsSQL = `
 UPDATE user_sessions
 SET revoked_at = now()
-WHERE user_id = $1 AND uuid <> $2 AND revoked_at IS NULL
+WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL
 `
 
 // RevokeOtherUserSessions 撤销用户除 keepSessionID 外的其他会话（修改密码后保留当前会话）。
@@ -280,7 +303,7 @@ func RevokeOtherUserSessions(ctx context.Context, userID int64, keepSessionID uu
 // deleteSessionSQL 物理删除指定会话。
 const deleteSessionSQL = `
 DELETE FROM user_sessions
-WHERE uuid = $1
+WHERE id = $1
 `
 
 // DeleteSession 物理删除会话，仅用于登录流程失败时回滚刚创建的会话。

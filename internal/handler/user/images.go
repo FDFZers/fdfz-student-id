@@ -6,9 +6,7 @@ import (
 	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
-	"path"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/guregu/null/v6"
@@ -57,8 +55,9 @@ func deleteBannerHandler(c *gin.Context) *errs.Error {
 	return deleteProfileImageHandler(c, bannerImage)
 }
 
-// setProfileImageHandler 上传并保存资料图片：校验权限、表单字段、图片 MIME 类型后写入 filestore。
+// setProfileImageHandler 上传并保存资料图片：校验权限、目标用户存在性、表单字段与图片 MIME 类型后写入 filestore。
 // 设置自己需要 user.profile.update.basic，设置他人需要 users.profile.update.basic；同一用户仅保留一张，按 upsert 覆盖。
+// 注意：存储文件名与 Content-Type 均由服务端检测结果决定（固定扩展名），不信任客户端文件名。
 func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 	form, e := c.MultipartForm()
 	if e != nil {
@@ -84,6 +83,10 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
+		return err
+	}
+
 	fileHeaders := form.File[kind.Field]
 	switch {
 	case len(fileHeaders) == 0:
@@ -93,22 +96,30 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 	}
 	fileHeader := fileHeaders[0]
 
-	if err := handling.ValidateMIMEType(fileHeader, map[string]struct{}{
+	mimeType, err := handling.DetectMIMEType(fileHeader, map[string]struct{}{
 		"image/jpeg": {},
 		"image/png":  {},
 		"image/webp": {},
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	// 扩展名必须与检测到的类型对应；不在允许的图片类型内的块会先被 DetectMIMEType 拒绝，
+	// 这里仍防御性处理无法映射扩展名的类型，避免写入无扩展名文件。
+	extension := handling.ImageExtension(mimeType)
+	if extension == "" {
+		return errs.UnsupportedMediaTypeError().AppendDetails("文件类型不受支持")
 	}
 
 	// 上传到 filestore：路径固定为 /student_id/{avatars|banners}/{userID}，同路径覆盖
 
 	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
 		Slug:         "/student_id/" + kind.Slug + "/" + targetStr,
-		FileName:     targetStr + strings.ToLower(path.Ext(fileHeader.Filename)),
+		FileName:     targetStr + extension,
+		ContentType:  null.StringFrom(mimeType),
 		ShouldUpsert: true,
 		AppID:        null.IntFrom(1),
-		UserID:       null.IntFrom(claims.UserID),
+		UserID:       null.IntFrom(targetID),
 	}); err != nil {
 		return err
 	}

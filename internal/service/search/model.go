@@ -25,7 +25,7 @@ type SearchInfo struct {
 // SearchRequest 是搜索查询请求体，各白名单校验失败时返回 bad_request。
 type SearchRequest struct {
 	Query         string                  `json:"query"`          // 搜索关键词，空串表示不带关键词条件
-	Limit         null.Int64              `json:"limit"`          // 分页大小，缺省用 DefaultLimit（显式 <=0 视为超限）
+	Limit         null.Int64              `json:"limit"`          // 分页大小，缺省或非正数回退 DefaultLimit，超过 MaxLimit 时截断
 	Offset        null.Int64              `json:"offset"`         // 偏移量，缺省或负数按 0 处理
 	Fields        []string                `json:"fields"`         // 参与关键词匹配的字段，缺省为全部可搜索字段
 	SortBy        null.String             `json:"sort_by"`        // 排序字段，为空表示按相关度（当前实现不排序）
@@ -36,7 +36,6 @@ type SearchRequest struct {
 }
 
 // SearchResponse 是搜索结果的元信息快照。
-// 存疑：当前仓库内没有被任何处理器使用，接口实际返回由处理器自行组装。
 type SearchResponse struct {
 	Total          int                 `json:"total"`
 	Fields         []string            `json:"fields"`
@@ -75,7 +74,7 @@ type SearchConfig struct {
 	Tags              []Tag              // 标签过滤定义
 	Columns           []string           // 数据查询 SELECT 列表，为空时 SELECT *
 	AdditionalWhere   []squirrel.Sqlizer // 固定附加的 WHERE 条件（软删除过滤、应用隔离等）
-	DefaultSortColumn string             // query 为空且未指定排序时的默认 ORDER BY 列，空串表示不排序
+	DefaultSortColumn string             // 未指定排序时的兜底 ORDER BY 列（保证分页稳定），空串表示不排序
 }
 
 // Query 是一条参数化 SQL 及其参数。

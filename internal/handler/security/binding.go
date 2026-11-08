@@ -272,7 +272,6 @@ type qqBindInitReq struct {
 }
 
 // qqBindInitHandler 发起 QQ 绑定：检查 QQ 可用后生成验证码并暂存，验证码返回给用户自行发送。
-// 存疑：发起阶段没有发送频控或配额限制，只在校验阶段限制拉取频率。
 func qqBindInitHandler(c *gin.Context) *errs.Error {
 	var req qqBindInitReq
 	if e := c.ShouldBindJSON(&req); e != nil {

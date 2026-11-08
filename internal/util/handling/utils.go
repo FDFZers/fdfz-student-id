@@ -47,13 +47,14 @@ func ParseID(c *gin.Context, name, item string) (int64, *errs.Error) {
 }
 
 // ParseUserID 解析可选的目标用户 ID：param 为空时返回 selfID（表示操作自己）。
+// 与 ParseID 保持一致：显式传入的 ID 必须是正整数，0/负数返回 400。
 func ParseUserID(c *gin.Context, selfID int64, param string) (int64, *errs.Error) {
 	str := c.Param(param)
 	if str == "" {
 		return selfID, nil
 	}
 	id, err := strconv.ParseInt(str, 10, 64)
-	if err != nil {
+	if err != nil || id <= 0 {
 		return 0, errs.BadRequestError().AppendDetails("用户 ID 格式错误")
 	}
 	return id, nil
@@ -115,9 +116,10 @@ func SetTokenCookies(c *gin.Context, accessToken, sessionToken string, accessMax
 }
 
 // SetStepupCookie 写入提权令牌 Cookie（HttpOnly），用于二次验证后执行敏感操作。
+// 注意：Secure 与其它令牌 Cookie 保持一致，仅生产环境开启，否则本地 http 调试时浏览器不会携带该 Cookie。
 func SetStepupCookie(c *gin.Context, token string, maxAge int) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("stepup_token", token, maxAge, "/", CookieDomain(), true, true)
+	c.SetCookie("stepup_token", token, maxAge, "/", CookieDomain(), cfg.IsProd, true)
 }
 
 // ClearSessionCookies 清除访问令牌、session token 与提权令牌 Cookie（登出时使用）。

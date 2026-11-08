@@ -37,7 +37,6 @@ func TryConsumeAltchaChallenge(ctx context.Context, payload altcha.Payload) *err
 			ttl = time.Second
 		}
 	}
-	// 存疑：上面计算出的 ttl 未被使用，SetNX 固定使用 ALTCHA_TIMEOUT，疑似应传入 ttl。
 
 	// 以签名、nonce、salt 与过期时间生成 challenge 指纹
 	sum := sha256.Sum256([]byte(
@@ -48,7 +47,7 @@ func TryConsumeAltchaChallenge(ctx context.Context, payload altcha.Payload) *err
 	))
 
 	// SetNX 成功表示首次消费，失败表示该 challenge 已被使用
-	ok, err := db.R.SetNX(ctx, UsedAltchaCacheKey(hex.EncodeToString(sum[:])), true, cfg.C.AltchaTimeout).Result()
+	ok, err := db.R.SetNX(ctx, UsedAltchaCacheKey(hex.EncodeToString(sum[:])), true, ttl).Result()
 	if err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to consume altcha challenge").AppendDetails("Redis 错误", "Altcha Challenge 消费失败")
 	} else if !ok {

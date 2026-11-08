@@ -51,30 +51,28 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/ban/:id", middleware.RequirePermission(perm.PermUsersBanWrite), handling.Wrap("用户封禁失败", banUserHandler))
 	i.DELETE("/ban/:id", middleware.RequirePermission(perm.PermUsersBanWrite), handling.Wrap("用户解封失败", unbanUserHandler))
 
-	// 存疑：以下列表/计数/关注路由未挂 RequireToken，但处理器调用 handling.MustGetClaims，未登录访问会 panic（由 gin.Recovery 兜底为 500）。
-	a.GET("/relation/list/following", handling.Wrap("关注列表获取失败", getFollowingsHandler))
-	a.GET("/relation/list/followers", handling.Wrap("粉丝列表获取失败", getFollowersHandler))
-	a.GET("/relation/list/friends", handling.Wrap("好友列表获取失败", getFriendsHandler))
+	a.GET("/relation/list/following", middleware.RequireToken(), handling.Wrap("关注列表获取失败", getFollowingsHandler))
+	a.GET("/relation/list/followers", middleware.RequireToken(), handling.Wrap("粉丝列表获取失败", getFollowersHandler))
+	a.GET("/relation/list/friends", middleware.RequireToken(), handling.Wrap("好友列表获取失败", getFriendsHandler))
 	a.GET("/relation/list/following/:id", middleware.RequireToken(), handling.Wrap("关注列表获取失败", getFollowingsHandler))
 	a.GET("/relation/list/followers/:id", middleware.RequireToken(), handling.Wrap("粉丝列表获取失败", getFollowersHandler))
 	a.GET("/relation/list/friends/:id", middleware.RequireToken(), handling.Wrap("好友列表获取失败", getFriendsHandler))
-	a.GET("/relation/count/following", handling.Wrap("关注列表获取失败", countFollowingsHandler))
-	a.GET("/relation/count/followers", handling.Wrap("粉丝列表获取失败", countFollowersHandler))
-	a.GET("/relation/count/friends", handling.Wrap("好友列表获取失败", countFriendsHandler))
+	a.GET("/relation/count/following", middleware.RequireToken(), handling.Wrap("关注列表获取失败", countFollowingsHandler))
+	a.GET("/relation/count/followers", middleware.RequireToken(), handling.Wrap("粉丝列表获取失败", countFollowersHandler))
+	a.GET("/relation/count/friends", middleware.RequireToken(), handling.Wrap("好友列表获取失败", countFriendsHandler))
 	a.GET("/relation/count/following/:id", middleware.RequireToken(), handling.Wrap("关注列表获取失败", countFollowingsHandler))
 	a.GET("/relation/count/followers/:id", middleware.RequireToken(), handling.Wrap("粉丝列表获取失败", countFollowersHandler))
 	a.GET("/relation/count/friends/:id", middleware.RequireToken(), handling.Wrap("好友列表获取失败", countFriendsHandler))
-	a.POST("/relation/follow/:id", handling.Wrap("关注失败", followUserHandler))
-	a.DELETE("/relation/follow/:id", handling.Wrap("取消关注失败", unfollowUserHandler))
+	a.POST("/relation/follow/:id", middleware.RequireToken(), handling.Wrap("关注失败", followUserHandler))
+	a.DELETE("/relation/follow/:id", middleware.RequireToken(), handling.Wrap("取消关注失败", unfollowUserHandler))
 	a.GET("/relation/query/:id", middleware.RequirePermission(perm.PermUserRelationRead), handling.Wrap("关注关系获取失败", getFollowStatusHandler))
-	i.POST("/relation/follow/:userID/:id", handling.Wrap("关注失败", followUserHandler))
-	i.DELETE("/relation/follow/:userID/:id", handling.Wrap("取消关注失败", unfollowUserHandler))
+	i.POST("/relation/follow/:userID/:id", middleware.RequireToken(), handling.Wrap("关注失败", followUserHandler))
+	i.DELETE("/relation/follow/:userID/:id", middleware.RequireToken(), handling.Wrap("取消关注失败", unfollowUserHandler))
 }
 
 // filterProfiles 按调用方权限与目标用户的 visibilities 过滤用户资料，供资料、搜索与关系列表接口复用。
 // real_name 采用字段级可见性：他人资料需 real_name.allowed 权限，再按 public/friends/private 判定是否返回。
-// 注意：friends 可见性需要查询调用方与目标用户的关注关系，会额外访问数据库/缓存。
-// 存疑：claims 为 nil 时直接返回 401，但所有调用方都先调用 MustGetClaims，该分支实际不可达。
+// 注意：只有 friends 可见性需要查询调用方与目标用户的关注关系，public/private 分支不再产生无谓查询。
 func filterProfiles(ctx context.Context, claims *model.RegisteredTokenClaims, targetUsers ...*model.User) ([]gin.H, *errs.Error) {
 	if claims == nil {
 		return nil, errs.InvalidTokenError().AppendDetails("令牌格式错误").Seal()
@@ -95,15 +93,31 @@ func filterProfiles(ctx context.Context, claims *model.RegisteredTokenClaims, ta
 	otherAbout := perm.HasPermission(claims, perm.PermUsersProfileReadAbout)
 	otherVisibilities := perm.HasPermission(claims, perm.PermUsersProfileReadVisibilities)
 
+	isAdmin := handling.HasUsersNamespacePerm(claims)
+
 	// 逐用户判定可读字段并组装响应；即使无任何字段可读也会返回 id
 
 	results := make([]gin.H, 0, len(targetUsers))
 	for _, targetUser := range targetUsers {
+		// 已注销用户：非管理员只返回最小化标识，不暴露任何可能残留的字段
+		if targetUser.DeletedAt.Valid && !isAdmin {
+			results = append(results, gin.H{
+				"username": targetUser.Username,
+				"deleted":  true,
+			})
+			continue
+		}
+
 		isSelf := claims.UserID == targetUser.ID
 
 		var basic, identity, realName, about, visibilities bool
 		if isSelf {
-			basic, identity, realName, about, visibilities = selfBasic, selfIdentity, selfRealName, selfAbout, selfVisibilities
+			// 管理自己资料时，self.* 与 users.* 权限取并集（管理员账号往往只被授予 users.*）
+			basic = selfBasic || otherBasic
+			identity = selfIdentity || otherIdentity
+			realName = selfRealName || otherRealName || otherRealNameAllowed
+			about = selfAbout || otherAbout
+			visibilities = selfVisibilities || otherVisibilities
 		} else {
 			basic, identity, about, visibilities = otherBasic, otherIdentity, otherAbout, otherVisibilities
 			if otherRealName {
@@ -111,14 +125,15 @@ func filterProfiles(ctx context.Context, claims *model.RegisteredTokenClaims, ta
 			} else if !otherRealNameAllowed {
 				realName = false
 			} else {
-				rel, err := user.GetFollowRelationship(ctx, claims.UserID, targetUser.ID)
-				if err != nil {
-					return nil, err
-				}
+				// 先按可见性分支，仅 friends 才需要查询关注关系（消除无谓 N+1）
 				switch targetUser.Visibilities.RealName {
 				case model.VisibilityPublic:
 					realName = true
 				case model.VisibilityFriends:
+					rel, err := user.GetFollowRelationship(ctx, claims.UserID, targetUser.ID)
+					if err != nil {
+						return nil, err
+					}
 					realName = rel == model.RelationshipFriends
 				default:
 					realName = false

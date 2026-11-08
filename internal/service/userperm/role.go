@@ -75,14 +75,22 @@ LIMIT $2 OFFSET $3
 `
 
 // countRolesVisibleToAppSQL 统计对某应用可见的用户组数量（本应用 ∪ 其他应用的公开组）。
-const countRolesVisibleToAppSQL = `SELECT count(*) FROM roles WHERE app_id = $1 OR is_public`
+// 其他应用的公开组仅当来源应用 active 且未软删除时可见：应用删除/停用后其用户组统一按 private 处理。
+const countRolesVisibleToAppSQL = `
+SELECT count(*)
+FROM roles r
+JOIN oauth_apps a ON a.id = r.app_id
+WHERE r.app_id = $1 OR (r.is_public AND a.status = 'active' AND a.deleted_at IS NULL)
+`
 
 // listRolesVisibleToAppSQL 分页列出对某应用可见的用户组，本应用的组排在前面。
+// 其他应用的公开组仅当来源应用 active 且未软删除时可见：应用删除/停用后其用户组统一按 private 处理。
 const listRolesVisibleToAppSQL = `
-SELECT id, app_id, name, note, is_public, created_at, updated_at
-FROM roles
-WHERE app_id = $1 OR is_public
-ORDER BY (app_id <> $1), id
+SELECT r.id, r.app_id, r.name, r.note, r.is_public, r.created_at, r.updated_at
+FROM roles r
+JOIN oauth_apps a ON a.id = r.app_id
+WHERE r.app_id = $1 OR (r.is_public AND a.status = 'active' AND a.deleted_at IS NULL)
+ORDER BY (r.app_id <> $1), r.id
 LIMIT $2 OFFSET $3
 `
 
@@ -107,11 +115,12 @@ func ListRolesVisibleToApp(ctx context.Context, appID int64, limit, offset int32
 	return roles, count, nil
 }
 
-// getRoleVisibleToAppSQL 按可见性查询用户组：本应用的组或其他应用的公开组。
+// getRoleVisibleToAppSQL 按可见性查询用户组：本应用的组或其他应用（active 且未软删除）的公开组。
 const getRoleVisibleToAppSQL = `
-SELECT id, app_id, name, note, is_public, created_at, updated_at
-FROM roles
-WHERE id = $1 AND (app_id = $2 OR is_public)
+SELECT r.id, r.app_id, r.name, r.note, r.is_public, r.created_at, r.updated_at
+FROM roles r
+JOIN oauth_apps a ON a.id = r.app_id
+WHERE r.id = $1 AND (r.app_id = $2 OR (r.is_public AND a.status = 'active' AND a.deleted_at IS NULL))
 `
 
 // GetRoleVisibleToApp 按可见性查询用户组；不可见时返回 (nil, nil)。
@@ -288,8 +297,9 @@ func RevokeUserRole(ctx context.Context, userID, roleID int64) *errs.Error {
 }
 
 // listUserRolesSQL 查询用户当前有效的用户组；appID 为 nil 时返回所有应用，否则仅返回指定应用。
+// 查询列必须与 collectRoles 的 Scan 参数完全一致（含 is_public）。
 const listUserRolesSQL = `
-SELECT r.id, r.app_id, r.name, r.note, r.created_at, r.updated_at
+SELECT r.id, r.app_id, r.name, r.note, r.is_public, r.created_at, r.updated_at
 FROM user_roles ur
 JOIN roles r ON r.id = ur.role_id
 WHERE ur.user_id = $1

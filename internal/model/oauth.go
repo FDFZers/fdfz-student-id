@@ -12,7 +12,6 @@ type AppType string
 type AppStatus string
 
 // AppAuthStatus 应用授权状态：active 已生效、pending 待确认。
-// 注意：OAuth 应用授权流程尚未实现，暂不展开。
 // ENUM(active, pending)
 type AppAuthStatus string
 
@@ -27,8 +26,8 @@ type OAuthApp struct {
 	Description    string   `json:"description" db:"description"`
 	HomepageURL    string   `json:"homepage_url" db:"homepage_url"`
 	ClientType     AppType  `json:"client_type" db:"client_type"`         // 客户端类型，默认 confidential
-	RedirectURIs   []string `json:"redirect_uris" db:"redirect_uris"`     // 允许的回调地址，OAuth 授权流程尚未实现
-	RequestedPerms []string `json:"requested_perms" db:"requested_perms"` // 应用申请的可授权权限，OAuth 授权流程尚未实现，暂不展开
+	RedirectURIs   []string `json:"redirect_uris" db:"redirect_uris"`     // 允许的回调地址
+	RequestedPerms []string `json:"requested_perms" db:"requested_perms"` // 应用申请的可授权权限
 
 	Status AppStatus `json:"status" db:"status"` // 应用状态，默认 active
 
@@ -38,7 +37,6 @@ type OAuthApp struct {
 }
 
 // OAuthAuthorization 用户对应用的授权记录；一个用户对一个应用至多一条。
-// 注意：OAuth 应用授权流程尚未实现，暂不展开。
 type OAuthAuthorization struct {
 	ID          int64         `json:"id" db:"id"`
 	UserID      int64         `json:"user_id" db:"user_id"`
@@ -51,7 +49,6 @@ type OAuthAuthorization struct {
 }
 
 // OAuthRefreshToken OAuth 刷新令牌；只存令牌哈希，可轮换。
-// 注意：OAuth 应用授权流程尚未实现，暂不展开。
 type OAuthRefreshToken struct {
 	ID         int64      `json:"id" db:"id"`
 	AuthID     int64      `json:"auth_id" db:"auth_id"` // 所属授权记录 ID

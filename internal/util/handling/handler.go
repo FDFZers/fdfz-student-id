@@ -23,6 +23,10 @@ func Wrap(failMsg string, h Handler) gin.HandlerFunc {
 		if err == nil {
 			return
 		}
+		if BodyLimitExceeded(c) {
+			errs.RequestTooLargeError().AppendDetails("请求体大小超出限制").Respond(c)
+			return
+		}
 		if err.IsSealed() {
 			err.Respond(c)
 			return

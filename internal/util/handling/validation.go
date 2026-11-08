@@ -5,7 +5,7 @@ import (
 	"fdfz-student-id/internal/model"
 	"fdfz-student-id/internal/service/perm"
 	"mime/multipart"
-	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -38,6 +38,12 @@ var emailBlockedDomains = map[string]struct{}{
 	"fdfz.top": {},
 }
 
+// containsNUL 判断字符串是否包含 NUL（0x00）字节。
+// PostgreSQL 的 text 类型无法存储 NUL，若不在校验阶段拒绝，写入时会变成 500 内部错误。
+func containsNUL(s string) bool {
+	return strings.IndexByte(s, 0) >= 0
+}
+
 // ValidateUsername 校验用户名格式；为空时视为未提供。
 func ValidateUsername(username string) *errs.Error {
 	if username == "" {
@@ -55,6 +61,9 @@ func ValidateUsername(username string) *errs.Error {
 func ValidateNickname(nickname string) *errs.Error {
 	if nickname == "" {
 		return errs.BadRequestError().AppendDetails("未提供昵称")
+	}
+	if containsNUL(nickname) {
+		return errs.BadRequestError().AppendDetails("昵称格式错误")
 	}
 	if ok, err := regexNickname.MatchString(nickname); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate nickname").AppendDetails("昵称校验失败")
@@ -101,12 +110,22 @@ func ValidateEmail(email string) *errs.Error {
 		return errs.BadRequestError().AppendDetails("邮箱格式错误")
 	}
 
-	// 正则通过后再检查域名黑名单
-	parts := strings.SplitN(email, "@", 2)
-	if len(parts) == 2 {
-		domain := strings.ToLower(parts[1])
-		if _, ok := emailBlockedDomains[domain]; ok {
-			return errs.BadRequestError().AppendDetails("不能使用该邮箱域名")
+	// 正则通过后再检查域名黑名单：先解析出真实地址，再取最后一个 '@' 之后的域名。
+	// 注意：不能简单按第一个 '@' 分割，带引号的 local-part 允许包含 '@'，否则可用
+	// `"a@b"@fdfz.top` 之类写法绕过黑名单；显示名同理不能参与域名判断。
+	address := email
+	if parsed, err := mail.ParseAddress(email); err == nil {
+		address = parsed.Address
+	}
+	// 解析失败时用 email 原文兜底，仍按最后一个 '@' 取域名
+	if at := strings.LastIndexByte(address, '@'); at >= 0 {
+		// 域名统一处理：小写、去空白、去掉 FQDN 末尾的点，再与黑名单（含子域名后缀）比较
+		domain := strings.ToLower(strings.TrimSpace(address[at+1:]))
+		domain = strings.TrimSuffix(domain, ".")
+		for blocked := range emailBlockedDomains {
+			if domain == blocked || strings.HasSuffix(domain, "."+blocked) {
+				return errs.BadRequestError().AppendDetails("不能使用该邮箱域名")
+			}
 		}
 	}
 
@@ -139,30 +158,12 @@ func ValidatePassword(password string) *errs.Error {
 	return nil
 }
 
-// ValidateMIMEType 读取文件头前 512 字节检测 MIME 类型，不在 allowedTypes 中则返回 415。
-// 注意：检测会打开并读取上传文件，调用后文件指针不可复用。
-// 存疑：空文件读取会返回 io.EOF，当前走 500 分支，可能应返回「未提供文件」。
+// ValidateMIMEType 读取文件头前 512 字节检测 MIME 类型并校验白名单，仅返回错误。
+// 注意：检测会打开并读取上传文件，调用后文件指针不可复用；需要按 MIME 映射扩展名/Content-Type 时
+// 使用 DetectMIMEType（见 mime.go）。
 func ValidateMIMEType(fileHeader *multipart.FileHeader, allowedTypes map[string]struct{}) *errs.Error {
-	file, err := fileHeader.Open()
-	if err != nil {
-		return errs.CreateAndLogInternalError(err, "Failed to open file while detecting mime").AppendDetails("文件类型检测失败")
-	}
-	defer func(file multipart.File) {
-		_ = file.Close()
-	}(file)
-
-	buffer := make([]byte, 512)
-	if _, err := file.Read(buffer); err != nil {
-		return errs.CreateAndLogInternalError(err, "Failed to read file while detecting mime").AppendDetails("文件类型检测失败")
-	}
-
-	fileType := http.DetectContentType(buffer)
-
-	if _, ok := allowedTypes[fileType]; !ok {
-		return errs.UnsupportedMediaTypeError().AppendDetails("文件类型不受支持")
-	}
-
-	return nil
+	_, err := DetectMIMEType(fileHeader, allowedTypes)
+	return err
 }
 
 // ValidateSchool 校验学校枚举取值。
@@ -191,6 +192,9 @@ func ValidateVisibility(visibility model.Visibility) *errs.Error {
 
 // ValidateSignature 校验个性签名长度（允许为空）。
 func ValidateSignature(signature string) *errs.Error {
+	if containsNUL(signature) {
+		return errs.BadRequestError().AppendDetails("个性签名格式错误")
+	}
 	if utf8.RuneCountInString(signature) > 128 {
 		return errs.BadRequestError().AppendDetails("个性签名过长")
 	}
@@ -199,6 +203,9 @@ func ValidateSignature(signature string) *errs.Error {
 
 // ValidateBio 校验个人简介长度（允许为空）。
 func ValidateBio(bio string) *errs.Error {
+	if containsNUL(bio) {
+		return errs.BadRequestError().AppendDetails("个人简介格式错误")
+	}
 	if utf8.RuneCountInString(bio) > 2048 {
 		return errs.BadRequestError().AppendDetails("个人简介过长")
 	}
@@ -209,6 +216,9 @@ func ValidateBio(bio string) *errs.Error {
 func ValidateBanReason(reason string) *errs.Error {
 	if strings.TrimSpace(reason) == "" {
 		return errs.BadRequestError().AppendDetails("未提供封禁原因")
+	}
+	if containsNUL(reason) {
+		return errs.BadRequestError().AppendDetails("封禁原因格式错误")
 	}
 	if utf8.RuneCountInString(reason) > 256 {
 		return errs.BadRequestError().AppendDetails("封禁原因过长")
@@ -234,6 +244,9 @@ func ValidatePermissionValue(value string) *errs.Error {
 	if value == "" {
 		return errs.BadRequestError().AppendDetails("未提供权限值")
 	}
+	if containsNUL(value) {
+		return errs.BadRequestError().AppendDetails("权限值格式错误")
+	}
 	if utf8.RuneCountInString(value) > 96 {
 		return errs.BadRequestError().AppendDetails("权限值过长")
 	}
@@ -242,6 +255,9 @@ func ValidatePermissionValue(value string) *errs.Error {
 
 // ValidatePermissionDescription 校验权限描述长度（允许为空）。
 func ValidatePermissionDescription(description string) *errs.Error {
+	if containsNUL(description) {
+		return errs.BadRequestError().AppendDetails("权限描述格式错误")
+	}
 	if utf8.RuneCountInString(description) > 256 {
 		return errs.BadRequestError().AppendDetails("权限描述过长")
 	}
@@ -253,6 +269,9 @@ func ValidateUserGroupName(name string) *errs.Error {
 	if name == "" {
 		return errs.BadRequestError().AppendDetails("未提供用户组名")
 	}
+	if containsNUL(name) {
+		return errs.BadRequestError().AppendDetails("用户组名格式错误")
+	}
 	if utf8.RuneCountInString(name) > 128 {
 		return errs.BadRequestError().AppendDetails("用户组名过长")
 	}
@@ -261,6 +280,9 @@ func ValidateUserGroupName(name string) *errs.Error {
 
 // ValidateUserGroupNote 校验用户组备注长度（允许为空）。
 func ValidateUserGroupNote(note string) *errs.Error {
+	if containsNUL(note) {
+		return errs.BadRequestError().AppendDetails("用户组备注格式错误")
+	}
 	if utf8.RuneCountInString(note) > 256 {
 		return errs.BadRequestError().AppendDetails("用户组备注过长")
 	}
@@ -283,6 +305,9 @@ func ValidateGrantPermission(permission string) *errs.Error {
 
 // ValidateGrantNote 校验授权备注长度（允许为空）。
 func ValidateGrantNote(note string) *errs.Error {
+	if containsNUL(note) {
+		return errs.BadRequestError().AppendDetails("授权备注格式错误")
+	}
 	if utf8.RuneCountInString(note) > 256 {
 		return errs.BadRequestError().AppendDetails("授权备注过长")
 	}

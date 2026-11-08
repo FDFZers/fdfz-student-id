@@ -14,20 +14,23 @@ func ResolvePatterns(patterns []string) []string {
 	// out: 已展开的确切权限值（去重）
 	out := make(map[string]struct{})
 
-	var visit func(info *PermissionInfo, stack map[int64]bool)
-	visit = func(info *PermissionInfo, stack map[int64]bool) {
-		// 防止循环继承导致死循环（例如 A 继承 B，B 继承 A）
-		if stack[info.ID] {
+	// visited 在本次解析内跨 pattern 共享：每个权限定义只沿继承图展开一次。
+	// 权限目录加载时已校验继承图无环（见 catalog.go 的 validateCycleImplies），因此不需要
+	// 路径栈做环检测；全局去重把复杂度从指数级（菱形继承）降为 O(V+E)。
+	visited := make(map[int64]struct{})
+
+	var visit func(info *PermissionInfo)
+	visit = func(info *PermissionInfo) {
+		if _, ok := visited[info.ID]; ok {
 			return
 		}
-		stack[info.ID] = true
-		defer delete(stack, info.ID)
+		visited[info.ID] = struct{}{}
 
 		out[info.String] = struct{}{}
 
 		// 递归处理 implies（拥有当前权限 ⇒ 隐含拥有被蕴含的权限）
 		for _, implied := range info.Implies {
-			visit(implied, stack)
+			visit(implied)
 		}
 	}
 
@@ -38,7 +41,7 @@ func ResolvePatterns(patterns []string) []string {
 		}
 		for _, def := range cat.ByNamespace[pattern.Namespace] {
 			if matchPermNodes(pattern.Nodes, def.Nodes, 0, 0) {
-				visit(def, make(map[int64]bool))
+				visit(def)
 			}
 		}
 	}

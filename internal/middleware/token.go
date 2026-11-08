@@ -22,7 +22,8 @@ import (
 
 // ParseToken 解析请求中的访问令牌（优先 Authorization: Bearer，其次 access_token Cookie），
 // 校验通过后把 claims 写入 token_claims 供后续处理器使用。
-// 注意：未携带令牌时静默放行；令牌非法或过期时直接 Abort，后续中间件与处理器不会再执行。
+// 注意：未携带令牌时静默放行；令牌非法或过期时不中止请求（公开路由仍可访问），
+// 而是把错误暂存到 token_error，由 RequireToken 在保护路由上返回精确的 401。
 func ParseToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
@@ -36,11 +37,8 @@ func ParseToken() gin.HandlerFunc {
 
 		claims, err := crypto.ParseJWT(token)
 		if err != nil {
-			if errors.Is(err, jwt.ErrTokenExpired) {
-				errs.TokenExpiredError().AppendDetails("令牌已过期").Abort(c)
-				return
-			}
-			errs.InvalidTokenError().AppendDetails("令牌格式错误").Abort(c)
+			// 解析失败不得写入 claims；保留错误信息供 RequireToken 区分过期与非法
+			c.Set("token_error", err)
 			return
 		}
 		c.Set("token_claims", claims)
@@ -48,13 +46,23 @@ func ParseToken() gin.HandlerFunc {
 }
 
 // RequireToken 要求请求已通过 ParseToken 解析出有效令牌，否则以 invalid_token 中止请求。
-// 注意：本中间件依赖 ParseToken 先执行。
+// 注意：本中间件依赖 ParseToken 先执行；存在 token_error 时按过期/非法返回精确 401。
 func RequireToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.IsAborted() {
 			return
 		}
 		if _, exists := c.Get("token_claims"); !exists {
+			if value, ok := c.Get("token_error"); ok {
+				if tokenErr, ok := value.(error); ok && tokenErr != nil {
+					if errors.Is(tokenErr, jwt.ErrTokenExpired) {
+						errs.TokenExpiredError().AppendDetails("令牌已过期").Abort(c)
+						return
+					}
+					errs.InvalidTokenError().AppendDetails("令牌格式错误").Abort(c)
+					return
+				}
+			}
 			errs.InvalidTokenError().AppendDetails("未提供令牌").Abort(c)
 			return
 		}
@@ -108,12 +116,8 @@ func ValidateStepupToken(c *gin.Context) *errs.Error {
 	}
 	session, err := auth.GetSessionByUUID(c.Request.Context(), sessionID)
 	if err != nil {
-		if err.Info.Error == "not_found" {
-			return errs.InvalidTokenError().AppendDetails("会话不存在")
-		}
 		return err
 	}
-	// 存疑：GetSessionByUUID 无记录时返回 not_found 错误而非 nil，session == nil 分支可能不可达。
 	if session == nil || session.UserID != claims.UserID ||
 		session.RevokedAt != nil || !time.Now().Before(session.ExpiresAt) {
 		return errs.InvalidTokenError().AppendDetails("会话已失效")

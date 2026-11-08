@@ -6,6 +6,7 @@ package user
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
@@ -14,7 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/guregu/null/v6"
+	"github.com/jackc/pgx/v5"
 )
 
 // 用户域缓存时长：用户信息与用户名→ID 映射 10 分钟，用户名占用检查 1 分钟（较短以保证注册即时生效）。
@@ -62,17 +65,31 @@ FROM new_user u
 JOIN new_password p ON p.user_id = u.id
 `
 
-// CreateUser 创建用户及其密码：先校验用户名/学号占用，再原子写入两张表并刷新缓存。
-// 注意：pwd.Password 必须已由调用方完成哈希；学号占用检查同时覆盖待审核的注册申请。
-func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *errs.Error {
-	if taken, err := IsUsernameTaken(ctx, u.Username); err != nil {
-		return err.AppendDetails("用户创建失败")
+// rowQuerier 抽象单行查询能力：*pgxpool.Pool 与 pgx.Tx 都满足，使创建用户流程既可在连接池上执行，
+// 也可在审核事务内执行，从而让唯一性校验与写入使用同一个事务视图。
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// createUserWithPasswordAt 在指定查询器上创建用户与密码：先在同一查询器上做用户名/学号唯一性校验，
+// 再用单条 CTE 原子写入 users 与 user_passwords，回填 ID、时间戳。
+// 注意：pwd.Password 必须已由调用方完成哈希；excludeRegisterRequestID 供审核流程排除当前申请自身
+// （事务内申请仍是 pending，不排除会被唯一性查询误判为已占用，传 nil 表示不排除）。
+func createUserWithPasswordAt(
+	ctx context.Context,
+	q rowQuerier,
+	u *model.User,
+	pwd *model.UserPassword,
+	excludeRegisterRequestID *uuid.UUID,
+) *errs.Error {
+	if taken, err := isUsernameTakenAt(ctx, q, u.Username, excludeRegisterRequestID); err != nil {
+		return errs.CreatePGError(err, "用户", "Failed to check username").AppendDetails("用户创建失败")
 	} else if taken {
 		return errs.ConflictError().AppendDetails("用户名已存在", "用户创建失败")
 	}
 	if u.Type == model.UserTypeStudent {
-		if taken, err := IsStudentNumTaken(ctx, u.School, u.StudentNum, 0); err != nil {
-			return err.AppendDetails("用户创建失败")
+		if taken, err := isStudentNumTakenAt(ctx, q, u.School, u.StudentNum, 0, excludeRegisterRequestID); err != nil {
+			return errs.CreatePGError(err, "学号占用信息", "Failed to check student num").AppendDetails("用户创建失败")
 		} else if taken {
 			return errs.ConflictError().AppendDetails("该学校学号已被注册或正在审核中", "用户创建失败")
 		}
@@ -85,7 +102,7 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 
 	// 单条 SQL 同时创建用户与密码，并回填 ID、时间戳
 
-	e = db.R.QueryRow(ctx, createUserWithPasswordSQL,
+	e = q.QueryRow(ctx, createUserWithPasswordSQL,
 		u.Username,
 		u.Type,
 		u.StudentNum,
@@ -104,6 +121,15 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 	)
 	if e != nil {
 		return errs.CreatePGError(e, "用户", "Failed to create user").AppendDetails("用户创建失败")
+	}
+	return nil
+}
+
+// CreateUser 创建用户及其密码：先校验用户名/学号占用，再原子写入两张表并刷新缓存。
+// 注意：pwd.Password 必须已由调用方完成哈希；学号占用检查同时覆盖待审核的注册申请。
+func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *errs.Error {
+	if err := createUserWithPasswordAt(ctx, db.R.Pool, u, pwd, nil); err != nil {
+		return err
 	}
 
 	// TODO: 增加权限
@@ -132,11 +158,62 @@ FROM users
 WHERE id = $1 AND deleted_at IS NULL
 `
 
+// getUserIncludingDeletedSQL 按 ID 查询用户，包含已软删除用户（资料字段已被清空，仅保留账号标识）。
+const getUserIncludingDeletedSQL = `
+SELECT id, username, type, student_num, real_name, school,
+    nickname, signature, bio, visibilities,
+    created_at, updated_at, deleted_at
+FROM users
+WHERE id = $1
+`
+
 // getUsernameSQL 按用户名（大小写不敏感）查询用户 ID，软删除的用户不返回。
 const getUsernameSQL = `
 SELECT id FROM users
 WHERE lower(username) = lower($1) AND deleted_at IS NULL
 `
+
+// getUsernameIncludingDeletedSQL 按用户名（大小写不敏感）查询用户 ID，包含已软删除用户。
+// 注意：注销后仍可再次注册同名账号，因此可能同时存在活跃与已注销的同名记录；
+// 优先返回活跃用户，其次返回最近一条已注销记录，避免资料接口随机命中空壳历史账号。
+const getUsernameIncludingDeletedSQL = `
+SELECT id FROM users
+WHERE lower(username) = lower($1)
+ORDER BY (deleted_at IS NOT NULL), id DESC
+LIMIT 1
+`
+
+// scanUser 从一行用户记录扫描出 model.User，并解析/归一化 visibilities JSON。
+// 返回的 error 保留 pgx.ErrNoRows 等原始错误，供调用方按缓存/接口语义分别处理。
+func scanUser(row pgx.Row) (*model.User, error) {
+	var u model.User
+	var vis []byte
+
+	err := row.Scan(
+		&u.ID,
+		&u.Username,
+		&u.Type,
+		&u.StudentNum,
+		&u.RealName,
+		&u.School,
+		&u.Nickname,
+		&u.Signature,
+		&u.Bio,
+		&vis,
+		&u.CreatedAt,
+		&u.UpdatedAt,
+		&u.DeletedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(vis, &u.Visibilities); err != nil {
+		return nil, err
+	}
+	u.Visibilities.Normalize()
+	return &u, nil
+}
 
 // GetUserByID 按 ID 查询用户：优先读 Redis 缓存，未命中时回源 PostgreSQL 并回填缓存。
 // 返回 nil 表示用户不存在或已被软删除；不返回错误对象，调用方需自行判断。
@@ -150,39 +227,29 @@ func GetUserByID(
 		UserCacheKey(id),
 		UserCacheDuration,
 		func() (*model.User, error) {
-			var u model.User
-			var vis []byte
-
-			err := db.R.QueryRow(ctx, getUserSQL, id).Scan(
-				&u.ID,
-				&u.Username,
-				&u.Type,
-				&u.StudentNum,
-				&u.RealName,
-				&u.School,
-				&u.Nickname,
-				&u.Signature,
-				&u.Bio,
-				&vis,
-				&u.CreatedAt,
-				&u.UpdatedAt,
-				&u.DeletedAt,
-			)
-			if err != nil {
-				return nil, err
-			}
-
-			if err := json.Unmarshal(vis, &u.Visibilities); err != nil {
-				return nil, err
-			}
-			u.Visibilities.Normalize()
-			return &u, nil
+			return scanUser(db.R.QueryRow(ctx, getUserSQL, id))
 		},
 	)
 	if err != nil {
 		return nil, err
 	}
 	return usr, nil
+}
+
+// GetUserByIDIncludingDeleted 按 ID 查询用户，不过滤软删除且不走缓存；返回 nil 表示用户不存在。
+// 用于资料接口对已注销用户返回最小化的 deleted 标识，而不是 404。
+func GetUserByIDIncludingDeleted(
+	ctx context.Context,
+	id int64,
+) (*model.User, *errs.Error) {
+	u, err := scanUser(db.R.QueryRow(ctx, getUserIncludingDeletedSQL, id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, errs.CreatePGError(err, "用户", "Failed to get user including deleted")
+	}
+	return u, nil
 }
 
 // GetUserByUsername 按用户名查询用户：先解析用户名对应的用户 ID（带缓存），再按 ID 读取用户。
@@ -214,11 +281,29 @@ func GetUserByUsername(
 	return GetUserByID(ctx, *id)
 }
 
+// GetUserByUsernameIncludingDeleted 按用户名查询用户，不过滤软删除且不走缓存；返回 nil 表示用户不存在。
+// 同名时优先返回活跃用户（见 getUsernameIncludingDeletedSQL），没有活跃用户时返回最近注销的记录。
+func GetUserByUsernameIncludingDeleted(
+	ctx context.Context,
+	username string,
+) (*model.User, *errs.Error) {
+	var id int64
+	err := db.R.QueryRow(ctx, getUsernameIncludingDeletedSQL, username).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, errs.CreatePGError(err, "用户", "Failed to get user id including deleted")
+	}
+	return GetUserByIDIncludingDeleted(ctx, id)
+}
+
 // ---------------------------------------------------------------------------
 // 更新用户
 // ---------------------------------------------------------------------------
 
 // updateUserSQL 整体更新用户可编辑字段（不含 type/password），由触发器维护 updated_at。
+// 末尾的 updated_at 条件实现乐观锁：仅当记录自读取后未被他人修改时才写库，避免后写覆盖先写。
 const updateUserSQL = `
 UPDATE users
 SET
@@ -230,13 +315,18 @@ SET
     signature    = $7,
     bio          = $8,
     visibilities = $9
-WHERE id = $1 AND deleted_at IS NULL
+WHERE id = $1 AND deleted_at IS NULL AND updated_at = $10
 RETURNING updated_at
 `
 
+// userExistsSQL 判断未软删除的用户是否存在，用于乐观锁更新 0 行时区分「并发修改」与「用户已删除」。
+const userExistsSQL = `
+SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)
+`
+
 // UpdateUser 整体更新用户资料：先读取旧记录判断用户名/学号是否变更，再做占用校验并写库，最后失效相关缓存。
-// 注意：读取旧记录与写库不在同一事务内，并发更新同一用户时后写覆盖先写。
-func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
+// expectedUpdatedAt 是调用方读取用户时的 updated_at 原值，用于乐观锁：记录在此期间被他人修改时返回 409。
+func UpdateUser(ctx context.Context, u *model.User, expectedUpdatedAt time.Time) *errs.Error {
 	vis, e := json.Marshal(u.Visibilities)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to marshal user visibilities").AppendDetails("序列化错误")
@@ -248,7 +338,10 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 	if err != nil {
 		return err
 	}
-	// 存疑：oldUser 为 nil（用户被并发软删除）时下面会空指针 panic。
+	// 用户可能在读取后、写库前被并发软删除，此时按「用户不存在」处理，避免空指针
+	if oldUser == nil {
+		return errs.NotFoundError().AppendDetails("用户不存在")
+	}
 
 	if !strings.EqualFold(oldUser.Username, u.Username) {
 		taken, err := IsUsernameTaken(ctx, u.Username)
@@ -281,8 +374,20 @@ func UpdateUser(ctx context.Context, u *model.User) *errs.Error {
 		u.Signature,
 		u.Bio,
 		vis,
+		expectedUpdatedAt,
 	).Scan(&u.UpdatedAt)
 	if e != nil {
+		// 0 行：再查一次用户是否仍存在，区分并发修改（409）与已被删除（404）
+		if errors.Is(e, pgx.ErrNoRows) {
+			var exists bool
+			if qErr := db.R.QueryRow(ctx, userExistsSQL, u.ID).Scan(&exists); qErr != nil {
+				return errs.CreatePGError(qErr, "用户", "Failed to check user existence")
+			}
+			if exists {
+				return errs.ConflictError().AppendDetails("资料已被他人修改，请刷新后重试")
+			}
+			return errs.NotFoundError().AppendDetails("用户不存在")
+		}
 		return errs.CreatePGError(e, "用户", "Failed to update user")
 	}
 
@@ -331,6 +436,7 @@ func SoftDeleteUser(ctx context.Context, id int64) *errs.Error {
 // ---------------------------------------------------------------------------
 
 // checkUsernameExistsSQL 检查用户名是否已被现存用户或待审核的注册申请占用。
+// $2 可排除指定注册申请（审核事务内排除申请自身），传 NULL 表示不排除。
 const checkUsernameExistsSQL = `
 SELECT EXISTS (
     SELECT 1 FROM users
@@ -338,8 +444,17 @@ SELECT EXISTS (
     UNION ALL
     SELECT 1 FROM register_requests
     WHERE lower(username) = lower($1) AND status = 'pending'
+      AND ($2::uuid IS NULL OR id <> $2)
 )
 `
+
+// isUsernameTakenAt 在指定查询器上检查用户名占用（不走缓存），excludeRegisterRequestID 传 nil 表示不排除。
+// 审核流程必须在事务内使用本函数：缓存版 IsUsernameTaken 无法与本事务未提交的写入保持一致。
+func isUsernameTakenAt(ctx context.Context, q rowQuerier, username string, excludeRegisterRequestID *uuid.UUID) (bool, error) {
+	var taken bool
+	err := q.QueryRow(ctx, checkUsernameExistsSQL, username, excludeRegisterRequestID).Scan(&taken)
+	return taken, err
+}
 
 // IsUsernameTaken 检查用户名是否已被现存用户或待审核的注册申请占用，结果缓存 1 分钟。
 // 注意：来自缓存的结果可能短暂滞后，注册/改名写库后需主动删除 UsernameExistsCacheKey。
@@ -351,7 +466,7 @@ func IsUsernameTaken(ctx context.Context, username string) (bool, *errs.Error) {
 		UsernameExistsCacheDuration,
 		func() (*bool, error) {
 			var taken bool
-			if err := db.R.QueryRow(ctx, checkUsernameExistsSQL, username).Scan(&taken); err != nil {
+			if err := db.R.QueryRow(ctx, checkUsernameExistsSQL, username, nil).Scan(&taken); err != nil {
 				return nil, err
 			}
 			return &taken, nil
@@ -371,6 +486,7 @@ func IsUsernameTaken(ctx context.Context, username string) (bool, *errs.Error) {
 // ---------------------------------------------------------------------------
 
 // checkStudentNumExistsSQL 检查同校同学号是否已被现存学生或待审核的学生注册申请占用，可排除指定用户自身。
+// $4 可排除指定注册申请（审核事务内排除申请自身），传 NULL 表示不排除。
 const checkStudentNumExistsSQL = `
 SELECT EXISTS (
     SELECT 1 FROM users
@@ -380,8 +496,26 @@ SELECT EXISTS (
     SELECT 1 FROM register_requests
     WHERE type = 'student' AND status = 'pending'
       AND school = $1 AND student_num = $2
+      AND ($4::uuid IS NULL OR id <> $4)
 )
 `
+
+// isStudentNumTakenAt 在指定查询器上检查学号占用（不走缓存），可排除用户自身与正在审核的申请。
+func isStudentNumTakenAt(
+	ctx context.Context,
+	q rowQuerier,
+	school model.School,
+	studentNum null.String,
+	excludeUserID int64,
+	excludeRegisterRequestID *uuid.UUID,
+) (bool, error) {
+	if !studentNum.Valid {
+		return false, nil
+	}
+	var taken bool
+	err := q.QueryRow(ctx, checkStudentNumExistsSQL, school, studentNum.String, excludeUserID, excludeRegisterRequestID).Scan(&taken)
+	return taken, err
+}
 
 // IsStudentNumTaken 检查学号是否已被现存用户或待审核的注册申请占用；studentNum 为空时直接返回 false。
 // excludeUserID 用于更新场景排除用户自己；本函数不缓存结果。
@@ -391,11 +525,8 @@ func IsStudentNumTaken(
 	studentNum null.String,
 	excludeUserID int64,
 ) (bool, *errs.Error) {
-	if !studentNum.Valid {
-		return false, nil
-	}
-	var taken bool
-	if err := db.R.QueryRow(ctx, checkStudentNumExistsSQL, school, studentNum.String, excludeUserID).Scan(&taken); err != nil {
+	taken, err := isStudentNumTakenAt(ctx, db.R.Pool, school, studentNum, excludeUserID, nil)
+	if err != nil {
 		return false, errs.CreatePGError(err, "学号占用信息", "Failed to check student num")
 	}
 	return taken, nil

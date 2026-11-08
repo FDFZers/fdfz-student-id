@@ -3,6 +3,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // psql 是统一使用 $n 占位符的 squirrel builder，所有条件均参数化，不拼接用户输入。
@@ -18,7 +20,30 @@ var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 const (
 	DefaultLimit = 20  // 未指定 limit 时的默认分页大小
 	MaxLimit     = 500 // 单次查询允许的最大分页大小，超过会被截断
+
+	// MaxQueryLength 是所有匹配方法共用的关键词长度上限（按 rune 计）：过长的关键词会显著增加
+	// 数据库匹配开销，这里作为兜底限制。regex 直接交给数据库正则引擎执行，不能用 Go 的 regexp 预校验
+	// 语法，只能把数据库返回的 2201B 错误映射为 bad_request。
+	MaxQueryLength = 512
+
+	// MaxFuzzyWords 是 fuzzy 匹配允许的最大分词数量：每个词都会生成一个 AND 条件，
+	// 词数过多会放大 SQL 参数与匹配开销。
+	MaxFuzzyWords = 8
+
+	// pgInvalidRegularExpression 是 PostgreSQL 非法正则表达式的 SQLSTATE。
+	pgInvalidRegularExpression = "2201B"
 )
+
+// mapExecError 把搜索执行错误转换为 API 错误：正则表达式语法错误属于客户端输入问题，返回 400。
+// 注意：正则方言是 PostgreSQL ARE（支持反向引用、前瞻等 Go regexp 不支持的语法），
+// 因此不能用 Go 的 regexp 预校验，只能把数据库返回的 2201B 错误映射为 bad_request。
+func mapExecError(err error, item, log string) *errs.Error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgInvalidRegularExpression {
+		return errs.BadRequestError().AppendDetails("搜索表达式格式错误")
+	}
+	return errs.CreatePGError(err, item, log)
+}
 
 // GetInfo 把搜索配置转换为对外元信息。
 // 注意：Tags 的标签值来自 map 遍历，每次返回的顺序可能不同，客户端应视为集合。
@@ -51,7 +76,8 @@ func GetInfo(cfg *SearchConfig) *SearchInfo {
 }
 
 // ExecSearch 执行搜索：先 COUNT 统计命中总数，再按分页查询数据并扫描为 T。
-// 注意：数据查询列需与 T 的 db tag 对齐（pgx.RowToAddrOfStructByName 按列名映射）。
+// 注意：使用 Lax 变体按列名映射——Columns 未返回的 struct 字段保持零值
+// strict 变体会要求 struct 每个字段都有对应列而在运行期报错。
 func ExecSearch[T any](ctx context.Context, cfg *SearchConfig, req *SearchRequest) (*SearchResult[T], *errs.Error) {
 	query, err := BuildSearch(cfg, req)
 	if err != nil {
@@ -60,16 +86,16 @@ func ExecSearch[T any](ctx context.Context, cfg *SearchConfig, req *SearchReques
 	// 统计总数
 	var count int32
 	if e := db.R.QueryRow(ctx, query.Count.SQL, query.Count.Args...).Scan(&count); e != nil {
-		return nil, errs.CreatePGError(e, cfg.Item, "Failed to execute search count query")
+		return nil, mapExecError(e, cfg.Item, "Failed to execute search count query")
 	}
 	// 查询当前页数据
 	rows, e := db.R.Query(ctx, query.Data.SQL, query.Data.Args...)
 	if e != nil {
-		return nil, errs.CreatePGError(e, cfg.Item, "Failed to execute search data query")
+		return nil, mapExecError(e, cfg.Item, "Failed to execute search data query")
 	}
-	data, e := pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[T])
+	data, e := pgx.CollectRows(rows, pgx.RowToAddrOfStructByNameLax[T])
 	if e != nil {
-		return nil, errs.CreatePGError(e, cfg.Item, "Failed to collect search data")
+		return nil, mapExecError(e, cfg.Item, "Failed to collect search data")
 	}
 	return &SearchResult[T]{
 		Count: count,
@@ -127,16 +153,31 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		}
 	}
 	searchFields := make([]Field, 0, len(requested))
+	seenFields := make(map[string]struct{}, len(requested))
 	for _, id := range requested {
 		f, ok := fieldsByID[id]
 		if !ok {
 			return nil, errs.BadRequestError().AppendDetails("搜索字段不存在：" + id)
 		}
+		// 去重（保持首次出现顺序）：重复字段只会把 OR 条件放大，不改变语义
+		if _, duplicated := seenFields[id]; duplicated {
+			continue
+		}
+		seenFields[id] = struct{}{}
 		searchFields = append(searchFields, f)
 	}
 
 	var conditions []sq.Sqlizer
 	trimmed := strings.TrimSpace(req.Query)
+
+	// 关键词长度兜底限制：所有匹配方法共用（合法但过长的表达式同样拒绝，避免匹配开销失控）
+	if len([]rune(trimmed)) > MaxQueryLength {
+		return nil, errs.BadRequestError().AppendDetails("搜索表达式过长")
+	}
+	// fuzzy 分词数量上限：每个词都会生成一个 AND 条件，词数过多会放大 SQL 参数与匹配开销
+	if method == MatchMethodFuzzy && len(strings.Fields(trimmed)) > MaxFuzzyWords {
+		return nil, errs.BadRequestError().AppendDetails("搜索词过多")
+	}
 
 	// 关键词条件：各字段之间用 OR 连接；没有有效条件时整个关键词条件省略
 	if trimmed != "" && len(searchFields) > 0 {
@@ -188,7 +229,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		dataB = dataB.Where(where)
 	}
 
-	// 排序：显式排序字段优先；否则仅在空 query 时使用默认排序列
+	// 排序：显式排序字段优先；未指定时使用默认排序列（保证分页结果稳定可复现）
 	switch {
 	case req.SortBy.Valid:
 		f, ok := sortableByID[req.SortBy.String]
@@ -211,20 +252,25 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 			return nil, errs.BadRequestError().AppendDetails("排序顺序不受支持：" + string(order))
 		}
 		dataB = dataB.OrderBy(fmt.Sprintf("%s %s", f.Column, dir))
+		// 次级排序：显式排序字段可能不唯一（如 created_at），追加默认排序列保证分页稳定
+		if cfg.DefaultSortColumn != "" && cfg.DefaultSortColumn != f.Column {
+			dataB = dataB.OrderBy(cfg.DefaultSortColumn)
+		}
 
-	case trimmed == "" && cfg.DefaultSortColumn != "":
+	case cfg.DefaultSortColumn != "":
 		dataB = dataB.OrderBy(cfg.DefaultSortColumn)
 	}
 
-	// 分页：未提供 limit 用 DefaultLimit，越界按 MaxLimit 截断；offset 仅取正值
-	// 存疑：显式传入 limit <= 0 时会落到 MaxLimit，而不是像 NormalizePagination 那样回退 DefaultLimit。
+	// 分页：未提供或非正数 limit 用 DefaultLimit，超过 MaxLimit 时截断；offset 仅取正值
 	var limit int64
 	if req.Limit.Valid {
 		limit = req.Limit.Int64
 	} else {
 		limit = DefaultLimit
 	}
-	if limit <= 0 || limit > MaxLimit {
+	if limit <= 0 {
+		limit = DefaultLimit
+	} else if limit > MaxLimit {
 		limit = MaxLimit
 	}
 	dataB = dataB.Limit(uint64(limit))
@@ -357,7 +403,10 @@ func buildTagCondition(tag Tag, sel TagSelection) (sq.Sqlizer, *errs.Error) {
 		parts = append(parts, sq.Expr(fmt.Sprintf("%s::text = ANY(?)", tag.Column), includeVals))
 	}
 	if len(excludeVals) > 0 {
-		parts = append(parts, sq.Expr(fmt.Sprintf("NOT (%s::text = ANY(?))", tag.Column), excludeVals))
+		parts = append(parts, sq.Expr(
+			fmt.Sprintf("(%s IS NULL OR NOT (%s::text = ANY(?)))", tag.Column, tag.Column),
+			excludeVals,
+		))
 	}
 	if len(parts) == 0 {
 		return nil, nil

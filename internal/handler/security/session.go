@@ -118,14 +118,18 @@ func revokeSessionsHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 自己与他人的会话撤销使用不同权限
+	// 撤销自己的会话必须使用提权令牌（提权令牌不携带权限，无法做权限判定）；
+	// 撤销他人的会话需要 users.session.write 权限。
 	var allowed bool
 	if selfID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserSessionWrite)
+		allowed = claims.TokenType == model.TokenTypeStepup
 	} else {
 		allowed = perm.HasPermission(claims, perm.PermUsersSessionWrite)
 	}
 	if !allowed {
+		if selfID == claims.UserID {
+			return errs.PermissionDeniedError().AppendDetails("撤销自己的会话需要提权令牌").Seal()
+		}
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
@@ -159,14 +163,18 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 自己与他人的会话撤销使用不同权限
+	// 撤销自己的会话必须使用提权令牌（提权令牌不携带权限，无法做权限判定）；
+	// 撤销他人的会话需要 users.session.write 权限。
 	var allowed bool
 	if selfID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserSessionWrite)
+		allowed = claims.TokenType == model.TokenTypeStepup
 	} else {
 		allowed = perm.HasPermission(claims, perm.PermUsersSessionWrite)
 	}
 	if !allowed {
+		if selfID == claims.UserID {
+			return errs.PermissionDeniedError().AppendDetails("撤销自己的会话需要提权令牌").Seal()
+		}
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
@@ -182,10 +190,11 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 
 	session, err := auth.GetSessionByUUID(c.Request.Context(), sessionID)
 	if err != nil {
-		if err.Info.Error == "not_found" {
-			return errs.NotFoundError().AppendDetails("会话不存在")
-		}
 		return err
+	}
+	// service 查询不存在的会话返回 (nil, nil)，由 handler 决定 404。
+	if session == nil {
+		return errs.NotFoundError().AppendDetails("会话不存在")
 	}
 	if session.UserID != selfID {
 		return errs.NotFoundError().AppendDetails("会话不存在")

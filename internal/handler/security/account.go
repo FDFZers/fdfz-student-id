@@ -43,7 +43,7 @@ func deleteAccountHandler(c *gin.Context) *errs.Error {
 }
 
 // deleteUserHandler 管理员删除指定用户：撤销其会话与提权令牌后立即软删除。
-// 注意：需要 users.delete 权限，且不能删除自己；删除后用户记录仍保留，供外键引用。
+// 注意：需要 users.delete 权限，且不能删除自己与拥有写权限的账号；删除后用户记录仍保留，供外键引用。
 func deleteUserHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
@@ -58,6 +58,16 @@ func deleteUserHandler(c *gin.Context) *errs.Error {
 
 	if err := handling.EnsureUserExists(c, targetID); err != nil {
 		return err
+	}
+
+	// 不允许删除仍拥有写权限的账号，避免管理面被互相删除而瘫痪
+
+	hasWritePermission, err := handling.UserHasWritePerm(c.Request.Context(), targetID)
+	if err != nil {
+		return err
+	}
+	if hasWritePermission {
+		return errs.PermissionDeniedError().AppendDetails("不能删除拥有写权限的用户")
 	}
 
 	// 撤销目标用户会话与提权令牌，防止删除后令牌继续生效

@@ -52,9 +52,16 @@ func LoadJWTKeys() error {
 	if err != nil {
 		return fmt.Errorf("create JWK from public key: %w", err)
 	}
-	_ = key.Set(jwk.KeyIDKey, cfg.C.JWTKeyID)
-	_ = key.Set(jwk.AlgorithmKey, jwa.RS512)
-	_ = key.Set(jwk.KeyUsageKey, "sig")
+	if err := key.Set(jwk.KeyIDKey, cfg.C.JWTKeyID); err != nil {
+		return fmt.Errorf("set JWK key id: %w", err)
+	}
+	// 注意：jwa.RS512 是构造函数而非取值，必须调用后才能得到 jwa.SignatureAlgorithm。
+	if err := key.Set(jwk.AlgorithmKey, jwa.RS512()); err != nil {
+		return fmt.Errorf("set JWK algorithm: %w", err)
+	}
+	if err := key.Set(jwk.KeyUsageKey, "sig"); err != nil {
+		return fmt.Errorf("set JWK key usage: %w", err)
+	}
 
 	set := jwk.NewSet()
 	_ = set.AddKey(key)

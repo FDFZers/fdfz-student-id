@@ -17,22 +17,15 @@ import (
 	"github.com/guregu/null/v6"
 )
 
-// check2FAAttempts 检查鉴权会话的二次验证失败次数，超过 MaxAuthSessionAttempts 时返回 429。
+// check2FAAttempts 原子地消费一次二次验证尝试机会，累计尝试次数超过 MaxAuthSessionAttempts 时返回 429。
+// 注意：必须在真正校验验证码之前调用，且每次请求只调用一次；失败路径不再额外自增计数。
 func check2FAAttempts(ctx context.Context, session *auth.AuthSession) *errs.Error {
-	attempts, err := auth.GetAuthSessionAttempts(ctx, session.ID)
+	attempts, err := auth.ConsumeAuthSessionAttempt(ctx, session.ID)
 	if err != nil {
 		return err
 	}
-	if attempts >= auth.MaxAuthSessionAttempts {
+	if attempts > auth.MaxAuthSessionAttempts {
 		return errs.RateLimitExceededError().AppendDetails("验证失败次数过多，请重新认证")
-	}
-	return nil
-}
-
-// record2FAFailure 记录一次二次验证失败，供 check2FAAttempts 限制暴力尝试。
-func record2FAFailure(ctx context.Context, session *auth.AuthSession) *errs.Error {
-	if _, err := auth.IncreaseAuthSessionAttempts(ctx, session.ID); err != nil {
-		return err
 	}
 	return nil
 }
@@ -75,17 +68,19 @@ func verifyEmailInitHandler(c *gin.Context) *errs.Error {
 	if session.Passed2FA {
 		return errs.IllegalStateError().AppendDetails("二次验证已通过")
 	}
-	// 存疑：先占用发送冷却再判断会话是否有邮箱，密码重置的匿名会话会在空邮箱上消耗冷却窗口。
-	if err := auth.TryAcquireEmailRateLimit(c.Request.Context(), session.Email.String); err != nil {
-		return err
-	}
+	// 匿名密码重置会话没有可用邮箱：仍按会话 ID 占用发送冷却后静默成功，防止通过重试差异枚举账号。
 	if !session.Email.Valid {
 		if session.Type == auth.AuthSessionTypeResetPassword {
-			// 重置密码静默成功防止账号枚举
+			if err := auth.TryAcquireEmailRateLimit(c.Request.Context(), session.ID.String()); err != nil {
+				return err
+			}
 			c.JSON(http.StatusOK, gin.H{})
 			return nil
 		}
 		return errs.IllegalStateError().AppendDetails("不支持邮箱验证")
+	}
+	if err := auth.TryAcquireEmailRateLimit(c.Request.Context(), session.Email.String); err != nil {
+		return err
 	}
 
 	// 生成验证码并发送邮件
@@ -94,13 +89,19 @@ func verifyEmailInitHandler(c *gin.Context) *errs.Error {
 		return errs.CreateAndLogInternalError(e, "Failed to generate code").AppendDetails("验证码生成失败")
 	}
 
-	if e := email.SendCode(session.Email.String, code, session.Type); e != nil {
-		return errs.CreateAndLogInternalError(e, "Failed to send email code").AppendDetails("邮件发送失败")
-	}
-
+	// 先持久化验证码再发送：发送成功前会话已延长到验证码有效期，避免邮件已发出但会话过期。
 	session.EmailCode = null.StringFrom(code)
 	if err := auth.UpdateAuthSession(c.Request.Context(), session, true); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证状态更新失败")
+	}
+
+	if e := email.SendCode(session.Email.String, code, session.Type); e != nil {
+		// 发送失败：清空已持久化的验证码并尽力恢复会话缓存时间，再返回错误
+		session.EmailCode = null.String{}
+		if uerr := auth.UpdateAuthSession(c.Request.Context(), session, false); uerr != nil {
+			slog.Warn("Failed to rollback email code after send failure", "error", uerr.Info.Error, "session_id", session.ID)
+		}
+		return errs.CreateAndLogInternalError(e, "Failed to send email code").AppendDetails("邮件发送失败")
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
@@ -136,19 +137,13 @@ func verifyEmailHandler(c *gin.Context) *errs.Error {
 	}
 	if !session.Email.Valid {
 		if session.Type == auth.AuthSessionTypeResetPassword {
-			// 重置密码模糊错误防止账号枚举
-			if err := record2FAFailure(c.Request.Context(), session); err != nil {
-				return err
-			}
+			// 重置密码模糊错误防止账号枚举（本次尝试已由 check2FAAttempts 原子计数）
 			return errs.ForbiddenError().AppendDetails("验证码错误")
 		}
 		return errs.IllegalStateError().AppendDetails("不支持邮箱验证")
 	}
 	if !session.EmailCode.Valid {
 		if session.Type == auth.AuthSessionTypeResetPassword {
-			if err := record2FAFailure(c.Request.Context(), session); err != nil {
-				return err
-			}
 			return errs.ForbiddenError().AppendDetails("验证码错误")
 		}
 		return errs.IllegalStateError().AppendDetails("邮箱验证码未发送")
@@ -156,9 +151,6 @@ func verifyEmailHandler(c *gin.Context) *errs.Error {
 
 	// 常量时间比较，避免通过响应耗时逐位猜测验证码
 	if subtle.ConstantTimeCompare([]byte(session.EmailCode.String), []byte(req.Code)) != 1 {
-		if err := record2FAFailure(c.Request.Context(), session); err != nil {
-			return err
-		}
 		return errs.ForbiddenError().AppendDetails("验证码错误")
 	}
 
@@ -176,7 +168,7 @@ type verifyQQInitReq struct {
 }
 
 // verifyQQInitHandler 生成 QQ 验证码并返回给调用方，由用户主动私聊 NapCat 机器人发送该验证码。
-// 注意：已有验证码时直接返回原验证码，不重复生成；匿名密码重置会话静默成功。
+// 注意：已有验证码时直接返回原验证码，不重复生成；匿名密码重置会话返回等长的随机验证码防止账号枚举。
 func verifyQQInitHandler(c *gin.Context) *errs.Error {
 	var req verifyQQInitReq
 	if e := c.ShouldBindJSON(&req); e != nil {
@@ -195,8 +187,21 @@ func verifyQQInitHandler(c *gin.Context) *errs.Error {
 	}
 	if !session.QQ.Valid {
 		if session.Type == auth.AuthSessionTypeResetPassword {
-			// 重置密码静默成功防止账号枚举
-			c.JSON(http.StatusOK, gin.H{})
+			// 匿名重置会话返回与真实用户同形状的验证码，且在同一会话内保持稳定（防止通过重复调用
+			// 比较验证码是否变化来枚举账号）；该验证码只用于响应伪装，不参与任何校验。
+			if !session.QQCode.Valid {
+				code, e := crypto.GenerateCode(6, crypto.CodeCharset)
+				if e != nil {
+					return errs.CreateAndLogInternalError(e, "Failed to generate code").AppendDetails("验证码生成失败")
+				}
+				session.QQCode = null.StringFrom(code)
+				if err := auth.UpdateAuthSession(c.Request.Context(), session, true); err != nil {
+					return errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证状态更新失败")
+				}
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"code": session.QQCode.String,
+			})
 			return nil
 		}
 		return errs.IllegalStateError().AppendDetails("不支持 QQ 验证")
@@ -252,28 +257,22 @@ func verifyQQHandler(c *gin.Context) *errs.Error {
 	if err := check2FAAttempts(c.Request.Context(), session); err != nil {
 		return err
 	}
-	// 存疑：先占用 QQ 拉取冷却再判断会话是否有 QQ，匿名重置会话会在空 QQ 号上消耗冷却窗口。
-	if err := auth.TryAcquireQQRateLimit(c.Request.Context(), session.QQ.String); err != nil {
-		return err
-	}
 	if !session.QQ.Valid {
 		if session.Type == auth.AuthSessionTypeResetPassword {
-			// 重置密码模糊错误防止账号枚举
-			if err := record2FAFailure(c.Request.Context(), session); err != nil {
-				return err
-			}
+			// 重置密码模糊错误防止账号枚举（本次尝试已由 check2FAAttempts 原子计数）
 			return errs.ForbiddenError().AppendDetails("验证码错误")
 		}
 		return errs.IllegalStateError().AppendDetails("不支持 QQ 验证")
 	}
 	if !session.QQCode.Valid {
 		if session.Type == auth.AuthSessionTypeResetPassword {
-			if err := record2FAFailure(c.Request.Context(), session); err != nil {
-				return err
-			}
 			return errs.ForbiddenError().AppendDetails("验证码错误")
 		}
 		return errs.IllegalStateError().AppendDetails("QQ 验证码未初始化")
+	}
+	// 只有真正需要拉取 NapCat 消息时才占用 QQ 拉取冷却，避免空 QQ 号消耗冷却窗口。
+	if err := auth.TryAcquireQQRateLimit(c.Request.Context(), session.QQ.String); err != nil {
+		return err
 	}
 
 	// 拉取最近 20 条好友消息，只比对时间窗口内的文本
@@ -299,9 +298,6 @@ func verifyQQHandler(c *gin.Context) *errs.Error {
 	}
 
 	if !success {
-		if err := record2FAFailure(c.Request.Context(), session); err != nil {
-			return err
-		}
 		return errs.ForbiddenError().AppendDetails("未识别到验证码")
 	}
 
@@ -355,9 +351,6 @@ func verifyTOTPHandler(c *gin.Context) *errs.Error {
 	if ok, e := crypto.VerifyTOTP(session.TOTPSecret.String, req.Code); e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to verify TOTP").AppendDetails("TOTP 校验失败")
 	} else if !ok {
-		if err := record2FAFailure(c.Request.Context(), session); err != nil {
-			return err
-		}
 		return errs.ForbiddenError().AppendDetails("验证码错误")
 	}
 

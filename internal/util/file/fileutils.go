@@ -2,6 +2,7 @@
 package fileutils
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,7 +11,7 @@ import (
 )
 
 // CopyFile 复制 src 到 dst：先写入同目录的临时文件，成功后再原子重命名，避免产生半成品 dst。
-// 注意：任一步失败都会清理临时文件；不保留源文件的权限位。
+// 注意：任一步失败都会清理临时文件并返回该步的原始错误；不保留源文件的权限位。
 func CopyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -30,38 +31,39 @@ func CopyFile(src, dst string) error {
 	}
 	tmpOut := out.Name()
 
-	// 复制内容，失败时关闭并删除临时文件
-	if _, err := io.Copy(out, in); err != nil {
-		err := out.Close()
-		if err != nil {
-			slog.Warn("Failed to close temp file", "error", err)
-		}
-		err = os.Remove(tmpOut)
-		if err != nil {
+	// removeTemp 删除临时文件；清理失败只记录日志，不覆盖原始错误。
+	removeTemp := func() {
+		if err := os.Remove(tmpOut); err != nil && !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("Failed to remove temp file", "error", err)
 		}
-		return err
+	}
+	// abort 关闭并删除临时文件后返回原始错误。
+	// 注意：不能用同名变量接收 Close/Remove 的错误，否则复制失败会被静默吞掉（曾经的 bug）。
+	abort := func(op string, cause error) error {
+		if err := out.Close(); err != nil {
+			slog.Warn("Failed to close temp file", "error", err)
+		}
+		removeTemp()
+		return fmt.Errorf("%s: %w", op, cause)
+	}
+
+	// 复制内容，失败时关闭并删除临时文件
+	if _, err := io.Copy(out, in); err != nil {
+		return abort("copy", err)
 	}
 	// 落盘，避免断电后文件名可见但内容为空
 	if err := out.Sync(); err != nil {
-		err := out.Close()
-		if err != nil {
-			slog.Warn("Failed to close temp file", "error", err)
-		}
-		err = os.Remove(tmpOut)
-		if err != nil {
-			slog.Warn("Failed to remove temp file", "error", err)
-		}
-		return err
+		return abort("sync", err)
 	}
 	if err := out.Close(); err != nil {
-		err := os.Remove(tmpOut)
-		if err != nil {
-			slog.Warn("Failed to remove temp file", "error", err)
-		}
-		return err
+		removeTemp()
+		return fmt.Errorf("close: %w", err)
 	}
-	return os.Rename(tmpOut, dst)
+	if err := os.Rename(tmpOut, dst); err != nil {
+		removeTemp()
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
 }
 
 // MoveFile 优先用 rename 移动文件；rename 失败（如跨文件系统）时退化为复制后删除源文件。

@@ -12,8 +12,6 @@ import (
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
-	"path"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/guregu/null/v6"
@@ -21,14 +19,14 @@ import (
 
 // createRegisterRequestReq 是注册申请的请求体（multipart 表单，包含佐证图片）。
 type createRegisterRequestReq struct {
-	Username      string         `form:"username"`       // 用户名
-	Nickname      string         `form:"nickname"`       // 昵称，留空或与用户名相同时不保存
-	Type          model.UserType `form:"type"`           // 用户类型
-	StudentNum    string         `form:"student_num"`    // 学号，学生类型必填
-	RealName      string         `form:"real_name"`      // 真实姓名
-	School        model.School   `form:"school"`         // 学校
-	Password      string         `form:"password"`       // 密码
-	AltchaPayload string         `form:"altcha_payload"` // Altcha 人机验证载荷
+	Username      string         `form:"username"`                  // 用户名
+	Nickname      string         `form:"nickname"`                  // 昵称，留空或与用户名相同时不保存
+	Type          model.UserType `form:"type" binding:"required"`   // 用户类型
+	StudentNum    string         `form:"student_num"`               // 学号，学生类型必填
+	RealName      string         `form:"real_name"`                 // 真实姓名
+	School        model.School   `form:"school" binding:"required"` // 学校
+	Password      string         `form:"password"`                  // 密码
+	AltchaPayload string         `form:"altcha_payload"`            // Altcha 人机验证载荷
 }
 
 // createRegisterHandler 创建注册申请并上传佐证图片；注册申请需管理员审核通过后才创建用户。
@@ -63,6 +61,11 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 	}
 	fileHeader := fileHeaders[0]
 
+	// 非学生账号不应填写学号：避免用学号字段占用/探测学生学号
+	if req.Type != model.UserTypeStudent && req.StudentNum != "" {
+		return errs.BadRequestError().AppendDetails("非学生账号不能提供学号")
+	}
+
 	var studentNum null.String
 	if req.StudentNum != "" {
 		studentNum = null.StringFrom(req.StudentNum)
@@ -81,8 +84,11 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 	if err := handling.ValidateUsername(req.Username); err != nil {
 		return err
 	}
-	if err := handling.ValidateNickname(req.Nickname); err != nil {
-		return err
+	// 昵称可留空：留空或与用户名相同时不保存（见下方 RegisterRequest 组装），此时跳过格式校验。
+	if req.Nickname != "" && req.Nickname != req.Username {
+		if err := handling.ValidateNickname(req.Nickname); err != nil {
+			return err
+		}
 	}
 	if err := handling.ValidateRealName(req.RealName); err != nil {
 		return err
@@ -96,11 +102,13 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 	if err := handling.ValidateUserType(req.Type); err != nil {
 		return err
 	}
-	if err := handling.ValidateMIMEType(fileHeader, map[string]struct{}{
+	// 佐证图片类型检测：以服务端检测到的 MIME 为准，忽略客户端文件名中的扩展名
+	mimeType, err := handling.DetectMIMEType(fileHeader, map[string]struct{}{
 		"image/jpeg": {},
 		"image/png":  {},
 		"image/webp": {},
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
@@ -139,9 +147,10 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 
 	// 上传佐证图片，失败时回滚删除注册申请
 	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
-		Slug:     "/student_id/proof_images/" + r.ID.String(),
-		FileName: r.ID.String() + strings.ToLower(path.Ext(fileHeader.Filename)),
-		AppID:    null.IntFrom(1),
+		Slug:        "/student_id/proof_images/" + r.ID.String(),
+		FileName:    r.ID.String() + handling.ImageExtension(mimeType),
+		ContentType: null.StringFrom(mimeType),
+		AppID:       null.IntFrom(1),
 	}); err != nil {
 		if err := user.DeleteRegisterRequest(c.Request.Context(), r.ID); err != nil {
 			return err.AppendDetails("注册失败且回退失败，请联系管理员").Seal()

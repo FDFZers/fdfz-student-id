@@ -38,16 +38,16 @@ var httpClient = &http.Client{Timeout: uploadTimeout}
 // StoreFileReq 是上传到 filestore 的请求体。
 // 注意：FilePath 是相对 SHARED_DIR 的路径，SHA512 由本地临时文件计算，供 filestore 校验。
 type StoreFileReq struct {
-	Slug         string      // 文件 slug，必须以 / 开头，如 /student_id/avatars/1
-	FilePath     string      // 相对 SHARED_DIR 的文件路径，由 storage.UploadTempPath 生成
-	FileName     string      // 展示用文件名（含扩展名）
-	Description  string      // 文件描述
-	ContentType  null.String // 客户端声明的 MIME 类型，可为空
-	SHA512       null.String // 文件内容的 SHA-512，供 filestore 校验完整性
-	ShouldUpsert bool        // slug 已存在时是否覆盖
-	ShouldCopy   bool        // 透传 filestore 的 should_copy 选项，语义由下游定义
-	UserID       null.Int64  // 关联用户 ID，可为空
-	AppID        null.Int64  // 关联应用 ID，可为空
+	Slug         string      `json:"slug"`          // 文件 slug，必须以 / 开头，如 /student_id/avatars/1
+	FilePath     string      `json:"file_path"`     // 相对 SHARED_DIR 的文件路径，由 storage.UploadTempPath 生成
+	FileName     string      `json:"file_name"`     // 展示用文件名（含扩展名）
+	Description  string      `json:"description"`   // 文件描述
+	ContentType  null.String `json:"content_type"`  // 客户端声明的 MIME 类型，可为空
+	SHA512       null.String `json:"sha512"`        // 文件内容的 SHA-512，供 filestore 校验完整性
+	ShouldUpsert bool        `json:"should_upsert"` // slug 已存在时是否覆盖
+	ShouldCopy   bool        `json:"should_copy"`   // 透传 filestore 的 should_copy 选项，语义由下游定义
+	UserID       null.Int64  `json:"user_id"`       // 关联用户 ID，可为空
+	AppID        null.Int64  `json:"app_id"`        // 关联应用 ID，可为空
 }
 
 // ---------------------------------------------------------------------------

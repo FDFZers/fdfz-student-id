@@ -22,7 +22,7 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/login/init", handling.Wrap("登录失败", loginInitHandler))
 	i.POST("/login/finalize", handling.Wrap("登录失败", loginFinalizeHandler))
 	i.POST("/refresh", handling.Wrap("令牌刷新失败", refreshTokenHandler))
-	i.POST("/logout", handling.Wrap("登出失败", logoutHandler))
+	i.POST("/logout", middleware.RequireToken(), handling.Wrap("登出失败", logoutHandler))
 
 	i.POST("/password_reset/init/email", handling.Wrap("密码重置初始化失败", resetPasswordEmailInitHandler))
 	i.POST("/password_reset/init/qq", handling.Wrap("密码重置初始化失败", resetPasswordQQInitHandler))

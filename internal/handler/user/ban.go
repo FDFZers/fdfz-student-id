@@ -8,7 +8,6 @@ import (
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,13 +18,12 @@ import (
 // 查自己需要 user.ban.read，查他人需要 users.ban.read；无封禁时返回 banned=false。
 func getUserBanHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
-	targetIDStr := c.Param("id")
-	targetID, e := strconv.ParseInt(targetIDStr, 10, 64)
-	if e != nil {
-		return errs.BadRequestError().AppendDetails("用户 ID 格式错误")
+	targetID, err := handling.ParseID(c, "id", "用户")
+	if err != nil {
+		return err
 	}
 
-	// 按「查自己」与「查他人」区分所需权限
+	// 先做权限判定，再检查目标是否存在：避免用 404/403 差异探测用户是否存在
 
 	var allowed bool
 	if targetID == claims.UserID {
@@ -35,6 +33,10 @@ func getUserBanHandler(c *gin.Context) *errs.Error {
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
+	}
+
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
+		return err
 	}
 
 	ban, err := user.GetUserBan(c.Request.Context(), targetID)
@@ -61,8 +63,8 @@ type banUserReq struct {
 	EndTime null.Time `json:"end_time"`
 }
 
-// banUserHandler 封禁指定用户：校验原因与结束时间、确认目标用户存在后写入封禁记录并记录审计日志。
-// 注意：不能封禁自己；新封禁会先禁用该用户已有的启用中封禁记录。
+// banUserHandler 封禁指定用户：校验原因与结束时间、确认目标用户存在且无写权限后写入封禁记录并记录审计日志。
+// 注意：不能封禁自己；对已封禁用户再次封禁会生成新的历史记录并禁用旧记录。
 func banUserHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
@@ -88,6 +90,16 @@ func banUserHandler(c *gin.Context) *errs.Error {
 
 	if err := handling.EnsureUserExists(c, targetID); err != nil {
 		return err
+	}
+
+	// 不允许封禁仍拥有写权限的账号，避免管理面被互相封禁而瘫痪
+
+	hasWritePermission, err := handling.UserHasWritePerm(c.Request.Context(), targetID)
+	if err != nil {
+		return err
+	}
+	if hasWritePermission {
+		return errs.PermissionDeniedError().AppendDetails("不能封禁拥有写权限的用户")
 	}
 
 	// 写入封禁记录并输出审计日志

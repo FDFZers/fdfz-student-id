@@ -12,11 +12,11 @@ import (
 )
 
 // searchCfg 注册申请搜索配置：可搜索字段、可排序字段、标签（状态/用户类型/学校）与返回列。
-// 注意：Columns 含 password 是因为 RegisterRequest 模型带密码哈希字段；响应构造时已显式剔除，不对外返回。
+// 注意：Columns 不包含 password（密码哈希），模型的 Password 字段保持零值，不读取也不对外返回。
 var searchCfg = search.SearchConfig{
 	Table:             "register_requests",
 	Item:              "注册请求",
-	Columns:           []string{"id", "username", "nickname", "type", "student_num", "real_name", "school", "password", "created_at", "status", "created_user_id", "reviewer_user_id", "review_comment", "reviewed_at"},
+	Columns:           []string{"id", "username", "nickname", "type", "student_num", "real_name", "school", "created_at", "status", "created_user_id", "reviewer_user_id", "review_comment", "reviewed_at"},
 	Fields:            []search.Field{{ID: "id", Column: "id", Numeric: true}, {ID: "student_num", Column: "student_num"}, {ID: "real_name", Column: "real_name"}, {ID: "created_user_id", Column: "created_user_id", Numeric: true}},
 	MatchMethods:      search.MatchMethodValues(),
 	SortableFields:    []search.Field{{ID: "created_at", Column: "created_at"}, {ID: "reviewed_at", Column: "reviewed_at"}},
@@ -49,12 +49,12 @@ func SearchQueryHandler(c *gin.Context) *errs.Error {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
-	requests, err := search.ExecSearch[model.RegisterRequest](c, &searchCfg, &req)
+	requests, err := search.ExecSearch[model.RegisterRequest](c.Request.Context(), &searchCfg, &req)
 	if err != nil {
 		return err
 	}
 
-	// 逐条构造对外字段，显式剔除 password
+	// 逐条构造对外字段；password 不在查询列中
 
 	filtered := make([]*gin.H, 0, len(requests.Data))
 	for _, request := range requests.Data {

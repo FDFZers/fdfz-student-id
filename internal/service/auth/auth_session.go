@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/guregu/null/v6"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -74,11 +75,12 @@ func AuthSessionAttemptsCacheKey(id uuid.UUID) string {
 func ValidateUserPassword(ctx context.Context, userID int64, password string) *errs.Error {
 	pwd, err := user.GetUserPassword(ctx, userID)
 	if err != nil {
-		if err.Info.Error == "not_found" {
-			crypto.BurnPasswordVerifyCost()
-			return errs.ForbiddenError().AppendDetails("用户名或密码错误")
-		}
 		return err.AppendDetails("密码验证失败")
+	}
+	// 没有密码记录（用户异常/数据缺失）与密码错误同样处理，并燃烧一次校验耗时防枚举。
+	if pwd == nil {
+		crypto.BurnPasswordVerifyCost()
+		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 	if ok, e := crypto.VerifyArgon2ID(password, pwd.Password); e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to verify user password").AppendDetails("密码验证失败")
@@ -197,30 +199,23 @@ func DeleteAuthSession(ctx context.Context, session *AuthSession) *errs.Error {
 	return nil
 }
 
-// GetAuthSessionAttempts 读取鉴权会话的二次验证失败次数，未记录时返回 0。
-func GetAuthSessionAttempts(ctx context.Context, id uuid.UUID) (int64, *errs.Error) {
-	n, err := db.GetRedis[int64](ctx, AuthSessionAttemptsCacheKey(id))
-	if err != nil {
-		return 0, errs.CreateAndLogInternalError(err, "Failed to get auth session attempts").AppendDetails("Redis 错误")
-	} else if n == nil {
-		return 0, nil
-	}
-	return *n, nil
-}
+// consumeAuthSessionAttemptScript 原子地自增二次验证尝试次数，并在计数键首次创建时设置过期时间。
+// 注意：INCR 与 EXPIRE 必须放在同一 Lua 脚本中执行，否则并发请求可能看到没有过期时间的计数器。
+var consumeAuthSessionAttemptScript = redis.NewScript(`
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return n
+`)
 
-// IncreaseAuthSessionAttempts 原子自增二次验证失败次数，首次写入时设置与验证码相同的过期时间。
-// 注意：过期时间设置失败时会删除计数键后返回错误，避免留下永不过期的计数器。
-func IncreaseAuthSessionAttempts(ctx context.Context, id uuid.UUID) (int64, *errs.Error) {
-	key := AuthSessionAttemptsCacheKey(id)
-	n, err := db.R.Incr(ctx, key).Result()
+// ConsumeAuthSessionAttempt 原子地消费一次二次验证尝试机会并返回累计尝试次数（从 1 开始）。
+// 注意：每次校验（无论成功失败）都必须先调用本函数计数，失败路径不再额外自增；首次计数时设置与验证码一致的过期时间。
+func ConsumeAuthSessionAttempt(ctx context.Context, id uuid.UUID) (int64, *errs.Error) {
+	ttlSeconds := int64(AuthSession2FACacheDuration / time.Second)
+	n, err := consumeAuthSessionAttemptScript.Run(ctx, db.R, []string{AuthSessionAttemptsCacheKey(id)}, ttlSeconds).Int64()
 	if err != nil {
-		return 0, errs.CreateAndLogInternalError(err, "Failed to increase auth session attempts").AppendDetails("Redis 错误")
-	}
-	if n == 1 {
-		if err := db.R.Expire(ctx, key, AuthSession2FACacheDuration).Err(); err != nil {
-			db.R.Del(ctx, key)
-			return 0, errs.CreateAndLogInternalError(err, "Failed to set auth session attempts expiration").AppendDetails("Redis 错误")
-		}
+		return 0, errs.CreateAndLogInternalError(err, "Failed to consume auth session attempt").AppendDetails("Redis 错误")
 	}
 	return n, nil
 }

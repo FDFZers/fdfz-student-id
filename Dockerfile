@@ -30,7 +30,11 @@ RUN apk add --no-cache ca-certificates tzdata curl \
 
 RUN addgroup -S ffhub && adduser -S ffhub -G ffhub
 
-RUN mkdir -p /app/shared && chown -R ffhub:ffhub /app/shared
+# 运行用户需要写权限的目录：
+#   - /app/shared：共享文件目录（SHARED_DIR），含上传临时目录；
+#   - /app/storage：storage.EnsureDir() 创建的本地临时目录（相对 WORKDIR 的 ./storage）。
+# 注意：必须显式创建并 chown，否则非 root 用户启动时 MkdirAll 会因 EACCES 直接退出。
+RUN mkdir -p /app/shared /app/storage && chown -R ffhub:ffhub /app/shared /app/storage
 
 USER ffhub
 

@@ -19,26 +19,41 @@ func UserBanCacheKey(userID int64) string {
 	return fmt.Sprintf("student_id:user:ban:%d", userID)
 }
 
-// banUserSQL 在单条语句中先禁用该用户已有的启用中封禁，再插入新封禁，保证同一用户最多一条启用记录。
-const banUserSQL = `
-WITH disabled AS (
-    UPDATE user_bans
-    SET enabled = false
-    WHERE user_id = $1 AND enabled = true
-)
+// disableActiveUserBansSQL 把该用户当前生效的封禁置为失效（封禁历史保留，不物理删除）。
+const disableActiveUserBansSQL = `
+UPDATE user_bans
+SET enabled = false
+WHERE user_id = $1 AND enabled = true
+`
+
+// insertUserBanSQL 插入一条新的生效封禁记录；历史上的封禁记录保持 enabled=false。
+const insertUserBanSQL = `
 INSERT INTO user_bans (user_id, reason, end_time, enabled)
 VALUES ($1, $2, $3, true)
 RETURNING id, created_at
 `
 
-// BanUser 封禁用户：禁用其旧封禁、写入新封禁记录并失效封禁缓存；end_time 为空表示永久封禁。
-// 注意：不校验用户是否存在与是否重复封禁，调用方需先确认目标用户存在。
+// BanUser 封禁用户：在事务内先禁用旧的生效封禁、再插入新的封禁记录，提交后失效封禁缓存；
+// end_time 为空表示永久封禁。将旧记录禁用而非覆盖，可保留完整封禁历史。
+// 注意：不校验用户是否存在，调用方需先确认目标用户存在；重复封禁会生成新的历史记录。
 func BanUser(ctx context.Context, b *model.UserBan) *errs.Error {
-	err := db.R.Pool.QueryRow(ctx, banUserSQL,
-		b.UserID, b.Reason, b.EndTime,
-	).Scan(&b.ID, &b.CreatedAt)
-	if err != nil {
-		return errs.CreatePGError(err, "封禁信息", "Failed to ban user")
+	tx, txErr := db.R.Begin(ctx)
+	if txErr != nil {
+		return errs.CreateAndLogInternalError(txErr, "Failed to begin transaction for banning user").
+			AppendDetails("封禁失败")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, disableActiveUserBansSQL, b.UserID); err != nil {
+		return errs.CreatePGError(err, "封禁信息", "Failed to disable active user bans").AppendDetails("封禁失败")
+	}
+	if err := tx.QueryRow(ctx, insertUserBanSQL, b.UserID, b.Reason, b.EndTime).
+		Scan(&b.ID, &b.CreatedAt); err != nil {
+		return errs.CreatePGError(err, "封禁信息", "Failed to insert user ban").AppendDetails("封禁失败")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to commit transaction for banning user").
+			AppendDetails("封禁失败")
 	}
 
 	db.R.Del(ctx, UserBanCacheKey(b.UserID))

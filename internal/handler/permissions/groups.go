@@ -262,6 +262,8 @@ type addAppGroupPermissionsRequestBody struct {
 }
 
 // addAppGroupPermissionsHandler 处理组权限追加：空权限列表直接成功，重复权限由服务层去重。
+// 写操作只允许作用于本应用的用户组：其他应用的公开用户组仅提供跨应用只读可见性，
+// 否则应用所有者可以越权修改其他应用的组权限集合。
 func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -277,16 +279,11 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	role, err := userperm.GetRoleVisibleToApp(c.Request.Context(), app.ID, groupID)
+	role, err := userperm.GetRoleInApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
 	if role == nil {
-		return errs.NotFoundError().AppendDetails("用户组不存在")
-	}
-	// 存疑：公开用户组可能属于其他应用，此校验会放行，随后向其他应用的用户组追加当前应用的权限。
-	if role.AppID != app.ID && !role.Public {
-		// 防御性校验：GetRoleVisibleToApp 已保证不可见即 nil。
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
@@ -379,7 +376,7 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	usr, err := user.GetUserByID(c, body.UserID)
+	usr, err := user.GetUserByID(c.Request.Context(), body.UserID)
 	if err != nil {
 		return err
 	} else if usr == nil {

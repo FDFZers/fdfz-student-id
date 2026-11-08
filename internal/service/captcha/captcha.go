@@ -33,7 +33,6 @@ func CreateChallenge() (altcha.Challenge, error) {
 // 注意：altcha 库在部分输入下可能 panic，这里 recover 后统一转成 error。
 func VerifyChallenge(payload altcha.Payload) (res altcha.VerifySolutionResult, err error) {
 	defer func() {
-		// 存疑：altcha 库在部分畸形输入下会 panic，需上游修复或长期保留 recover。
 		if r := recover(); r != nil {
 			switch x := r.(type) {
 			case string:
@@ -77,12 +76,11 @@ func VerifyPayloadStr(ctx context.Context, payloadStr string) *errs.Error {
 	if e != nil {
 		return errs.AltchaError().AppendDetails("Altcha 内部错误")
 	}
-	if !result.Verified {
-		return errs.AltchaError().AppendDetails("Altcha Challenge 校验失败")
-	}
-	// 存疑：VerifySolution 对过期 challenge 会先返回 Expired（Verified 为 false），本分支实际不可达。
 	if result.Expired {
 		return errs.AltchaError().AppendDetails("Altcha Challenge 已过期")
+	}
+	if !result.Verified {
+		return errs.AltchaError().AppendDetails("Altcha Challenge 校验失败")
 	}
 
 	// 用 Redis SetNX 保证同一 challenge 只消费一次

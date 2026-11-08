@@ -82,7 +82,6 @@ func (r *Reloader) Notify() {
 
 // ReloadNow 立即同步重载一次（由 reloadMu 串行化），并更新状态；失败时返回加载错误。
 // 注意：加载失败不会清空旧目录快照，鉴权继续使用上一次成功加载的数据。
-// 存疑：失败时 Pending 也会被清空，等待中的变更不会自动重试，需要下一次 Notify 或手动重载。
 func (r *Reloader) ReloadNow(ctx context.Context) *errs.Error {
 	r.reloadMu.Lock()
 	defer r.reloadMu.Unlock()
@@ -96,12 +95,14 @@ func (r *Reloader) ReloadNow(ctx context.Context) *errs.Error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.status.Pending = false
 	if err != nil {
+		// 加载失败时保留 Pending：等待中的变更尚未生效，只有在后续重载成功后才会被清除，
+		// 否则状态接口会误报「没有待处理变更」。
 		r.status.LastError = reloadErrorText(err)
 		slog.Warn("Failed to reload permission catalog", "error", r.status.LastError)
 		return err
 	}
+	r.status.Pending = false
 	r.status.LastError = ""
 	r.status.LastSuccessAt = time.Now()
 	r.status.Version++
@@ -166,8 +167,13 @@ func (r *Reloader) loop(ctx context.Context) {
 			timerC = nil
 
 			reloadCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			_ = r.ReloadNow(reloadCtx)
+			loadErr := r.ReloadNow(reloadCtx)
 			cancel()
+			if loadErr != nil {
+				// 加载失败说明等待中的变更尚未生效：重新投递通知，在节流间隔后自动重试，
+				// 避免一次瞬时数据库错误导致目录永久停留在旧快照。
+				r.Notify()
+			}
 		}
 	}
 }

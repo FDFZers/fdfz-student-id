@@ -8,6 +8,7 @@ import (
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,8 +21,8 @@ type reviewRegisterReq struct {
 	Comment string                      `json:"comment"`
 }
 
-// reviewRegisterHandler 审核注册申请：校验 ID/状态与 register_requests.review 权限后交给服务层处理。
-// 审核通过会创建用户并回写 created_user_id；失败由服务层回滚审核状态，这里不 Seal 以便 Wrap 追加端点级文案。
+// reviewRegisterHandler 审核注册申请：校验 ID/状态/审核意见与 register_requests.review 权限后交给服务层处理。
+// 审核通过会在同一事务内创建用户并回写 created_user_id，失败整体回滚；这里不 Seal 以便 Wrap 追加端点级文案。
 func reviewRegisterHandler(c *gin.Context) *errs.Error {
 	var req reviewRegisterReq
 	if e := c.ShouldBindJSON(&req); e != nil {
@@ -34,6 +35,10 @@ func reviewRegisterHandler(c *gin.Context) *errs.Error {
 
 	if !req.Status.IsValid() || req.Status == model.RegisterRequestStatusPending {
 		return errs.BadRequestError().AppendDetails("审核状态取值错误")
+	}
+
+	if utf8.RuneCountInString(req.Comment) > 1024 {
+		return errs.BadRequestError().AppendDetails("审核意见过长")
 	}
 
 	claims := handling.MustGetClaims(c)

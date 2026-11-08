@@ -52,7 +52,7 @@ func (r *updateProfileReq) empty() bool {
 
 // updateUserProfileHandler 修改目标用户资料：逐字段校验权限与取值后整体写库，并返回过滤后的资料。
 // 需修改自己时使用 user.profile.update.* 权限，修改他人时使用 users.profile.update.* 权限。
-// 注意：先读后写、非事务流程，并发修改同一用户时后写覆盖先写。
+// 写库带 updated_at 乐观锁：期间资料被他人修改时返回 409，避免后写覆盖先写。
 func updateUserProfileHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
@@ -76,6 +76,9 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 	} else if target == nil {
 		return errs.NotFoundError().AppendDetails("用户不存在")
 	}
+
+	// 在修改字段之前保存读取到的 updated_at 原值，作为乐观锁的期望值
+	expectedUpdatedAt := target.UpdatedAt
 
 	isSelf := claims.UserID == targetID
 
@@ -195,7 +198,7 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 
 	// 写库并返回过滤后的最新资料
 
-	if err := user.UpdateUser(c.Request.Context(), target); err != nil {
+	if err := user.UpdateUser(c.Request.Context(), target, expectedUpdatedAt); err != nil {
 		return err
 	}
 

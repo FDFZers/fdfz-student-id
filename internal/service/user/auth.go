@@ -19,12 +19,15 @@ const getUserPasswordSQL = `
 SELECT user_id, password, updated_at FROM user_passwords WHERE user_id = $1
 `
 
-// GetUserPassword 查询用户的密码哈希；用户没有密码记录时返回 404。
+// GetUserPassword 查询用户的密码哈希。
 func GetUserPassword(ctx context.Context, userID int64) (*model.UserPassword, *errs.Error) {
 	var pwd model.UserPassword
 	err := db.R.QueryRow(ctx, getUserPasswordSQL, userID).
 		Scan(&pwd.UserID, &pwd.Password, &pwd.UpdatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, errs.CreatePGError(err, "密码", "Failed to get user password").AppendDetails("获取密码失败")
 	}
 	return &pwd, nil

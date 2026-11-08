@@ -44,7 +44,6 @@ func (v *Visibilities) Normalize() {
 
 // User 用户实体，对应 users 表。
 // 注意：DeletedAt 非空即为软删除（注销），记录仍保留供外键与历史数据引用。
-// 存疑：users 表还有 deletion_scheduled_at（注销冷静期截止时间），本模型未映射，由 user 服务单独读写。
 type User struct {
 	ID       int64  `json:"id" db:"id"`
 	Username string `json:"username" db:"username"`

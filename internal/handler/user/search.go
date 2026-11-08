@@ -3,6 +3,7 @@ package user
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/search"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
@@ -23,12 +24,43 @@ var searchCfg = search.SearchConfig{
 	DefaultSortColumn: "id",
 }
 
-// searchInfo 用户搜索能力的静态描述，供前端渲染搜索表单。
-var searchInfo = search.GetInfo(&searchCfg)
+// removeSearchFields 返回移除指定 ID 后的字段副本；不修改入参切片，避免污染全局搜索配置。
+func removeSearchFields(fields []search.Field, ids ...string) []search.Field {
+	removed := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		removed[id] = struct{}{}
+	}
+	result := make([]search.Field, 0, len(fields))
+	for _, field := range fields {
+		if _, ok := removed[field.ID]; ok {
+			continue
+		}
+		result = append(result, field)
+	}
+	return result
+}
+
+// searchConfigForClaims 按调用方资料权限返回搜索配置副本：没有对应读权限的字段从关键词匹配与排序白名单中移除，
+// 使 COUNT 与数据查询都无法把不可读字段当作探测条件（搜索 oracle），也不影响其他请求使用的全局配置。
+// 注意：id 字段始终保留。
+func searchConfigForClaims(claims *model.RegisteredTokenClaims) *search.SearchConfig {
+	cfg := searchCfg
+	if !perm.HasPermission(claims, perm.PermUsersProfileReadBasic) {
+		cfg.Fields = removeSearchFields(cfg.Fields, "username", "nickname")
+		cfg.SortableFields = removeSearchFields(cfg.SortableFields, "username", "nickname")
+	}
+	if !perm.HasPermission(claims, perm.PermUsersProfileReadIdentity) {
+		cfg.Fields = removeSearchFields(cfg.Fields, "student_num")
+		cfg.SortableFields = removeSearchFields(cfg.SortableFields, "student_num")
+	}
+	return &cfg
+}
 
 // searchInfoHandler 返回用户搜索的字段、匹配方法、可排序字段与标签取值。
+// 注意：按调用方资料权限返回过滤后的元信息，与 searchQueryHandler 的可用字段保持一致。
 func searchInfoHandler(c *gin.Context) *errs.Error {
-	c.JSON(http.StatusOK, searchInfo)
+	claims := handling.MustGetClaims(c)
+	c.JSON(http.StatusOK, search.GetInfo(searchConfigForClaims(claims)))
 	return nil
 }
 
@@ -41,7 +73,8 @@ func searchQueryHandler(c *gin.Context) *errs.Error {
 	}
 
 	claims := handling.MustGetClaims(c)
-	users, err := search.ExecSearch[model.User](c, &searchCfg, &req)
+	cfg := searchConfigForClaims(claims)
+	users, err := search.ExecSearch[model.User](c.Request.Context(), cfg, &req)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// FollowCacheDuration 是关注关系与计数缓存的时长。
+// FollowCacheDuration 是关注关系缓存的时长。
 const (
 	FollowCacheDuration = 1 * time.Minute
 )
@@ -24,35 +24,12 @@ func FollowRelationshipCacheKey(viewerID, targetID int64) string {
 	return fmt.Sprintf("student_id:user:follow:rel:%d:%d", viewerID, targetID)
 }
 
-// FollowersCountCacheKey 返回用户粉丝数缓存的 Redis key。
-func FollowersCountCacheKey(userID int64) string {
-	return fmt.Sprintf("student_id:user:follow:count:followers:%d", userID)
-}
-
-// FollowingCountCacheKey 返回用户关注数缓存的 Redis key。
-func FollowingCountCacheKey(userID int64) string {
-	return fmt.Sprintf("student_id:user:follow:count:following:%d", userID)
-}
-
-// FriendsCountCacheKey 返回用户好友数缓存的 Redis key。
-func FriendsCountCacheKey(userID int64) string {
-	return fmt.Sprintf("student_id:user:follow:count:friends:%d", userID)
-}
-
-// invalidateFollowCache 关注/取关后失效受影响的缓存：双向关系、被关注者粉丝数、关注者关注数、双方好友数。
-// 注意：好友关系变化会同时影响双方，两个好友数缓存都要删。
+// invalidateFollowCache 关注/取关后失效受影响的缓存：双向关系都会变化。
+// 注意：粉丝数/关注数/好友数改为实时 SQL 查询，不再有计数缓存需要失效。
 func invalidateFollowCache(ctx context.Context, followerID, followingID int64) {
 	db.R.Del(ctx,
-		// 双向关系都会变化
 		FollowRelationshipCacheKey(followerID, followingID),
 		FollowRelationshipCacheKey(followingID, followerID),
-		// followerID 关注数变化
-		FollowingCountCacheKey(followerID),
-		// followingID 粉丝数变化
-		FollowersCountCacheKey(followingID),
-		// 互关可能变化，因此好友数两侧都可能变
-		FriendsCountCacheKey(followerID),
-		FriendsCountCacheKey(followingID),
 	)
 }
 
@@ -248,26 +225,13 @@ JOIN users u ON u.id = f.follower_id
 WHERE f.following_id = $1 AND u.deleted_at IS NULL
 `
 
-// CountFollowers 统计用户粉丝数，结果缓存 1 分钟；与列表接口返回的 count 可能短暂不一致。
+// CountFollowers 实时统计用户粉丝数（SQL 与列表接口共用同一条件），不使用缓存。
 func CountFollowers(ctx context.Context, userID int64) (int64, *errs.Error) {
-	count, err := db.GetCached(
-		ctx,
-		"粉丝列表",
-		FollowersCountCacheKey(userID),
-		FollowCacheDuration,
-		func() (*int64, error) {
-			var c int64
-			err := db.R.QueryRow(ctx, countFollowersSQL, userID).Scan(&c)
-			return &c, err
-		},
-	)
-	if err != nil {
-		return 0, err
+	var count int64
+	if err := db.R.QueryRow(ctx, countFollowersSQL, userID).Scan(&count); err != nil {
+		return 0, errs.CreatePGError(err, "粉丝列表", "Failed to count followers")
 	}
-	if count == nil {
-		return 0, nil
-	}
-	return *count, nil
+	return count, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -298,26 +262,13 @@ JOIN users u ON u.id = f.following_id
 WHERE f.follower_id = $1 AND u.deleted_at IS NULL
 `
 
-// CountFollowing 统计用户关注数，结果缓存 1 分钟。
+// CountFollowing 实时统计用户关注数（SQL 与列表接口共用同一条件），不使用缓存。
 func CountFollowing(ctx context.Context, userID int64) (int64, *errs.Error) {
-	count, err := db.GetCached(
-		ctx,
-		"关注列表",
-		FollowingCountCacheKey(userID),
-		FollowCacheDuration,
-		func() (*int64, error) {
-			var c int64
-			err := db.R.QueryRow(ctx, countFollowingSQL, userID).Scan(&c)
-			return &c, err
-		},
-	)
-	if err != nil {
-		return 0, err
+	var count int64
+	if err := db.R.QueryRow(ctx, countFollowingSQL, userID).Scan(&count); err != nil {
+		return 0, errs.CreatePGError(err, "关注列表", "Failed to count followings")
 	}
-	if count == nil {
-		return 0, nil
-	}
-	return *count, nil
+	return count, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -350,24 +301,11 @@ JOIN users u ON u.id = f.following_id
 WHERE f.follower_id = $1 AND u.deleted_at IS NULL
 `
 
-// CountFriends 统计用户好友数，结果缓存 1 分钟。
+// CountFriends 实时统计用户好友数（SQL 与列表接口共用同一条件），不使用缓存。
 func CountFriends(ctx context.Context, userID int64) (int64, *errs.Error) {
-	count, err := db.GetCached(
-		ctx,
-		"好友列表",
-		FriendsCountCacheKey(userID),
-		FollowCacheDuration,
-		func() (*int64, error) {
-			var c int64
-			err := db.R.QueryRow(ctx, countFriendsSQL, userID).Scan(&c)
-			return &c, err
-		},
-	)
-	if err != nil {
-		return 0, err
+	var count int64
+	if err := db.R.QueryRow(ctx, countFriendsSQL, userID).Scan(&count); err != nil {
+		return 0, errs.CreatePGError(err, "好友列表", "Failed to count friends")
 	}
-	if count == nil {
-		return 0, nil
-	}
-	return *count, nil
+	return count, nil
 }

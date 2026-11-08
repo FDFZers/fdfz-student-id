@@ -28,7 +28,6 @@ type Config struct {
 	PermSessionTokenTTL time.Duration // 正式会话刷新令牌有效期，默认 30d：PERM_SESSION_TOKEN_TTL
 	CodeSendInterval    time.Duration // 邮箱/QQ 验证码最小发送间隔，默认 1m：CODE_SEND_INTERVAL
 
-	// OAuth 相关 TTL 预留给尚未实现的 OAuth 应用授权流程。
 	OAuthAccessTokenTTL    time.Duration // 默认 30m：OAUTH_ACCESS_TOKEN_TTL
 	OAuthRefreshTokenTTL   time.Duration // 默认 30d：OAUTH_REFRESH_TOKEN_TTL
 	OAuthCodeTTL           time.Duration // 默认 60s：OAUTH_CODE_TTL
@@ -82,7 +81,7 @@ func LoadConfig() error {
 	cfg.SMTP.Host = env("SMTP_HOST", "mail.fdfz.top")
 	cfg.SMTP.Port = env("SMTP_PORT", "587")
 	cfg.SMTP.From = env("SMTP_FROM", "FDFZ Bot <noreply@fdfz.top>")
-	cfg.SMTP.Username = env("SMTP_USERNAME", "<noreply@fdfz.top>")
+	cfg.SMTP.Username = env("SMTP_USERNAME", "noreply@fdfz.top")
 	cfg.BypassCaptcha = !IsProd && env("BYPASS_CAPTCHA", "false") == "true"
 	cfg.SharedDir = env("SHARED_DIR", "./shared")
 	cfg.AuthFrontendURL = env("AUTH_FRONTEND_URL", "https://auth.fdfz.top")
@@ -94,6 +93,24 @@ func LoadConfig() error {
 
 	if cfg.StepupTokenTTL = envDur("STEPUP_TOKEN_TTL", 5*time.Minute); cfg.StepupTokenTTL <= 0 {
 		return fmt.Errorf("stepup token ttl must be positive")
+	}
+
+	// 其余时长配置同样必须为正数：负数/零会让令牌立即过期、验证码发送冷却失效或 challenge 立即过期。
+	for name, d := range map[string]time.Duration{
+		"ALTCHA_TIMEOUT":            cfg.AltchaTimeout,
+		"ACCESS_TOKEN_TTL":          cfg.AccessTokenTTL,
+		"TEMP_SESSION_TOKEN_TTL":    cfg.TempSessionTokenTTL,
+		"PERM_SESSION_TOKEN_TTL":    cfg.PermSessionTokenTTL,
+		"CODE_SEND_INTERVAL":        cfg.CodeSendInterval,
+		"OAUTH_ACCESS_TOKEN_TTL":    cfg.OAuthAccessTokenTTL,
+		"OAUTH_REFRESH_TOKEN_TTL":   cfg.OAuthRefreshTokenTTL,
+		"OAUTH_CODE_TTL":            cfg.OAuthCodeTTL,
+		"OAUTH_DEVICE_CODE_TTL":     cfg.OAuthDeviceCodeTTL,
+		"OAUTH_CONSENT_REQUEST_TTL": cfg.OAuthConsentRequestTTL,
+	} {
+		if d <= 0 {
+			return fmt.Errorf("load env: %s must be positive", name)
+		}
 	}
 
 	// 必填的敏感配置：密钥缺失时直接启动失败，避免以不安全默认值运行。

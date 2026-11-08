@@ -50,8 +50,10 @@ func resetPasswordEmailInitHandler(c *gin.Context) *errs.Error {
 	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
+	if err := handling.ValidateEmail(req.Email); err != nil {
+		return err
+	}
 
-	// 存疑：这里未校验邮箱格式，非法输入会走「账号不存在」分支并静默成功。
 	usr, err := user.GetUserByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		return err
@@ -109,8 +111,10 @@ func resetPasswordQQInitHandler(c *gin.Context) *errs.Error {
 	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
+	if err := handling.ValidateQQ(req.QQ); err != nil {
+		return err
+	}
 
-	// 存疑：这里未校验 QQ 号格式，非法输入会走「账号不存在」分支并静默成功。
 	usr, err := user.GetUserByQQ(c.Request.Context(), req.QQ)
 	if err != nil {
 		return err

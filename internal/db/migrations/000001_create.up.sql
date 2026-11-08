@@ -287,6 +287,9 @@ CREATE INDEX idx_register_requests_reviewer_user_id
 CREATE UNIQUE INDEX uq_register_requests_school_student_num_pending
     ON register_requests (school, student_num)
     WHERE status = 'pending' AND type = 'student';
+CREATE UNIQUE INDEX uq_register_requests_username_pending
+    ON register_requests (lower(username))
+    WHERE status = 'pending';
 
 -- =============================================
 -- 应用 oauth_apps

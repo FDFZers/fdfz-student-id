@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"mime"
+	"net/mail"
 	"net/smtp"
 	"strings"
 	"time"
@@ -17,6 +18,16 @@ import (
 //
 //go:embed templates/*.html
 var fs embed.FS
+
+// envelopeFrom 从 SMTP_FROM 中提取信封发件人地址。
+// SMTP 的 MAIL FROM 只接受裸地址（RFC 5321），而 SMTP_FROM 允许带显示名
+// （如 "FDFZ Bot <noreply@fdfz.top>"），直接把显示名交给 smtp.SendMail 会被服务器以语法错误拒绝。
+func envelopeFrom(from string) string {
+	if addr, err := mail.ParseAddress(from); err == nil {
+		return addr.Address
+	}
+	return from
+}
 
 // send 组装 MIME 邮件并通过 SMTP_* 配置发送。
 // 主题按 RFC 2047 编码，正文为 HTML；发送失败时返回底层错误。
@@ -35,7 +46,7 @@ func send(to, subject, htmlBody string) error {
 	msg.WriteString("\r\n")
 	msg.WriteString(htmlBody)
 
-	return smtp.SendMail(cfg.C.SMTP.Host+":"+cfg.C.SMTP.Port, a, cfg.C.SMTP.From, []string{to}, []byte(msg.String()))
+	return smtp.SendMail(cfg.C.SMTP.Host+":"+cfg.C.SMTP.Port, a, envelopeFrom(cfg.C.SMTP.From), []string{to}, []byte(msg.String()))
 }
 
 // SendCode 按鉴权会话类型选择文案，渲染验证码模板并发送。
