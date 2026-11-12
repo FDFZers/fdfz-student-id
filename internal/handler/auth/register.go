@@ -84,7 +84,6 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 	if err := handling.ValidateUsername(req.Username); err != nil {
 		return err
 	}
-	// 昵称可留空：留空或与用户名相同时不保存（见下方 RegisterRequest 组装），此时跳过格式校验。
 	if req.Nickname != "" && req.Nickname != req.Username {
 		if err := handling.ValidateNickname(req.Nickname); err != nil {
 			return err
@@ -102,7 +101,7 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 	if err := handling.ValidateUserType(req.Type); err != nil {
 		return err
 	}
-	// 佐证图片类型检测：以服务端检测到的 MIME 为准，忽略客户端文件名中的扩展名
+	// 以服务端检测到的 MIME 为准，忽略客户端文件名中的扩展名
 	mimeType, err := handling.DetectMIMEType(fileHeader, map[string]struct{}{
 		"image/jpeg": {},
 		"image/png":  {},

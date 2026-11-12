@@ -38,8 +38,7 @@ var emailBlockedDomains = map[string]struct{}{
 	"fdfz.top": {},
 }
 
-// containsNUL 判断字符串是否包含 NUL（0x00）字节。
-// PostgreSQL 的 text 类型无法存储 NUL，若不在校验阶段拒绝，写入时会变成 500 内部错误。
+// containsNUL 判断字符串是否包含 NUL 字节；PostgreSQL 的 text 无法存储 NUL，需提前拒绝。
 func containsNUL(s string) bool {
 	return strings.IndexByte(s, 0) >= 0
 }
@@ -110,16 +109,12 @@ func ValidateEmail(email string) *errs.Error {
 		return errs.BadRequestError().AppendDetails("邮箱格式错误")
 	}
 
-	// 正则通过后再检查域名黑名单：先解析出真实地址，再取最后一个 '@' 之后的域名。
-	// 注意：不能简单按第一个 '@' 分割，带引号的 local-part 允许包含 '@'，否则可用
-	// `"a@b"@fdfz.top` 之类写法绕过黑名单；显示名同理不能参与域名判断。
+	// 取解析后地址最后一个 '@' 之后的域名：带引号的 local-part 可包含 '@'。
 	address := email
 	if parsed, err := mail.ParseAddress(email); err == nil {
 		address = parsed.Address
 	}
-	// 解析失败时用 email 原文兜底，仍按最后一个 '@' 取域名
 	if at := strings.LastIndexByte(address, '@'); at >= 0 {
-		// 域名统一处理：小写、去空白、去掉 FQDN 末尾的点，再与黑名单（含子域名后缀）比较
 		domain := strings.ToLower(strings.TrimSpace(address[at+1:]))
 		domain = strings.TrimSuffix(domain, ".")
 		for blocked := range emailBlockedDomains {
@@ -158,9 +153,7 @@ func ValidatePassword(password string) *errs.Error {
 	return nil
 }
 
-// ValidateMIMEType 读取文件头前 512 字节检测 MIME 类型并校验白名单，仅返回错误。
-// 注意：检测会打开并读取上传文件，调用后文件指针不可复用；需要按 MIME 映射扩展名/Content-Type 时
-// 使用 DetectMIMEType（见 mime.go）。
+// ValidateMIMEType 校验 MIME 类型白名单，仅返回错误；检测会消耗文件读取偏移，调用后不可复用。
 func ValidateMIMEType(fileHeader *multipart.FileHeader, allowedTypes map[string]struct{}) *errs.Error {
 	_, err := DetectMIMEType(fileHeader, allowedTypes)
 	return err

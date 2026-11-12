@@ -12,7 +12,7 @@ import (
 )
 
 // searchCfg 注册申请搜索配置：可搜索字段、可排序字段、标签（状态/用户类型/学校）与返回列。
-// 注意：Columns 不包含 password（密码哈希），模型的 Password 字段保持零值，不读取也不对外返回。
+// Columns 不含 password（密码哈希），不读取也不对外返回。
 var searchCfg = search.SearchConfig{
 	Table:             "register_requests",
 	Item:              "注册请求",
@@ -53,8 +53,6 @@ func SearchQueryHandler(c *gin.Context) *errs.Error {
 	if err != nil {
 		return err
 	}
-
-	// 逐条构造对外字段；password 不在查询列中
 
 	filtered := make([]*gin.H, 0, len(requests.Data))
 	for _, request := range requests.Data {

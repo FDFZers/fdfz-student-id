@@ -96,8 +96,6 @@ func (r *Reloader) ReloadNow(ctx context.Context) *errs.Error {
 	defer r.mu.Unlock()
 
 	if err != nil {
-		// 加载失败时保留 Pending：等待中的变更尚未生效，只有在后续重载成功后才会被清除，
-		// 否则状态接口会误报「没有待处理变更」。
 		r.status.LastError = reloadErrorText(err)
 		slog.Warn("Failed to reload permission catalog", "error", r.status.LastError)
 		return err
@@ -170,8 +168,7 @@ func (r *Reloader) loop(ctx context.Context) {
 			loadErr := r.ReloadNow(reloadCtx)
 			cancel()
 			if loadErr != nil {
-				// 加载失败说明等待中的变更尚未生效：重新投递通知，在节流间隔后自动重试，
-				// 避免一次瞬时数据库错误导致目录永久停留在旧快照。
+				// 加载失败时重新投递通知，在节流间隔后重试。
 				r.Notify()
 			}
 		}

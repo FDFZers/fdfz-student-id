@@ -135,25 +135,19 @@ func GetUserByEmail(ctx context.Context, email string) (*model.User, *errs.Error
 // 设置邮箱
 // ---------------------------------------------------------------------------
 
-// softDeleteUserEmailSQL 软删除该用户当前生效的邮箱绑定（换绑前置步骤）。
 const softDeleteUserEmailSQL = `
 UPDATE user_emails
 SET deleted_at = now()
 WHERE user_id = $1 AND deleted_at IS NULL
 `
 
-// insertUserEmailSQL 插入新的邮箱绑定记录。
 const insertUserEmailSQL = `
 INSERT INTO user_emails (user_id, email)
 VALUES ($1, $2)
 RETURNING id, created_at
 `
 
-// SetUserEmail 绑定邮箱：先软删除该用户原邮箱，再插入新记录，并回填 id 与创建时间。
-// 注意：两步必须在同一事务内执行；不能写成「先 UPDATE 再 INSERT」的单条 CTE 语句——
-// 数据修改 CTE 之间看不到彼此在同一语句内的修改，INSERT 会撞上部分唯一索引
-// uq_user_emails_user_id_active，导致换绑邮箱必定失败。
-// 唯一索引保证同一邮箱只能被一个用户绑定，冲突时由 CreatePGError 转为 409。
+// SetUserEmail 绑定邮箱：两步必须在同一事务内，否则会撞上部分唯一索引导致换绑失败。
 func SetUserEmail(ctx context.Context, e *model.UserEmail) *errs.Error {
 	tx, txErr := db.R.Begin(ctx)
 	if txErr != nil {
@@ -223,24 +217,19 @@ func GetUserQQ(ctx context.Context, userID int64) (*model.UserQQ, *errs.Error) {
 // 设置 QQ
 // ---------------------------------------------------------------------------
 
-// softDeleteUserQQSQL 软删除该用户当前生效的 QQ 绑定（换绑前置步骤）。
 const softDeleteUserQQSQL = `
 UPDATE user_qqs
 SET deleted_at = now()
 WHERE user_id = $1 AND deleted_at IS NULL
 `
 
-// insertUserQQSQL 插入新的 QQ 绑定记录。
 const insertUserQQSQL = `
 INSERT INTO user_qqs (user_id, qq)
 VALUES ($1, $2)
 RETURNING id, created_at
 `
 
-// SetUserQQ 绑定 QQ：先软删除该用户原 QQ，再插入新记录，并回填 id 与创建时间。
-// 注意：两步必须在同一事务内执行；不能写成「先 UPDATE 再 INSERT」的单条 CTE 语句，
-// 否则换绑 QQ 会撞上部分唯一索引 uq_user_qqs_user_id_active 而必定失败。
-// 唯一索引保证同一 QQ 只能被一个用户绑定，冲突时由 CreatePGError 转为 409。
+// SetUserQQ 绑定 QQ：两步必须在同一事务内，否则会撞上部分唯一索引导致换绑失败。
 func SetUserQQ(ctx context.Context, e *model.UserQQ) *errs.Error {
 	tx, txErr := db.R.Begin(ctx)
 	if txErr != nil {

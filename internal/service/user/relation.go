@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// FollowCacheDuration 是关注关系缓存的时长。
 const (
 	FollowCacheDuration = 1 * time.Minute
 )
@@ -24,8 +23,6 @@ func FollowRelationshipCacheKey(viewerID, targetID int64) string {
 	return fmt.Sprintf("student_id:user:follow:rel:%d:%d", viewerID, targetID)
 }
 
-// invalidateFollowCache 关注/取关后失效受影响的缓存：双向关系都会变化。
-// 注意：粉丝数/关注数/好友数改为实时 SQL 查询，不再有计数缓存需要失效。
 func invalidateFollowCache(ctx context.Context, followerID, followingID int64) {
 	db.R.Del(ctx,
 		FollowRelationshipCacheKey(followerID, followingID),
@@ -225,7 +222,6 @@ JOIN users u ON u.id = f.follower_id
 WHERE f.following_id = $1 AND u.deleted_at IS NULL
 `
 
-// CountFollowers 实时统计用户粉丝数（SQL 与列表接口共用同一条件），不使用缓存。
 func CountFollowers(ctx context.Context, userID int64) (int64, *errs.Error) {
 	var count int64
 	if err := db.R.QueryRow(ctx, countFollowersSQL, userID).Scan(&count); err != nil {
@@ -262,7 +258,6 @@ JOIN users u ON u.id = f.following_id
 WHERE f.follower_id = $1 AND u.deleted_at IS NULL
 `
 
-// CountFollowing 实时统计用户关注数（SQL 与列表接口共用同一条件），不使用缓存。
 func CountFollowing(ctx context.Context, userID int64) (int64, *errs.Error) {
 	var count int64
 	if err := db.R.QueryRow(ctx, countFollowingSQL, userID).Scan(&count); err != nil {
@@ -301,7 +296,6 @@ JOIN users u ON u.id = f.following_id
 WHERE f.follower_id = $1 AND u.deleted_at IS NULL
 `
 
-// CountFriends 实时统计用户好友数（SQL 与列表接口共用同一条件），不使用缓存。
 func CountFriends(ctx context.Context, userID int64) (int64, *errs.Error) {
 	var count int64
 	if err := db.R.QueryRow(ctx, countFriendsSQL, userID).Scan(&count); err != nil {

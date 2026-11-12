@@ -9,9 +9,7 @@ import (
 	"strings"
 )
 
-// isWritePerm 判断权限是否属于「管理侧」写权限：student_id 应用下 users.* / permissions.*
-// 命名空间中的写/改/删类权限（普通用户权限 user.*、只读管理权限 users.*.read|list 以及第三方应用权限不算）。
-// 用于封禁/删除前的前置保护：避免管理员之间互相封禁/删除导致管理面瘫痪。
+// isWritePerm 判断权限是否属于管理侧写权限：student_id 应用下 users.* / permissions.* 的写/改/删权限。
 func isWritePerm(permission string) bool {
 	value, ok := strings.CutPrefix(permission, "student_id:")
 	if !ok {
@@ -25,10 +23,8 @@ func isWritePerm(permission string) bool {
 		strings.Contains(value, ".delete")
 }
 
-// UserHasWritePerm 判断用户当前生效的权限中是否包含管理侧写权限（users.* 或 permissions.* 的
-// 写/改/删权限）。用于封禁/删除等管理操作的前置校验：不允许对拥有管理权限的账号执行，避免管理员互相
-// 封禁/删除导致管理面瘫痪（权限模型当前是扁平的，没有显式的角色层级）。
-// 注意：不要用 ".write" 子串判断——普通用户权限（如 user.relation.write）和第三方应用权限也会命中。
+// UserHasWritePerm 判断用户是否拥有管理侧写权限，用于阻止管理员互相封禁/删除。
+// 不能按 ".write" 子串判断：普通用户权限和第三方应用权限也会命中。
 func UserHasWritePerm(ctx context.Context, userID int64) (bool, *errs.Error) {
 	perms, err := userperm.ListUserEffectivePermissions(ctx, userID)
 	if err != nil {

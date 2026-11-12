@@ -148,7 +148,6 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 
-	// 用户可能在初始化与完成登录之间被删除：按凭据错误返回，避免为已删除账号创建会话
 	if usr, err := user.GetUserByID(c.Request.Context(), authSession.UserID); err != nil {
 		return err
 	} else if usr == nil {
@@ -242,7 +241,6 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	if err != nil {
 		return err.AppendDetails("会话获取失败")
 	}
-	// 会话不存在/已过期/已撤销时 service 返回 nil，应告知客户端重新登录。
 	if session == nil {
 		return errs.InvalidTokenError().AppendDetails("会话不存在或已过期")
 	}

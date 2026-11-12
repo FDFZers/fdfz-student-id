@@ -75,7 +75,7 @@ LIMIT $2 OFFSET $3
 `
 
 // countRolesVisibleToAppSQL 统计对某应用可见的用户组数量（本应用 ∪ 其他应用的公开组）。
-// 其他应用的公开组仅当来源应用 active 且未软删除时可见：应用删除/停用后其用户组统一按 private 处理。
+// 其他应用的公开组仅在来源应用 active 且未软删除时可见。
 const countRolesVisibleToAppSQL = `
 SELECT count(*)
 FROM roles r
@@ -84,7 +84,6 @@ WHERE r.app_id = $1 OR (r.is_public AND a.status = 'active' AND a.deleted_at IS 
 `
 
 // listRolesVisibleToAppSQL 分页列出对某应用可见的用户组，本应用的组排在前面。
-// 其他应用的公开组仅当来源应用 active 且未软删除时可见：应用删除/停用后其用户组统一按 private 处理。
 const listRolesVisibleToAppSQL = `
 SELECT r.id, r.app_id, r.name, r.note, r.is_public, r.created_at, r.updated_at
 FROM roles r

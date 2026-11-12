@@ -44,8 +44,6 @@ func check(ctx context.Context) HealthStatus {
 
 	allUp := true
 
-	// 先取一次全局仓库快照：db.R 本身为 nil 时（例如尚未初始化就被探针访问）不能直接解引用，
-	// 否则会 panic 导致整个进程崩溃，而不是返回 503。
 	repo := db.R
 
 	// PostgreSQL

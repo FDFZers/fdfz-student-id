@@ -95,7 +95,6 @@ func LoadConfig() error {
 		return fmt.Errorf("stepup token ttl must be positive")
 	}
 
-	// 其余时长配置同样必须为正数：负数/零会让令牌立即过期、验证码发送冷却失效或 challenge 立即过期。
 	for name, d := range map[string]time.Duration{
 		"ALTCHA_TIMEOUT":            cfg.AltchaTimeout,
 		"ACCESS_TOKEN_TTL":          cfg.AccessTokenTTL,

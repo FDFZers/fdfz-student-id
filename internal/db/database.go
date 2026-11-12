@@ -25,8 +25,8 @@ var R *Repo
 
 // GetRedisFound 读取并反序列化 Redis 缓存，额外返回是否命中缓存。
 // 命中空值标记时返回 (nil, true, nil)，用于区分「未缓存」与「缓存了空结果」。
-// JSON null 同样视为缓存空结果（可能是历史写入的 nil 值）。
-// 注意：缓存数据损坏时删除脏键并按未命中处理，让调用方回源查询自愈，避免单条脏数据持续返回 500。
+// JSON null 反序列化会得到零值，同样按缓存空结果处理。
+// 缓存数据损坏时删除脏键并按未命中处理，由调用方回源查询。
 func GetRedisFound[T any](
 	ctx context.Context,
 	key string,
@@ -38,7 +38,6 @@ func GetRedisFound[T any](
 		if res == RedisEmptyMark {
 			return nil, true, nil
 		}
-		// JSON null 不是有效数据，按缓存空结果处理；否则 unmarshal 会成功但得到零值（伪缓存命中）
 		if res == "null" {
 			return nil, true, nil
 		}
@@ -47,7 +46,6 @@ func GetRedisFound[T any](
 		if err := json.Unmarshal([]byte(res), &data); err == nil {
 			return &data, true, nil
 		} else {
-			// 缓存数据损坏：删除脏键并回源查询，避免接口在 TTL 到期前持续 500
 			slog.Warn("Failed to parse cached data, fallback to source", "key", key, "error", err)
 			R.Del(ctx, key)
 			return nil, false, nil

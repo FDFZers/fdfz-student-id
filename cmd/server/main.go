@@ -140,7 +140,7 @@ func main() {
 	srv := &http.Server{
 		Addr:    ":11400",
 		Handler: r,
-		// 限制读取请求头的耗时，避免 Slowloris 类慢速连接长期占用连接数。
+		// 限制读取请求头耗时，防御 Slowloris 慢速连接。
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

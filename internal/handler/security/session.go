@@ -118,8 +118,7 @@ func revokeSessionsHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 撤销自己的会话必须使用提权令牌（提权令牌不携带权限，无法做权限判定）；
-	// 撤销他人的会话需要 users.session.write 权限。
+	// 撤销自己的会话需提权令牌（提权令牌不携带权限），撤销他人需 users.session.write。
 	var allowed bool
 	if selfID == claims.UserID {
 		allowed = claims.TokenType == model.TokenTypeStepup
@@ -163,8 +162,7 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 撤销自己的会话必须使用提权令牌（提权令牌不携带权限，无法做权限判定）；
-	// 撤销他人的会话需要 users.session.write 权限。
+	// 撤销自己的会话需提权令牌（提权令牌不携带权限），撤销他人需 users.session.write。
 	var allowed bool
 	if selfID == claims.UserID {
 		allowed = claims.TokenType == model.TokenTypeStepup
@@ -192,7 +190,6 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 	if err != nil {
 		return err
 	}
-	// service 查询不存在的会话返回 (nil, nil)，由 handler 决定 404。
 	if session == nil {
 		return errs.NotFoundError().AppendDetails("会话不存在")
 	}

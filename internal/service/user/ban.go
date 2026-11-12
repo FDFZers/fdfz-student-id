@@ -19,23 +19,19 @@ func UserBanCacheKey(userID int64) string {
 	return fmt.Sprintf("student_id:user:ban:%d", userID)
 }
 
-// disableActiveUserBansSQL 把该用户当前生效的封禁置为失效（封禁历史保留，不物理删除）。
 const disableActiveUserBansSQL = `
 UPDATE user_bans
 SET enabled = false
 WHERE user_id = $1 AND enabled = true
 `
 
-// insertUserBanSQL 插入一条新的生效封禁记录；历史上的封禁记录保持 enabled=false。
 const insertUserBanSQL = `
 INSERT INTO user_bans (user_id, reason, end_time, enabled)
 VALUES ($1, $2, $3, true)
 RETURNING id, created_at
 `
 
-// BanUser 封禁用户：在事务内先禁用旧的生效封禁、再插入新的封禁记录，提交后失效封禁缓存；
-// end_time 为空表示永久封禁。将旧记录禁用而非覆盖，可保留完整封禁历史。
-// 注意：不校验用户是否存在，调用方需先确认目标用户存在；重复封禁会生成新的历史记录。
+// BanUser 不校验用户是否存在，调用方需先确认；end_time 为空表示永久封禁。
 func BanUser(ctx context.Context, b *model.UserBan) *errs.Error {
 	tx, txErr := db.R.Begin(ctx)
 	if txErr != nil {

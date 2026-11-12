@@ -72,7 +72,6 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 
 // filterProfiles 按调用方权限与目标用户的 visibilities 过滤用户资料，供资料、搜索与关系列表接口复用。
 // real_name 采用字段级可见性：他人资料需 real_name.allowed 权限，再按 public/friends/private 判定是否返回。
-// 注意：只有 friends 可见性需要查询调用方与目标用户的关注关系，public/private 分支不再产生无谓查询。
 func filterProfiles(ctx context.Context, claims *model.RegisteredTokenClaims, targetUsers ...*model.User) ([]gin.H, *errs.Error) {
 	if claims == nil {
 		return nil, errs.InvalidTokenError().AppendDetails("令牌格式错误").Seal()
@@ -99,7 +98,7 @@ func filterProfiles(ctx context.Context, claims *model.RegisteredTokenClaims, ta
 
 	results := make([]gin.H, 0, len(targetUsers))
 	for _, targetUser := range targetUsers {
-		// 已注销用户：非管理员只返回最小化标识，不暴露任何可能残留的字段
+		// 已注销用户仅向非管理员返回最小化标识。
 		if targetUser.DeletedAt.Valid && !isAdmin {
 			results = append(results, gin.H{
 				"username": targetUser.Username,
@@ -112,7 +111,7 @@ func filterProfiles(ctx context.Context, claims *model.RegisteredTokenClaims, ta
 
 		var basic, identity, realName, about, visibilities bool
 		if isSelf {
-			// 管理自己资料时，self.* 与 users.* 权限取并集（管理员账号往往只被授予 users.*）
+			// 管理自己时 self.* 与 users.* 权限取并集，管理员通常只被授予 users.*。
 			basic = selfBasic || otherBasic
 			identity = selfIdentity || otherIdentity
 			realName = selfRealName || otherRealName || otherRealNameAllowed
@@ -125,7 +124,6 @@ func filterProfiles(ctx context.Context, claims *model.RegisteredTokenClaims, ta
 			} else if !otherRealNameAllowed {
 				realName = false
 			} else {
-				// 先按可见性分支，仅 friends 才需要查询关注关系（消除无谓 N+1）
 				switch targetUser.Visibilities.RealName {
 				case model.VisibilityPublic:
 					realName = true

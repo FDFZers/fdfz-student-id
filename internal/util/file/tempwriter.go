@@ -58,7 +58,6 @@ func NewTempWriter(dstPath string, sha512Sum *string) (*TempWriter, error) {
 	}, nil
 }
 
-// removeTemp 删除临时文件；清理失败只记录日志，不覆盖调用方要返回的原始错误。
 func (w *TempWriter) removeTemp() {
 	if err := os.Remove(w.tmpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("Failed to remove temp file", "error", err)
@@ -116,7 +115,6 @@ func (w *TempWriter) Commit() error {
 		return fmt.Errorf("%w: expected %s, got %s", ErrSHA512Mismatch, *w.expectedHash, w.actualHash)
 	}
 
-	// 落盘并关闭；失败时关闭并清理临时文件，避免 fd 与临时文件泄漏
 	if err := w.tmpFile.Sync(); err != nil {
 		if closeErr := w.tmpFile.Close(); closeErr != nil {
 			slog.Warn("Failed to close temp file", "error", closeErr)
@@ -132,7 +130,6 @@ func (w *TempWriter) Commit() error {
 	}
 	w.closed = true
 
-	// 移动到目标路径；失败时清理临时文件
 	if err := MoveFile(w.tmpPath, w.dstPath); err != nil {
 		w.removeTemp()
 		return fmt.Errorf("move temp file: %w", err)

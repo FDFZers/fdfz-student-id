@@ -147,7 +147,7 @@ func deleteAppPermissionHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("权限定义不存在")
 	}
 
-	// 核心权限管理定义不允许删除：删除后该权限无法再被授予，会导致权限管理自锁（只能改库恢复）。
+	// 核心权限管理定义删除后无法再授予，会导致权限管理自锁。
 	if app.ID == 1 && strings.HasPrefix(def.Value, "permissions.") {
 		return errs.IllegalStateError().AppendDetails("核心权限定义不允许删除").Seal()
 	}

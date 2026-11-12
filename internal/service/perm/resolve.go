@@ -14,9 +14,7 @@ func ResolvePatterns(patterns []string) []string {
 	// out: 已展开的确切权限值（去重）
 	out := make(map[string]struct{})
 
-	// visited 在本次解析内跨 pattern 共享：每个权限定义只沿继承图展开一次。
-	// 权限目录加载时已校验继承图无环（见 catalog.go 的 validateCycleImplies），因此不需要
-	// 路径栈做环检测；全局去重把复杂度从指数级（菱形继承）降为 O(V+E)。
+	// 权限目录加载时已校验继承图无环，无需路径栈；visited 跨 pattern 共享去重。
 	visited := make(map[int64]struct{})
 
 	var visit func(info *PermissionInfo)

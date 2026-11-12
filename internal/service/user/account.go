@@ -21,20 +21,18 @@ const AccountDeletionDelay = 7 * 24 * time.Hour
 // systemAdminUserID 是用户被删除后其 OAuth 应用的接收者（系统管理员）用户 ID，默认 1。
 const systemAdminUserID int64 = 1
 
-// followPair 是一条关注关系的两端用户 ID；注销会物理删除关系，删除前先记录用于失效缓存。
+// followPair 是一条关注关系的两端用户 ID。
 type followPair struct {
 	FollowerID  int64
 	FollowingID int64
 }
 
-// getSingleUserFollowPairsSQL 查询与指定用户相关的关注关系（作为关注者或被关注者）。
 const getSingleUserFollowPairsSQL = `
 SELECT follower_id, following_id
 FROM user_follows
 WHERE follower_id = $1 OR following_id = $1
 `
 
-// getDueUserFollowPairsSQL 查询与所有到期注销用户相关的关注关系，用于批量注销后失效缓存。
 const getDueUserFollowPairsSQL = `
 SELECT follower_id, following_id
 FROM user_follows
@@ -48,7 +46,6 @@ WHERE follower_id IN (
     )
 `
 
-// queryFollowPairs 执行关系对查询，返回与注销用户相关的关注关系。
 func queryFollowPairs(ctx context.Context, sql string, args ...any) ([]followPair, *errs.Error) {
 	rows, err := db.R.Query(ctx, sql, args...)
 	if err != nil {
@@ -65,8 +62,6 @@ func queryFollowPairs(ctx context.Context, sql string, args ...any) ([]followPai
 	return pairs, nil
 }
 
-// invalidateDeletedUserFollowCaches 失效注销删除了的关系缓存（双向）。
-// 注意：计数缓存已改为实时 SQL 查询，这里只需处理关系缓存。
 func invalidateDeletedUserFollowCaches(ctx context.Context, pairs []followPair) {
 	if len(pairs) == 0 {
 		return
@@ -78,7 +73,6 @@ func invalidateDeletedUserFollowCaches(ctx context.Context, pairs []followPair) 
 			FollowRelationshipCacheKey(p.FollowingID, p.FollowerID),
 		)
 	}
-	// 批量注销可能产生大量 key，按固定批大小删除，避免单次 Redis 命令参数过多。
 	const batchSize = 1000
 	for len(keys) > 0 {
 		n := batchSize
@@ -90,8 +84,7 @@ func invalidateDeletedUserFollowCaches(ctx context.Context, pairs []followPair) 
 	}
 }
 
-// deleteUserProfileImages 尽力删除已注销用户的头像与背景图文件（slug 固定，文件不存在视为已删除）。
-// 注意：应放在账号数据清理成功之后调用；filestore 暂时不可用时只记录告警，不回滚注销流程。
+// deleteUserProfileImages 尽力删除已注销用户的头像与背景图，仅在账号清理成功后调用。
 func deleteUserProfileImages(ctx context.Context, userID int64) {
 	for _, slug := range []string{
 		fmt.Sprintf("/student_id/avatars/%d", userID),
@@ -181,10 +174,8 @@ func CancelPendingAccountDeletion(ctx context.Context, userID int64) (bool, *err
 // 完成到期的注销（单用户）
 // ---------------------------------------------------------------------------
 
-// finalizeOverdueAccountDeletionSQL 在单条语句中原子完成到期注销：软删除用户并清空个人身份信息、
-// 物理删除关注关系、软删除邮箱/QQ、删除密码/TOTP/用户组/授权、撤销会话、删除 OAuth 授权，
-// 并把其 OAuth 应用转归系统管理员。
-// 注意：student_num 需按用户类型清空——学生留空串（满足 NOT NULL + CHECK），教师必须置 NULL。
+// finalizeOverdueAccountDeletionSQL 在单条语句中原子完成到期注销及关联数据清理。
+// student_num 需符合 CHECK：学生留空串、教师置 NULL。
 const finalizeOverdueAccountDeletionSQL = `
 WITH due AS (
     UPDATE users
@@ -242,10 +233,8 @@ SELECT id, username FROM due
 `
 
 // FinalizeOverdueAccountDeletion 完成指定用户已到期的注销（登录时调用），返回是否执行了清理。
-// 注意：只有 deletion_scheduled_at <= now() 时才会生效；清理后用户资料仅保留账号标识，不可再登录。
+// 清理后仅保留账号标识，不可再登录。
 func FinalizeOverdueAccountDeletion(ctx context.Context, userID int64) (bool, *errs.Error) {
-	// 注销会物理删除关注关系，先记录受影响的关系对用于删除后失效缓存
-
 	pairs, pairErr := queryFollowPairs(ctx, getSingleUserFollowPairsSQL, userID)
 	if pairErr != nil {
 		return false, pairErr
@@ -339,8 +328,6 @@ SELECT id, username FROM due
 // FinalizeDueAccountDeletions 批量完成所有到期注销，返回清理的用户数；由定时任务每 10 分钟调用。
 // 注意：逐行清理对应用户的缓存再返回，失败时返回已清理的数量与错误。
 func FinalizeDueAccountDeletions(ctx context.Context) (int64, *errs.Error) {
-	// 注销会物理删除关注关系，先记录受影响的关系对用于删除后失效缓存
-
 	pairs, pairErr := queryFollowPairs(ctx, getDueUserFollowPairsSQL)
 	if pairErr != nil {
 		return 0, pairErr
@@ -439,11 +426,8 @@ apps AS (
 SELECT id, username FROM deleted
 `
 
-// DeleteUser 管理员立即删除用户：软删除用户并清空身份信息、物理删除关注关系、清理关联凭据/会话，
-// 其 OAuth 应用转归系统管理员。用户不存在时返回 404；成功后清理用户信息、用户名映射与用户名占用缓存。
+// DeleteUser 管理员立即删除用户，其 OAuth 应用转归系统管理员；用户不存在时返回 404。
 func DeleteUser(ctx context.Context, userID int64) *errs.Error {
-	// 注销会物理删除关注关系，先记录受影响的关系对用于删除后失效缓存
-
 	pairs, pairErr := queryFollowPairs(ctx, getSingleUserFollowPairsSQL, userID)
 	if pairErr != nil {
 		return pairErr

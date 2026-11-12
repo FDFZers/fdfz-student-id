@@ -21,22 +21,14 @@ const (
 	DefaultLimit = 20  // 未指定 limit 时的默认分页大小
 	MaxLimit     = 500 // 单次查询允许的最大分页大小，超过会被截断
 
-	// MaxQueryLength 是所有匹配方法共用的关键词长度上限（按 rune 计）：过长的关键词会显著增加
-	// 数据库匹配开销，这里作为兜底限制。regex 直接交给数据库正则引擎执行，不能用 Go 的 regexp 预校验
-	// 语法，只能把数据库返回的 2201B 错误映射为 bad_request。
 	MaxQueryLength = 512
 
-	// MaxFuzzyWords 是 fuzzy 匹配允许的最大分词数量：每个词都会生成一个 AND 条件，
-	// 词数过多会放大 SQL 参数与匹配开销。
 	MaxFuzzyWords = 8
 
-	// pgInvalidRegularExpression 是 PostgreSQL 非法正则表达式的 SQLSTATE。
 	pgInvalidRegularExpression = "2201B"
 )
 
-// mapExecError 把搜索执行错误转换为 API 错误：正则表达式语法错误属于客户端输入问题，返回 400。
-// 注意：正则方言是 PostgreSQL ARE（支持反向引用、前瞻等 Go regexp 不支持的语法），
-// 因此不能用 Go 的 regexp 预校验，只能把数据库返回的 2201B 错误映射为 bad_request。
+// mapExecError 把搜索执行错误转换为 API 错误，其中正则表达式语法错误返回 400。
 func mapExecError(err error, item, log string) *errs.Error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgInvalidRegularExpression {
@@ -76,8 +68,7 @@ func GetInfo(cfg *SearchConfig) *SearchInfo {
 }
 
 // ExecSearch 执行搜索：先 COUNT 统计命中总数，再按分页查询数据并扫描为 T。
-// 注意：使用 Lax 变体按列名映射——Columns 未返回的 struct 字段保持零值
-// strict 变体会要求 struct 每个字段都有对应列而在运行期报错。
+// 数据列按 db tag 映射到 T；Columns 未包含的字段保持零值。
 func ExecSearch[T any](ctx context.Context, cfg *SearchConfig, req *SearchRequest) (*SearchResult[T], *errs.Error) {
 	query, err := BuildSearch(cfg, req)
 	if err != nil {
@@ -159,7 +150,6 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		if !ok {
 			return nil, errs.BadRequestError().AppendDetails("搜索字段不存在：" + id)
 		}
-		// 去重（保持首次出现顺序）：重复字段只会把 OR 条件放大，不改变语义
 		if _, duplicated := seenFields[id]; duplicated {
 			continue
 		}
@@ -170,11 +160,9 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 	var conditions []sq.Sqlizer
 	trimmed := strings.TrimSpace(req.Query)
 
-	// 关键词长度兜底限制：所有匹配方法共用（合法但过长的表达式同样拒绝，避免匹配开销失控）
 	if len([]rune(trimmed)) > MaxQueryLength {
 		return nil, errs.BadRequestError().AppendDetails("搜索表达式过长")
 	}
-	// fuzzy 分词数量上限：每个词都会生成一个 AND 条件，词数过多会放大 SQL 参数与匹配开销
 	if method == MatchMethodFuzzy && len(strings.Fields(trimmed)) > MaxFuzzyWords {
 		return nil, errs.BadRequestError().AppendDetails("搜索词过多")
 	}
@@ -229,7 +217,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		dataB = dataB.Where(where)
 	}
 
-	// 排序：显式排序字段优先；未指定时使用默认排序列（保证分页结果稳定可复现）
+	// 排序：显式排序字段优先；未指定时使用默认排序列。
 	switch {
 	case req.SortBy.Valid:
 		f, ok := sortableByID[req.SortBy.String]
@@ -252,7 +240,7 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 			return nil, errs.BadRequestError().AppendDetails("排序顺序不受支持：" + string(order))
 		}
 		dataB = dataB.OrderBy(fmt.Sprintf("%s %s", f.Column, dir))
-		// 次级排序：显式排序字段可能不唯一（如 created_at），追加默认排序列保证分页稳定
+		// 显式排序字段可能不唯一，追加默认排序列保证分页稳定。
 		if cfg.DefaultSortColumn != "" && cfg.DefaultSortColumn != f.Column {
 			dataB = dataB.OrderBy(cfg.DefaultSortColumn)
 		}

@@ -95,7 +95,7 @@ func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, 
 	if count <= 0 || count > maxHistoryCount {
 		count = defaultHistoryCount
 	}
-	// OneBot 11 的 user_id 是数字类型
+	// OneBot 11 的 user_id 是数字类型。
 	userID, err := strconv.ParseInt(qq, 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("qq: invalid qq number %q: %w", qq, err)

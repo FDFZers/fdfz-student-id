@@ -23,7 +23,7 @@ func getUserBanHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 先做权限判定，再检查目标是否存在：避免用 404/403 差异探测用户是否存在
+	// 先判权限再查存在性，避免用 404/403 差异探测用户是否存在。
 
 	var allowed bool
 	if targetID == claims.UserID {
@@ -63,8 +63,7 @@ type banUserReq struct {
 	EndTime null.Time `json:"end_time"`
 }
 
-// banUserHandler 封禁指定用户：校验原因与结束时间、确认目标用户存在且无写权限后写入封禁记录并记录审计日志。
-// 注意：不能封禁自己；对已封禁用户再次封禁会生成新的历史记录并禁用旧记录。
+// banUserHandler 封禁指定用户并记录审计日志；不能封禁自己或拥有写权限的账号。
 func banUserHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
@@ -91,8 +90,6 @@ func banUserHandler(c *gin.Context) *errs.Error {
 	if err := handling.EnsureUserExists(c, targetID); err != nil {
 		return err
 	}
-
-	// 不允许封禁仍拥有写权限的账号，避免管理面被互相封禁而瘫痪
 
 	hasWritePermission, err := handling.UserHasWritePerm(c.Request.Context(), targetID)
 	if err != nil {

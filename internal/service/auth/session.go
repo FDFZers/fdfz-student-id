@@ -74,7 +74,7 @@ WHERE session_token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
 `
 
 // GetSessionByUUID 按会话 uuid 查询用户会话（包含已过期与已撤销的记录）。
-// 记录不存在时返回 (nil, nil)，由调用方决定如何响应（通常转 404 或 401）。
+// 记录不存在时返回 (nil, nil)。
 func GetSessionByUUID(
 	ctx context.Context,
 	id uuid.UUID,
@@ -239,7 +239,7 @@ RETURNING session_token_hash
 `
 
 // RevokeSession 撤销指定会话（登出）。
-// 注意：会话已撤销或不存时视为成功，使登出保持幂等；只有数据库错误才返回错误。
+// 会话已撤销或不存在时视为成功，保证登出幂等。
 func RevokeSession(ctx context.Context, id uuid.UUID) *errs.Error {
 	var tokenHash string
 	err := db.R.QueryRow(ctx, revokeSessionSQL, id).Scan(&tokenHash)

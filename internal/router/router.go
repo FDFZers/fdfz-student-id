@@ -63,7 +63,7 @@ func InitRouter(r *gin.Engine) {
 	})
 
 	// 两组路由都先解析令牌；internal 组额外限制令牌类型，禁止 OAuth 令牌访问内部接口。
-	// 两组路由都先解析令牌并安装 1 MiB 默认请求体上限；上传类路由可用 LimitSize 重新设置更大上限。
+	// 默认请求体上限 1 MiB，上传类路由可用 LimitSize 覆盖。
 	v1 := r.Group("/api/v1", middleware.ParseToken(), middleware.DefaultLimitSize())
 	internal := r.Group("/api/internal", middleware.ParseToken(), middleware.DefaultLimitSize(), func(c *gin.Context) {
 		claims := handling.GetClaimsOrNil(c)

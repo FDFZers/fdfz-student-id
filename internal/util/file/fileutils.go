@@ -11,7 +11,7 @@ import (
 )
 
 // CopyFile 复制 src 到 dst：先写入同目录的临时文件，成功后再原子重命名，避免产生半成品 dst。
-// 注意：任一步失败都会清理临时文件并返回该步的原始错误；不保留源文件的权限位。
+// 任一步失败都会清理临时文件；不保留源文件的权限位。
 func CopyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
@@ -31,14 +31,11 @@ func CopyFile(src, dst string) error {
 	}
 	tmpOut := out.Name()
 
-	// removeTemp 删除临时文件；清理失败只记录日志，不覆盖原始错误。
 	removeTemp := func() {
 		if err := os.Remove(tmpOut); err != nil && !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("Failed to remove temp file", "error", err)
 		}
 	}
-	// abort 关闭并删除临时文件后返回原始错误。
-	// 注意：不能用同名变量接收 Close/Remove 的错误，否则复制失败会被静默吞掉（曾经的 bug）。
 	abort := func(op string, cause error) error {
 		if err := out.Close(); err != nil {
 			slog.Warn("Failed to close temp file", "error", err)

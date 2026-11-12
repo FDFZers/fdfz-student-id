@@ -19,9 +19,7 @@ import (
 //go:embed templates/*.html
 var fs embed.FS
 
-// envelopeFrom 从 SMTP_FROM 中提取信封发件人地址。
-// SMTP 的 MAIL FROM 只接受裸地址（RFC 5321），而 SMTP_FROM 允许带显示名
-// （如 "FDFZ Bot <noreply@fdfz.top>"），直接把显示名交给 smtp.SendMail 会被服务器以语法错误拒绝。
+// SMTP 的 MAIL FROM 只接受裸地址，SMTP_FROM 的显示名需先解析，否则会被服务器拒绝。
 func envelopeFrom(from string) string {
 	if addr, err := mail.ParseAddress(from); err == nil {
 		return addr.Address

@@ -24,7 +24,7 @@ var searchCfg = search.SearchConfig{
 	DefaultSortColumn: "id",
 }
 
-// removeSearchFields 返回移除指定 ID 后的字段副本；不修改入参切片，避免污染全局搜索配置。
+// removeSearchFields 返回过滤后的字段副本，不修改入参。
 func removeSearchFields(fields []search.Field, ids ...string) []search.Field {
 	removed := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -40,9 +40,7 @@ func removeSearchFields(fields []search.Field, ids ...string) []search.Field {
 	return result
 }
 
-// searchConfigForClaims 按调用方资料权限返回搜索配置副本：没有对应读权限的字段从关键词匹配与排序白名单中移除，
-// 使 COUNT 与数据查询都无法把不可读字段当作探测条件（搜索 oracle），也不影响其他请求使用的全局配置。
-// 注意：id 字段始终保留。
+// searchConfigForClaims 按资料读权限返回裁剪后的搜索配置副本，防止用搜索计数探测不可读字段。
 func searchConfigForClaims(claims *model.RegisteredTokenClaims) *search.SearchConfig {
 	cfg := searchCfg
 	if !perm.HasPermission(claims, perm.PermUsersProfileReadBasic) {
@@ -57,7 +55,6 @@ func searchConfigForClaims(claims *model.RegisteredTokenClaims) *search.SearchCo
 }
 
 // searchInfoHandler 返回用户搜索的字段、匹配方法、可排序字段与标签取值。
-// 注意：按调用方资料权限返回过滤后的元信息，与 searchQueryHandler 的可用字段保持一致。
 func searchInfoHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	c.JSON(http.StatusOK, search.GetInfo(searchConfigForClaims(claims)))

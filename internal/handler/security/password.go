@@ -53,7 +53,6 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("新密码不能与原密码相同")
 	}
 
-	// 校验原密码；service 查询不存在的密码记录返回 (nil, nil)，由 handler 决定 404。
 	current, err := user.GetUserPassword(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err

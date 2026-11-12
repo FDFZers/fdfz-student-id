@@ -262,8 +262,7 @@ type addAppGroupPermissionsRequestBody struct {
 }
 
 // addAppGroupPermissionsHandler 处理组权限追加：空权限列表直接成功，重复权限由服务层去重。
-// 写操作只允许作用于本应用的用户组：其他应用的公开用户组仅提供跨应用只读可见性，
-// 否则应用所有者可以越权修改其他应用的组权限集合。
+// 写操作仅限本应用的用户组，防止越权修改其他应用的组权限。
 func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {

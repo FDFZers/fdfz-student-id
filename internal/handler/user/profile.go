@@ -10,7 +10,7 @@ import (
 )
 
 // getUserProfileByUsernameHandler 按用户名查询用户资料。
-// 用户不存在时返回 404；已注销用户由 filterProfiles 决定返回最小化标识（非管理员）或正常字段（管理员）。
+// 已注销用户由 filterProfiles 返回最小化标识（非管理员）或正常字段（管理员）。
 func getUserProfileByUsernameHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetUsername := c.Param("username")
@@ -32,7 +32,7 @@ func getUserProfileByUsernameHandler(c *gin.Context) *errs.Error {
 }
 
 // getUserProfileByIDHandler 按用户 ID 查询用户资料；未带 :id 路径参数时查询当前登录用户。
-// 用户不存在时返回 404；已注销用户由 filterProfiles 决定返回最小化标识（非管理员）或正常字段（管理员）。
+// 已注销用户由 filterProfiles 返回最小化标识（非管理员）或正常字段（管理员）。
 func getUserProfileByIDHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")

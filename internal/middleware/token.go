@@ -22,8 +22,7 @@ import (
 
 // ParseToken 解析请求中的访问令牌（优先 Authorization: Bearer，其次 access_token Cookie），
 // 校验通过后把 claims 写入 token_claims 供后续处理器使用。
-// 注意：未携带令牌时静默放行；令牌非法或过期时不中止请求（公开路由仍可访问），
-// 而是把错误暂存到 token_error，由 RequireToken 在保护路由上返回精确的 401。
+// 令牌非法或过期时不中止请求，以便公开路由仍可访问。
 func ParseToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
@@ -37,7 +36,6 @@ func ParseToken() gin.HandlerFunc {
 
 		claims, err := crypto.ParseJWT(token)
 		if err != nil {
-			// 解析失败不得写入 claims；保留错误信息供 RequireToken 区分过期与非法
 			c.Set("token_error", err)
 			return
 		}
@@ -46,7 +44,6 @@ func ParseToken() gin.HandlerFunc {
 }
 
 // RequireToken 要求请求已通过 ParseToken 解析出有效令牌，否则以 invalid_token 中止请求。
-// 注意：本中间件依赖 ParseToken 先执行；存在 token_error 时按过期/非法返回精确 401。
 func RequireToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.IsAborted() {

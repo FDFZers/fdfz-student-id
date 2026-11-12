@@ -26,9 +26,8 @@ RETURNING id, created_at, status,
     created_user_id, reviewer_user_id, review_comment, reviewed_at
 `
 
-// CreateRegisterRequest 创建注册申请（r.Password 必须已哈希）：先校验用户名/学号占用，再写库。
-// 用户名与学号冲突统一返回模糊文案，避免被用来探测某个用户名/学号是否已被占用；
-// 并发提交撞上唯一索引时同样使用该文案。用户名占用缓存在写入后失效，使新申请立即生效。
+// CreateRegisterRequest 要求 r.Password 已哈希。
+// 用户名/学号冲突统一返回模糊文案，防止账号枚举；并发撞唯一索引时同样如此。
 func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.Error {
 	// 校验用户名与学号是否已被占用（含待审核申请）
 
@@ -46,8 +45,6 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 			return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试")
 		}
 	}
-
-	// 写入申请并清除用户名占用缓存
 
 	e := db.R.QueryRow(ctx, createRegisterRequestSQL,
 		r.Username,
@@ -68,7 +65,6 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 	)
 	if e != nil {
 		err := errs.CreatePGError(e, "注册请求", "Failed to create register request")
-		// 并发提交同名/同学号申请会撞上唯一索引，仍返回模糊文案，避免泄露占用情况
 		if err.HTTPCode == http.StatusConflict {
 			return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试")
 		}
@@ -92,9 +88,8 @@ FROM register_requests
 WHERE id = $1
 `
 
-// GetRegisterRequestByID 按 ID 查询注册申请，直接读 PostgreSQL 不走缓存。
+// GetRegisterRequestByID 直接读 PostgreSQL：审核状态在事务内变化，缓存会引入旧快照竞态。
 // 返回 nil 表示申请不存在，不返回错误。
-// 注意：审核状态会在事务内被更新，缓存会引入请求之间的旧快照竞态，因此这里有意不使用 Redis。
 func GetRegisterRequestByID(
 	ctx context.Context,
 	id uuid.UUID,
@@ -137,23 +132,20 @@ WHERE id = $1
 FOR UPDATE
 `
 
-// rejectRegisterRequestSQL 记录驳回结果（状态、审核人、审核意见与审核时间）。
 const rejectRegisterRequestSQL = `
 UPDATE register_requests
 SET status = $2, reviewer_user_id = $3, review_comment = $4, reviewed_at = now()
 WHERE id = $1
 `
 
-// approveRegisterRequestSQL 记录审核通过结果并回写本次创建的用户 ID。
 const approveRegisterRequestSQL = `
 UPDATE register_requests
 SET status = 'approved', created_user_id = $2, reviewer_user_id = $3, review_comment = $4, reviewed_at = now()
 WHERE id = $1
 `
 
-// ReviewRegisterRequest 审核注册申请：在单个事务内完成状态更新，审核通过时创建用户与密码也在同一事务内，
-// 任一环节失败整体回滚，不会出现「已通过但用户未创建」或「用户已创建但状态未更新」的中间状态。
-// 并发审核同一申请时，后到的事务在锁等待后读到非 pending 状态并返回 409，而不是被误报为 404。
+// ReviewRegisterRequest 在单个事务内完成状态更新与创建用户，任一环节失败整体回滚。
+// 并发审核同一申请时，后到的事务读到非 pending 状态并返回 409。
 func ReviewRegisterRequest(
 	ctx context.Context,
 	id uuid.UUID,
@@ -171,8 +163,6 @@ func ReviewRegisterRequest(
 			AppendDetails("注册请求审核失败")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
-	// 在事务内锁定申请并读取创建用户所需的全部字段
 
 	var req model.RegisterRequest
 	err := tx.QueryRow(ctx, lockRegisterRequestSQL, id).Scan(
@@ -196,8 +186,6 @@ func ReviewRegisterRequest(
 		return errs.ConflictError().AppendDetails("注册请求已被审核")
 	}
 
-	// 驳回：仅更新申请状态与审核信息，提交后清除用户名占用缓存
-
 	if status == model.RegisterRequestStatusRejected {
 		if _, e := tx.Exec(ctx, rejectRegisterRequestSQL, id, status, reviewerID, reviewComment); e != nil {
 			return errs.CreatePGError(e, "注册请求", "Failed to reject register request")
@@ -212,8 +200,6 @@ func ReviewRegisterRequest(
 		return nil
 	}
 
-	// 通过：在事务内创建用户与密码，再回写申请状态与创建的用户 ID
-
 	u := &model.User{
 		Username:   req.Username,
 		Nickname:   req.Nickname,
@@ -225,7 +211,7 @@ func ReviewRegisterRequest(
 	pwd := &model.UserPassword{
 		Password: req.Password,
 	}
-	// 排除当前申请自身：事务内申请仍是 pending，不排除会被唯一性查询误判为已被占用
+	// 排除当前申请自身，否则事务内仍为 pending 的申请会被唯一性查询判为已占用
 	excludeRegisterRequestID := req.ID
 	if err := createUserWithPasswordAt(ctx, tx, u, pwd, &excludeRegisterRequestID); err != nil {
 		return err
@@ -238,8 +224,6 @@ func ReviewRegisterRequest(
 		return errs.CreateAndLogInternalError(e, "Failed to commit transaction for approving register request").
 			AppendDetails("注册请求审核失败")
 	}
-
-	// 事务已提交，回填用户缓存、清除用户名占用缓存并记录日志
 
 	db.SetRedis(ctx, UserIDCacheKey(u.Username), u.ID, UserCacheDuration)
 	db.SetRedis(ctx, UserCacheKey(u.ID), u, UserCacheDuration)

@@ -19,7 +19,6 @@ const getUserPasswordSQL = `
 SELECT user_id, password, updated_at FROM user_passwords WHERE user_id = $1
 `
 
-// GetUserPassword 查询用户的密码哈希。
 func GetUserPassword(ctx context.Context, userID int64) (*model.UserPassword, *errs.Error) {
 	var pwd model.UserPassword
 	err := db.R.QueryRow(ctx, getUserPasswordSQL, userID).

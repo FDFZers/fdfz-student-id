@@ -77,7 +77,6 @@ func ValidateUserPassword(ctx context.Context, userID int64, password string) *e
 	if err != nil {
 		return err.AppendDetails("密码验证失败")
 	}
-	// 没有密码记录（用户异常/数据缺失）与密码错误同样处理，并燃烧一次校验耗时防枚举。
 	if pwd == nil {
 		crypto.BurnPasswordVerifyCost()
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
@@ -199,8 +198,7 @@ func DeleteAuthSession(ctx context.Context, session *AuthSession) *errs.Error {
 	return nil
 }
 
-// consumeAuthSessionAttemptScript 原子地自增二次验证尝试次数，并在计数键首次创建时设置过期时间。
-// 注意：INCR 与 EXPIRE 必须放在同一 Lua 脚本中执行，否则并发请求可能看到没有过期时间的计数器。
+// INCR 与 EXPIRE 必须在同一脚本中执行，否则 EXPIRE 失败会留下永不过期的计数器。
 var consumeAuthSessionAttemptScript = redis.NewScript(`
 local n = redis.call('INCR', KEYS[1])
 if n == 1 then
@@ -209,8 +207,7 @@ end
 return n
 `)
 
-// ConsumeAuthSessionAttempt 原子地消费一次二次验证尝试机会并返回累计尝试次数（从 1 开始）。
-// 注意：每次校验（无论成功失败）都必须先调用本函数计数，失败路径不再额外自增；首次计数时设置与验证码一致的过期时间。
+// ConsumeAuthSessionAttempt 每次二次验证都须先调用计数，无论校验成功失败。
 func ConsumeAuthSessionAttempt(ctx context.Context, id uuid.UUID) (int64, *errs.Error) {
 	ttlSeconds := int64(AuthSession2FACacheDuration / time.Second)
 	n, err := consumeAuthSessionAttemptScript.Run(ctx, db.R, []string{AuthSessionAttemptsCacheKey(id)}, ttlSeconds).Int64()
