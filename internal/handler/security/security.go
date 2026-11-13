@@ -2,7 +2,7 @@ package security
 
 import (
 	"fdfz-student-id/internal/middleware"
-	"fdfz-student-id/internal/service/perm"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
 
 	"github.com/gin-gonic/gin"
@@ -34,7 +34,7 @@ func InitRoutes(internal *gin.RouterGroup) {
 	// 修改密码、注销账号与管理员删除用户
 	group.POST("/password/change", middleware.RequireStepupToken(), handling.Wrap("修改密码失败", changePasswordHandler))
 	group.DELETE("/account", middleware.RequireStepupToken(), handling.Wrap("账号注销失败", deleteAccountHandler))
-	group.DELETE("/profile/:id", middleware.RequirePermission(perm.PermUsersDelete), handling.Wrap("用户删除失败", deleteUserHandler))
+	group.DELETE("/profile/:id", middleware.RequirePermission(permsvc.PermUsersDelete), handling.Wrap("用户删除失败", deleteUserHandler))
 
 	// 会话列表与撤销：会话列表只要求访问令牌，撤销要求提权令牌
 	group.GET("/session", middleware.RequireToken(), handling.Wrap("会话列表获取失败", listSessionsHandler))

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/perm"
+	authsvc "fdfz-student-id/internal/service/auth"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
@@ -21,6 +21,8 @@ import (
 
 // ParseToken 解析请求中的访问令牌（优先 Authorization: Bearer，其次 access_token Cookie），
 // 校验通过后把 claims 写入 token_claims 供后续处理器使用。
+// 支持用户访问令牌、提权令牌与 OAuth 应用令牌；OAuth 令牌只做 JWT 签名与声明校验，
+// 其权限完全来自签发时写入的 permissions，撤销授权不会追溯已签发的访问令牌。
 // 令牌非法或过期时不中止请求，以便公开路由仍可访问。
 func ParseToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -38,11 +40,30 @@ func ParseToken() gin.HandlerFunc {
 			c.Set("token_error", err)
 			return
 		}
+		if claims.UserID <= 0 {
+			c.Set("token_error", errs.InvalidTokenError().AppendDetails("令牌缺少用户信息"))
+			return
+		}
+
+		// 校验令牌类型与必填声明：OAuth 令牌必须携带 app_id，否则无法归属到应用。
+		switch claims.TokenType {
+		case model.TokenTypeUser, model.TokenTypeStepup:
+		case model.TokenTypeOAuth:
+			if !claims.AppID.Valid || claims.AppID.String == "" {
+				c.Set("token_error", errs.InvalidTokenError().AppendDetails("令牌缺少应用信息"))
+				return
+			}
+		default:
+			c.Set("token_error", errs.InvalidTokenError().AppendDetails("令牌类型错误"))
+			return
+		}
+
 		c.Set("token_claims", claims)
 	}
 }
 
 // RequireToken 要求请求已通过 ParseToken 解析出有效令牌，否则以 invalid_token 中止请求。
+// ParseToken 写入的 *errs.Error 会被原样返回，其余解析错误按过期/格式错误归类。
 func RequireToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.IsAborted() {
@@ -50,8 +71,13 @@ func RequireToken() gin.HandlerFunc {
 		}
 		if _, exists := c.Get("token_claims"); !exists {
 			if value, ok := c.Get("token_error"); ok {
-				if tokenErr, ok := value.(error); ok && tokenErr != nil {
-					if errors.Is(tokenErr, jwt.ErrTokenExpired) {
+				// ParseToken 抛出的业务错误（令牌类型错误等）直接原样返回。
+				if err, ok := value.(*errs.Error); ok && err != nil {
+					err.Abort(c)
+					return
+				}
+				if e, ok := value.(error); ok && e != nil {
+					if errors.Is(e, jwt.ErrTokenExpired) {
 						errs.TokenExpiredError().AppendDetails("令牌已过期").Abort(c)
 						return
 					}
@@ -65,6 +91,21 @@ func RequireToken() gin.HandlerFunc {
 	}
 }
 
+// RequireUserToken 要求令牌是用户访问令牌：提权令牌与 OAuth 应用令牌都不能访问这些接口。
+// 用于 OAuth 授权确认、设备码确认与授权管理等必须由用户本人操作的端点。
+func RequireUserToken() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		RequireToken()(c)
+		if c.IsAborted() {
+			return
+		}
+		claims := handling.GetClaimsOrNil(c)
+		if claims == nil || claims.TokenType != model.TokenTypeUser {
+			errs.InvalidTokenError().AppendDetails("令牌类型错误").Abort(c)
+		}
+	}
+}
+
 // RequirePermission 要求当前令牌同时具备全部指定权限，否则以 permission_denied 中止请求。
 func RequirePermission(permissions ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -73,7 +114,7 @@ func RequirePermission(permissions ...string) gin.HandlerFunc {
 			return
 		}
 		for _, permission := range permissions {
-			if !perm.HasPermission(handling.MustGetClaims(c), permission) {
+			if !permsvc.HasPermission(handling.MustGetClaims(c), permission) {
 				errs.PermissionDeniedError().AppendDetails("权限不足").Abort(c)
 				return
 			}
@@ -110,7 +151,7 @@ func ValidateStepupToken(c *gin.Context) *errs.Error {
 	if e != nil {
 		return errs.InvalidTokenError().AppendDetails("会话 ID 格式错误")
 	}
-	session, err := auth.GetSessionByUUID(c.Request.Context(), sessionID)
+	session, err := authsvc.GetSessionByUUID(c.Request.Context(), sessionID)
 	if err != nil {
 		return err
 	}
@@ -119,9 +160,9 @@ func ValidateStepupToken(c *gin.Context) *errs.Error {
 		return errs.InvalidTokenError().AppendDetails("会话已失效")
 	}
 
-	revokedAt, revokedErr := auth.GetStepupRevokedAt(c.Request.Context(), claims.UserID)
-	if revokedErr != nil {
-		return revokedErr
+	revokedAt, err := authsvc.GetStepupRevokedAt(c.Request.Context(), claims.UserID)
+	if err != nil {
+		return err
 	} else if !revokedAt.IsZero() && claims.IssuedAt != nil && !claims.IssuedAt.Time.After(revokedAt) {
 		return errs.InvalidTokenError().AppendDetails("提权令牌已失效")
 	}
@@ -156,7 +197,7 @@ func RequireAppAccess(appParam string, globalPermission string, ownedAppPermissi
 			return
 		}
 
-		if perm.HasPermission(claims, globalPermission) {
+		if permsvc.HasPermission(claims, globalPermission) {
 			c.Set("app_access_scope", "global")
 			return
 		}
@@ -167,7 +208,7 @@ func RequireAppAccess(appParam string, globalPermission string, ownedAppPermissi
 			return
 		}
 
-		if !perm.HasPermission(claims, ownedAppPermission) || !slices.Contains(claims.OwnedApps, appID) {
+		if !permsvc.HasPermission(claims, ownedAppPermission) || !slices.Contains(claims.OwnedApps, appID) {
 			errs.PermissionDeniedError().AppendDetails("权限不足").Abort(c)
 			return
 		}

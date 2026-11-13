@@ -6,7 +6,7 @@ import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/service/user"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fmt"
 	"strings"
@@ -73,7 +73,7 @@ func AuthSessionAttemptsCacheKey(id uuid.UUID) string {
 // ValidateUserPassword 校验用户密码。用户不存在与密码错误都返回「用户名或密码错误」，避免暴露账号是否存在。
 // 注意：用户不存在或密码记录缺失时也会执行一次 Argon2id 校验，拉平响应耗时防止账号枚举。
 func ValidateUserPassword(ctx context.Context, userID int64, password string) *errs.Error {
-	pwd, err := user.GetUserPassword(ctx, userID)
+	pwd, err := usersvc.GetUserPassword(ctx, userID)
 	if err != nil {
 		return err.AppendDetails("密码验证失败")
 	}
@@ -129,21 +129,21 @@ func CreateAuthSession(ctx context.Context, typ AuthSessionType, isSchoolIp bool
 
 	var qq, email, totp null.String
 	if useQQ {
-		if qqInfo, err := user.GetUserQQ(ctx, userID); err != nil {
+		if qqInfo, err := usersvc.GetUserQQ(ctx, userID); err != nil {
 			return nil, err
 		} else if qqInfo != nil {
 			qq = null.StringFrom(qqInfo.QQ)
 		}
 	}
 	if useEmail {
-		if emailInfo, err := user.GetUserEmail(ctx, userID); err != nil {
+		if emailInfo, err := usersvc.GetUserEmail(ctx, userID); err != nil {
 			return nil, err
 		} else if emailInfo != nil {
 			email = null.StringFrom(emailInfo.Email)
 		}
 	}
 	if useTOTP {
-		if totpInfo, err := user.GetUserTOTP(ctx, userID); err != nil {
+		if totpInfo, err := usersvc.GetUserTOTP(ctx, userID); err != nil {
 			return nil, err
 		} else if totpInfo != nil {
 			totp = null.StringFrom(totpInfo.Secret)

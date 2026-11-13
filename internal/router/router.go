@@ -7,6 +7,7 @@ import (
 	"fdfz-student-id/internal/handler/auth"
 	"fdfz-student-id/internal/handler/healthcheck"
 	"fdfz-student-id/internal/handler/misc"
+	"fdfz-student-id/internal/handler/oauth"
 	"fdfz-student-id/internal/handler/permissions"
 	"fdfz-student-id/internal/handler/regreq"
 	"fdfz-student-id/internal/handler/security"
@@ -84,6 +85,7 @@ func InitRouter(r *gin.Engine) {
 	security.InitRoutes(internal)
 	permissions.InitRoutes(internal)
 	app.InitRoutes(v1, internal)
+	oauth.InitRoutes(v1)
 }
 
 // InitHealthCheckRouter 注册健康检查路由（生产环境单独监听 8080 端口）。

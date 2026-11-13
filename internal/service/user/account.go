@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/service/filestore"
+	filestoresvc "fdfz-student-id/internal/service/filestore"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -90,7 +90,7 @@ func deleteUserProfileImages(ctx context.Context, userID int64) {
 		fmt.Sprintf("/student_id/avatars/%d", userID),
 		fmt.Sprintf("/student_id/banners/%d", userID),
 	} {
-		if err := filestore.DeleteFile(slug); err != nil && err.HTTPCode != http.StatusNotFound {
+		if err := filestoresvc.DeleteFile(slug); err != nil && err.HTTPCode != http.StatusNotFound {
 			slog.Warn("Failed to delete profile image for deleted user",
 				"user_id", userID, "slug", slug, "error", err.Info.Error)
 		}
@@ -235,24 +235,24 @@ SELECT id, username FROM due
 // FinalizeOverdueAccountDeletion 完成指定用户已到期的注销（登录时调用），返回是否执行了清理。
 // 清理后仅保留账号标识，不可再登录。
 func FinalizeOverdueAccountDeletion(ctx context.Context, userID int64) (bool, *errs.Error) {
-	pairs, pairErr := queryFollowPairs(ctx, getSingleUserFollowPairsSQL, userID)
-	if pairErr != nil {
-		return false, pairErr
+	pairs, err := queryFollowPairs(ctx, getSingleUserFollowPairsSQL, userID)
+	if err != nil {
+		return false, err
 	}
 
 	var id int64
 	var username string
-	err := db.R.QueryRow(
+	e := db.R.QueryRow(
 		ctx,
 		finalizeOverdueAccountDeletionSQL,
 		userID,
 		systemAdminUserID,
 	).Scan(&id, &username)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	if e != nil {
+		if errors.Is(e, pgx.ErrNoRows) {
 			return false, nil
 		}
-		return false, errs.CreatePGError(err, "用户", "Failed to finalize account deletion")
+		return false, errs.CreatePGError(e, "用户", "Failed to finalize account deletion")
 	}
 	db.R.Del(ctx, UserCacheKey(id))
 	db.R.Del(ctx, UserIDCacheKey(username))
@@ -328,14 +328,14 @@ SELECT id, username FROM due
 // FinalizeDueAccountDeletions 批量完成所有到期注销，返回清理的用户数；由定时任务每 10 分钟调用。
 // 注意：逐行清理对应用户的缓存再返回，失败时返回已清理的数量与错误。
 func FinalizeDueAccountDeletions(ctx context.Context) (int64, *errs.Error) {
-	pairs, pairErr := queryFollowPairs(ctx, getDueUserFollowPairsSQL)
-	if pairErr != nil {
-		return 0, pairErr
+	pairs, err := queryFollowPairs(ctx, getDueUserFollowPairsSQL)
+	if err != nil {
+		return 0, err
 	}
 
-	rows, err := db.R.Query(ctx, finalizeDueAccountDeletionsSQL, systemAdminUserID)
-	if err != nil {
-		return 0, errs.CreatePGError(err, "用户", "Failed to finalize account deletions").AppendDetails("账号注销清理失败")
+	rows, e := db.R.Query(ctx, finalizeDueAccountDeletionsSQL, systemAdminUserID)
+	if e != nil {
+		return 0, errs.CreatePGError(e, "用户", "Failed to finalize account deletions").AppendDetails("账号注销清理失败")
 	}
 	defer rows.Close()
 
@@ -346,8 +346,8 @@ func FinalizeDueAccountDeletions(ctx context.Context) (int64, *errs.Error) {
 	for rows.Next() {
 		var id int64
 		var username string
-		if err := rows.Scan(&id, &username); err != nil {
-			return count, errs.CreatePGError(err, "用户", "Failed to scan finalized account").AppendDetails("账号注销清理失败")
+		if e := rows.Scan(&id, &username); e != nil {
+			return count, errs.CreatePGError(e, "用户", "Failed to scan finalized account").AppendDetails("账号注销清理失败")
 		}
 		count++
 		deletedIDs = append(deletedIDs, id)
@@ -355,8 +355,8 @@ func FinalizeDueAccountDeletions(ctx context.Context) (int64, *errs.Error) {
 		db.R.Del(ctx, UserIDCacheKey(username))
 		db.R.Del(ctx, UsernameExistsCacheKey(username))
 	}
-	if err := rows.Err(); err != nil {
-		return count, errs.CreatePGError(err, "用户", "Failed to finalize account deletions").AppendDetails("账号注销清理失败")
+	if e := rows.Err(); e != nil {
+		return count, errs.CreatePGError(e, "用户", "Failed to finalize account deletions").AppendDetails("账号注销清理失败")
 	}
 	invalidateDeletedUserFollowCaches(ctx, pairs)
 	for _, userID := range deletedIDs {
@@ -428,19 +428,19 @@ SELECT id, username FROM deleted
 
 // DeleteUser 管理员立即删除用户，其 OAuth 应用转归系统管理员；用户不存在时返回 404。
 func DeleteUser(ctx context.Context, userID int64) *errs.Error {
-	pairs, pairErr := queryFollowPairs(ctx, getSingleUserFollowPairsSQL, userID)
-	if pairErr != nil {
-		return pairErr
+	pairs, err := queryFollowPairs(ctx, getSingleUserFollowPairsSQL, userID)
+	if err != nil {
+		return err
 	}
 
 	var id int64
 	var username string
-	err := db.R.QueryRow(ctx, adminDeleteUserSQL, userID, systemAdminUserID).Scan(&id, &username)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	e := db.R.QueryRow(ctx, adminDeleteUserSQL, userID, systemAdminUserID).Scan(&id, &username)
+	if e != nil {
+		if errors.Is(e, pgx.ErrNoRows) {
 			return errs.NotFoundError().AppendDetails("用户不存在")
 		}
-		return errs.CreatePGError(err, "用户", "Failed to delete user")
+		return errs.CreatePGError(e, "用户", "Failed to delete user")
 	}
 
 	db.R.Del(ctx, UserCacheKey(id))

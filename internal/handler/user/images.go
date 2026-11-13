@@ -2,8 +2,8 @@ package user
 
 import (
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/service/filestore"
-	"fdfz-student-id/internal/service/perm"
+	filestoresvc "fdfz-student-id/internal/service/filestore"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"strconv"
@@ -17,6 +17,11 @@ type profileImageKind struct {
 	Field string // multipart 上传表单字段名
 	Slug  string // filestore 路径中的类型段（avatars/banners）
 	Item  string // 面向用户的中文名词
+}
+
+// slug 返回用户资料图片在 filestore 中的固定路径。
+func (k profileImageKind) slug(userID int64) string {
+	return "/student_id/" + k.Slug + "/" + strconv.FormatInt(userID, 10)
 }
 
 // 资料图片的两种类型配置。
@@ -75,9 +80,9 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 
 	var allowed bool
 	if targetID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserProfileUpdateBasic)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUserProfileUpdateBasic)
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersProfileUpdateBasic)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersProfileUpdateBasic)
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
@@ -94,8 +99,8 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 
 	// 上传到 filestore：路径固定为 /student_id/{avatars|banners}/{userID}，同路径覆盖
 
-	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
-		Slug:         "/student_id/" + kind.Slug + "/" + targetStr,
+	if err := filestoresvc.UploadFile(fileHeader, &filestoresvc.StoreFileReq{
+		Slug:         kind.slug(targetID),
 		FileName:     targetStr + extension,
 		ContentType:  null.StringFrom(mimeType),
 		ShouldUpsert: true,
@@ -120,9 +125,9 @@ func serveProfileImage(c *gin.Context, kind profileImageKind) *errs.Error {
 
 	var allowed bool
 	if targetID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserProfileReadBasic)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUserProfileReadBasic)
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersProfileReadBasic)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersProfileReadBasic)
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
@@ -134,8 +139,8 @@ func serveProfileImage(c *gin.Context, kind profileImageKind) *errs.Error {
 
 	// 构建带下载令牌的 filestore 地址并重定向
 
-	slug := "/student_id/" + kind.Slug + "/" + strconv.FormatInt(targetID, 10)
-	fileURL, err := filestore.BuildFileUrl(slug)
+	slug := kind.slug(targetID)
+	fileURL, err := filestoresvc.BuildFileUrl(slug)
 	if err != nil {
 		return err
 	}
@@ -156,9 +161,9 @@ func deleteProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Erro
 
 	var allowed bool
 	if targetID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserProfileUpdateBasic)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUserProfileUpdateBasic)
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersProfileUpdateBasic)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersProfileUpdateBasic)
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
@@ -170,14 +175,14 @@ func deleteProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Erro
 
 	// 删除 filestore 中的固定路径文件；文件不存在视为「未设置」
 
-	slug := "/student_id/" + kind.Slug + "/" + strconv.FormatInt(targetID, 10)
-	if err := filestore.DeleteFile(slug); err != nil {
+	slug := kind.slug(targetID)
+	if err := filestoresvc.DeleteFile(slug); err != nil {
 		if err.HTTPCode == http.StatusNotFound {
 			return errs.NotFoundError().AppendDetails("未设置" + kind.Item)
 		}
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

@@ -3,7 +3,7 @@ package email
 import (
 	"embed"
 	"fdfz-student-id/internal/cfg"
-	"fdfz-student-id/internal/service/auth"
+	authsvc "fdfz-student-id/internal/service/auth"
 	"fmt"
 	"log/slog"
 	"mime"
@@ -48,7 +48,7 @@ func send(to, subject, htmlBody string) error {
 
 // SendCode 按鉴权会话类型选择文案，渲染验证码模板并发送。
 // 注意：typ 必须是登录、重置密码或二次验证之一，其他取值返回错误。
-func SendCode(to, code string, typ auth.AuthSessionType) error {
+func SendCode(to, code string, typ authsvc.AuthSessionType) error {
 	data, err := fs.ReadFile("templates/code.html")
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func SendCode(to, code string, typ auth.AuthSessionType) error {
 	var r *strings.Replacer
 	var title string
 	switch typ {
-	case auth.AuthSessionTypeLogin:
+	case authsvc.AuthSessionTypeLogin:
 		slog.Info("Sending login verification code", "to", to)
 		r = strings.NewReplacer(
 			"{{TITLE}}", "登录验证",
@@ -67,7 +67,7 @@ func SendCode(to, code string, typ auth.AuthSessionType) error {
 			"{{CODE}}", code,
 		)
 		title = "登录验证"
-	case auth.AuthSessionTypeResetPassword:
+	case authsvc.AuthSessionTypeResetPassword:
 		slog.Info("Sending password reset code", "to", to)
 		r = strings.NewReplacer(
 			"{{TITLE}}", "密码重置",
@@ -77,7 +77,7 @@ func SendCode(to, code string, typ auth.AuthSessionType) error {
 			"{{CODE}}", code,
 		)
 		title = "密码重置"
-	case auth.AuthSessionTypeStepup:
+	case authsvc.AuthSessionTypeStepup:
 		slog.Info("Sending stepup code", "to", to)
 		r = strings.NewReplacer(
 			"{{TITLE}}", "二次验证",

@@ -3,7 +3,8 @@ package qq
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,11 +31,11 @@ type Message struct {
 
 // apiResponse 是 OneBot 11 的通用响应包装。
 type apiResponse struct {
-	Status  string          `json:"status"`  // ok 表示接口调用成功
-	RetCode int             `json:"retcode"` // 0 表示成功，非 0 为错误码
-	Data    json.RawMessage `json:"data"`    // 各接口的返回数据
-	Message string          `json:"message"` // 错误描述
-	Wording string          `json:"wording"` // 错误补充说明
+	Status  string         `json:"status"`  // ok 表示接口调用成功
+	RetCode int            `json:"retcode"` // 0 表示成功，非 0 为错误码
+	Data    jsontext.Value `json:"data"`    // 各接口的返回数据
+	Message string         `json:"message"` // 错误描述
+	Wording string         `json:"wording"` // 错误补充说明
 }
 
 // endpointURL 拼接 NapCat 基础地址与 API 路径，去掉基础地址末尾多余的 /。
@@ -44,7 +45,7 @@ func endpointURL(path string) string {
 
 // post 向 NapCat 发送 JSON 请求并解析 OneBot 11 响应。
 // 注意：非 2xx 状态码、status 非 ok 或 retcode 非 0 都会返回错误；配置 NAPCAT_TOKEN 时自动带 Bearer 认证。
-func post(ctx context.Context, path string, payload any) (json.RawMessage, error) {
+func post(ctx context.Context, path string, payload any) (jsontext.Value, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("qq: marshal request: %w", err)
@@ -112,9 +113,9 @@ func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, 
 
 	// NapCat/go-cqhttp 的 data 既可能是 {"messages":[...]}，也可能直接是数组
 	var wrapped struct {
-		Messages []json.RawMessage `json:"messages"`
+		Messages []jsontext.Value `json:"messages"`
 	}
-	var items []json.RawMessage
+	var items []jsontext.Value
 	if err := json.Unmarshal(data, &wrapped); err == nil && wrapped.Messages != nil {
 		items = wrapped.Messages
 	} else if err := json.Unmarshal(data, &items); err != nil {
@@ -151,11 +152,11 @@ type oneBotMessage struct {
 	Sender  struct {
 		UserID int64 `json:"user_id"`
 	} `json:"sender"`
-	Message json.RawMessage `json:"message"`
+	Message jsontext.Value `json:"message"`
 }
 
 // parseMessage 把 OneBot 消息对象转换为 Message，优先取消息段文本与 sender.user_id，缺失时回退。
-func parseMessage(raw json.RawMessage) (Message, error) {
+func parseMessage(raw jsontext.Value) (Message, error) {
 	var m oneBotMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return Message{}, err
@@ -172,7 +173,7 @@ func parseMessage(raw json.RawMessage) (Message, error) {
 }
 
 // extractText 提取纯文本：兼容 OneBot 的纯字符串与消息段数组两种 message 形状，只拼接 text 段。
-func extractText(raw json.RawMessage) string {
+func extractText(raw jsontext.Value) string {
 	if len(raw) == 0 {
 		return ""
 	}

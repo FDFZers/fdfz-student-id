@@ -79,3 +79,11 @@ const (
 	PermAppsSuspend = "student_id:apps.suspend"
 	PermAppsDelete  = "student_id:apps.delete"
 )
+
+// OAuth 授权管理
+const (
+	PermOAuthRead    = "student_id:oauth.read"
+	PermOAuthRevoke  = "student_id:oauth.revoke"
+	PermOAuthsRead   = "student_id:oauths.read"
+	PermOAuthsRevoke = "student_id:oauths.revoke"
+)

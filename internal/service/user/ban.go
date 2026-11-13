@@ -32,10 +32,10 @@ RETURNING id, created_at
 `
 
 // BanUser 不校验用户是否存在，调用方需先确认；end_time 为空表示永久封禁。
-func BanUser(ctx context.Context, b *model.UserBan) *errs.Error {
-	tx, txErr := db.R.Begin(ctx)
-	if txErr != nil {
-		return errs.CreateAndLogInternalError(txErr, "Failed to begin transaction for banning user").
+func BanUser(ctx context.Context, dh db.Handle, b *model.UserBan) *errs.Error {
+	tx, err := dh.Begin(ctx)
+	if err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to begin transaction for banning user").
 			AppendDetails("封禁失败")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()

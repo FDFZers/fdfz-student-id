@@ -2,8 +2,8 @@ package user
 
 import (
 	"context"
-	"encoding/json"
-	"fdfz-student-id/internal/service/search"
+	"encoding/json/v2"
+	searchsvc "fdfz-student-id/internal/service/search"
 	"fmt"
 	"time"
 
@@ -44,10 +44,10 @@ func listFollows(
 	// 分页参数归一化：limit 落在 [1, MaxLimit]，offset 不小于 0
 
 	if limit <= 0 {
-		limit = search.DefaultLimit
+		limit = searchsvc.DefaultLimit
 	}
-	if limit > search.MaxLimit {
-		limit = search.MaxLimit
+	if limit > searchsvc.MaxLimit {
+		limit = searchsvc.MaxLimit
 	}
 	if offset < 0 {
 		offset = 0

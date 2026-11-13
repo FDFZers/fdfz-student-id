@@ -4,8 +4,8 @@ import (
 	"context"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/service/userperm"
+	permsvc "fdfz-student-id/internal/service/perm"
+	userpermsvc "fdfz-student-id/internal/service/userperm"
 	"slices"
 	"strings"
 )
@@ -27,7 +27,7 @@ func isWritePerm(permission string) bool {
 // UserHasWritePerm 判断用户是否拥有管理侧写权限，用于阻止管理员互相封禁/删除。
 // 不能按 ".write" 子串判断：普通用户权限和第三方应用权限也会命中。
 func UserHasWritePerm(ctx context.Context, userID int64) (bool, *errs.Error) {
-	perms, err := userperm.ListUserEffectivePermissions(ctx, userID)
+	perms, err := userpermsvc.ListUserEffectivePermissions(ctx, userID)
 	if err != nil {
 		return false, err
 	}
@@ -48,10 +48,10 @@ func HasUsersNamespacePerm(claims *model.RegisteredTokenClaims) bool {
 
 // IsGlobalAppAdmin 判断调用方是否拥有全局应用管理写权限（可修改命名空间与所有者）。
 func IsGlobalAppAdmin(claims *model.RegisteredTokenClaims) bool {
-	return perm.HasPermission(claims, perm.PermAppsUpdate)
+	return permsvc.HasPermission(claims, permsvc.PermAppsUpdate)
 }
 
 // IsGlobalAppReader 判断调用方是否拥有全局应用读取权限（可读取全部应用）。
 func IsGlobalAppReader(claims *model.RegisteredTokenClaims) bool {
-	return perm.HasPermission(claims, perm.PermAppsList)
+	return permsvc.HasPermission(claims, permsvc.PermAppsList)
 }

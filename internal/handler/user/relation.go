@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/service/search"
-	"fdfz-student-id/internal/service/user"
+	permsvc "fdfz-student-id/internal/service/perm"
+	searchsvc "fdfz-student-id/internal/service/search"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
@@ -33,9 +33,9 @@ func followUserHandler(c *gin.Context) *errs.Error {
 
 	var allowed bool
 	if selfID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserRelationWrite)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUserRelationWrite)
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersRelationWrite)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersRelationWrite)
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
@@ -45,17 +45,15 @@ func followUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	if err := user.FollowUser(c.Request.Context(), selfID, targetID); err != nil {
+	if err := usersvc.FollowUser(c.Request.Context(), selfID, targetID); err != nil {
 		return err
 	}
 
-	rel, err := user.GetFollowRelationship(c.Request.Context(), selfID, targetID)
+	rel, err := usersvc.GetFollowRelationship(c.Request.Context(), selfID, targetID)
 	if err != nil {
 		return err
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"relationship": rel,
-	})
+	c.JSON(http.StatusOK, handling.RelationshipJSON(rel))
 	return nil
 }
 
@@ -75,9 +73,9 @@ func unfollowUserHandler(c *gin.Context) *errs.Error {
 
 	var allowed bool
 	if selfID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserRelationWrite)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUserRelationWrite)
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersRelationWrite)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersRelationWrite)
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
@@ -87,18 +85,16 @@ func unfollowUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	if err := user.UnfollowUser(c.Request.Context(), selfID, targetID); err != nil {
+	if err := usersvc.UnfollowUser(c.Request.Context(), selfID, targetID); err != nil {
 		return err
 	}
 
-	rel, err := user.GetFollowRelationship(c.Request.Context(), selfID, targetID)
+	rel, err := usersvc.GetFollowRelationship(c.Request.Context(), selfID, targetID)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"relationship": rel,
-	})
+	c.JSON(http.StatusOK, handling.RelationshipJSON(rel))
 	return nil
 }
 
@@ -115,14 +111,12 @@ func getFollowStatusHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	rel, err := user.GetFollowRelationship(c.Request.Context(), claims.UserID, targetID)
+	rel, err := usersvc.GetFollowRelationship(c.Request.Context(), claims.UserID, targetID)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"relationship": rel,
-	})
+	c.JSON(http.StatusOK, handling.RelationshipJSON(rel))
 	return nil
 }
 
@@ -161,7 +155,7 @@ func countFriendsHandler(c *gin.Context) *errs.Error {
 }
 
 // serveFollowList 获取关系列表的统一实现：解析目标用户与分页、校验可见性后按关系类型查询并过滤资料。
-// 列表项会经过 filterProfiles，因此返回字段仍受调用方权限与各用户 visibilities 约束。
+// 列表项会经过 usersJSON，因此返回字段仍受调用方权限与各用户 visibilities 约束。
 func serveFollowList(c *gin.Context, rel model.Relationship) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
@@ -172,7 +166,7 @@ func serveFollowList(c *gin.Context, rel model.Relationship) *errs.Error {
 		return err
 	}
 
-	limit, offset := search.ParseQueryPagination(c)
+	limit, offset := searchsvc.ParseQueryPagination(c)
 
 	if err := canViewFollowList(c, claims, target, rel); err != nil {
 		return err
@@ -183,11 +177,11 @@ func serveFollowList(c *gin.Context, rel model.Relationship) *errs.Error {
 	var list *model.RelationList
 	switch rel {
 	case model.RelationshipFollowed:
-		list, err = user.ListFollowers(c.Request.Context(), target.ID, limit, offset)
+		list, err = usersvc.ListFollowers(c.Request.Context(), target.ID, limit, offset)
 	case model.RelationshipFollowing:
-		list, err = user.ListFollowing(c.Request.Context(), target.ID, limit, offset)
+		list, err = usersvc.ListFollowing(c.Request.Context(), target.ID, limit, offset)
 	case model.RelationshipFriends:
-		list, err = user.ListFriends(c.Request.Context(), target.ID, limit, offset)
+		list, err = usersvc.ListFriends(c.Request.Context(), target.ID, limit, offset)
 	default:
 		return errs.CreateAndLogInternalError(errors.New("unknown follow list type"), "Unknown follow list type").AppendDetails("关注列表类型不受支持")
 	}
@@ -195,15 +189,12 @@ func serveFollowList(c *gin.Context, rel model.Relationship) *errs.Error {
 		return err
 	}
 
-	filtered, err := filterProfiles(c.Request.Context(), claims, list.Users...)
+	filtered, err := handling.UsersJSON(c.Request.Context(), claims, list.Users...)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"count": list.Count,
-		"data":  filtered,
-	})
+	handling.RespondList(c, list.Count, filtered)
 	return nil
 }
 
@@ -223,11 +214,11 @@ func serveFollowCount(c *gin.Context, rel model.Relationship) *errs.Error {
 	var count int64
 	switch rel {
 	case model.RelationshipFollowed:
-		count, err = user.CountFollowers(c.Request.Context(), target.ID)
+		count, err = usersvc.CountFollowers(c.Request.Context(), target.ID)
 	case model.RelationshipFollowing:
-		count, err = user.CountFollowing(c.Request.Context(), target.ID)
+		count, err = usersvc.CountFollowing(c.Request.Context(), target.ID)
 	case model.RelationshipFriends:
-		count, err = user.CountFriends(c.Request.Context(), target.ID)
+		count, err = usersvc.CountFriends(c.Request.Context(), target.ID)
 	default:
 		return errs.CreateAndLogInternalError(errors.New("unknown follow list type"), "Unknown follow list type").AppendDetails("关注列表类型不受支持")
 	}
@@ -255,7 +246,7 @@ func resolveFollowListTarget(
 		return nil, err
 	}
 
-	target, err := user.GetUserByID(c.Request.Context(), targetID)
+	target, err := usersvc.GetUserByID(c.Request.Context(), targetID)
 	if err != nil {
 		return nil, err
 	} else if target == nil {
@@ -275,14 +266,14 @@ func canViewFollowList(
 ) *errs.Error {
 	// 拥有 users.relation.read 时不受可见性限制
 
-	if perm.HasPermission(claims, perm.PermUsersRelationRead) {
+	if permsvc.HasPermission(claims, permsvc.PermUsersRelationRead) {
 		return nil
 	}
 
 	// 查看自己的关系列表只需要 user.relation.read
 
 	if claims.UserID == target.ID {
-		if !perm.HasPermission(claims, perm.PermUserRelationRead) {
+		if !permsvc.HasPermission(claims, permsvc.PermUserRelationRead) {
 			return errs.PermissionDeniedError().AppendDetails("权限不足")
 		}
 		return nil
@@ -290,7 +281,7 @@ func canViewFollowList(
 
 	// 查看他人时按目标用户的 visibilities 判定
 
-	if !perm.HasPermission(claims, perm.PermUsersRelationReadAllowed) {
+	if !permsvc.HasPermission(claims, permsvc.PermUsersRelationReadAllowed) {
 		return errs.PermissionDeniedError().AppendDetails("权限不足")
 	}
 
@@ -314,7 +305,7 @@ func canViewFollowList(
 		case model.VisibilityFriends:
 			// 多个可见性可能都要查关系，只查询一次
 			if r == nil {
-				rel, err := user.GetFollowRelationship(c.Request.Context(), claims.UserID, target.ID)
+				rel, err := usersvc.GetFollowRelationship(c.Request.Context(), claims.UserID, target.ID)
 				if err != nil {
 					return err
 				}

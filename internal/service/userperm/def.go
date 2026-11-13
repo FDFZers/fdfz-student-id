@@ -3,12 +3,12 @@ package userperm
 import (
 	"context"
 	"errors"
-	"fdfz-student-id/internal/service/search"
+	searchsvc "fdfz-student-id/internal/service/search"
 
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
+	permsvc "fdfz-student-id/internal/service/perm"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -38,7 +38,7 @@ func CreatePermissionDef(ctx context.Context, def *model.PermissionDef) *errs.Er
 	if err != nil {
 		return errs.CreatePGError(err, "权限定义", "Failed to create permission def")
 	}
-	perm.NotifyReload()
+	permsvc.NotifyReload()
 	return nil
 }
 
@@ -98,10 +98,10 @@ LIMIT $2 OFFSET $3
 // ListPermissionDefs 分页查询某应用下的权限定义，返回当前页数据与总数。
 func ListPermissionDefs(ctx context.Context, appID int64, limit, offset int32) ([]*model.PermissionDef, int32, *errs.Error) {
 	if limit <= 0 {
-		limit = search.DefaultLimit
+		limit = searchsvc.DefaultLimit
 	}
-	if limit > search.MaxLimit {
-		limit = search.MaxLimit
+	if limit > searchsvc.MaxLimit {
+		limit = searchsvc.MaxLimit
 	}
 	if offset < 0 {
 		offset = 0
@@ -157,7 +157,7 @@ func UpdatePermissionDef(ctx context.Context, id int64, description string, requ
 	if _, err := db.R.Exec(ctx, updatePermissionDefSQL, id, description, requestable); err != nil {
 		return errs.CreatePGError(err, "权限定义", "Failed to update permission def")
 	}
-	perm.NotifyReload()
+	permsvc.NotifyReload()
 	return nil
 }
 
@@ -169,7 +169,7 @@ func DeletePermissionDef(ctx context.Context, id int64) *errs.Error {
 	if _, err := db.R.Exec(ctx, deletePermissionDefSQL, id); err != nil {
 		return errs.CreatePGError(err, "权限定义", "Failed to delete permission def")
 	}
-	perm.NotifyReload()
+	permsvc.NotifyReload()
 	return nil
 }
 
@@ -200,7 +200,7 @@ func AddPermissionImply(ctx context.Context, permissionID, impliedID int64) *err
 	}
 	ids = append(ids, impliedID)
 
-	return SetPermissionImplies(ctx, def.AppID, permissionID, ids)
+	return SetPermissionImplies(ctx, db.R, def.AppID, permissionID, ids)
 }
 
 // RemovePermissionImply 移除一条直接继承边（不存在时幂等成功）。
@@ -224,7 +224,7 @@ func RemovePermissionImply(ctx context.Context, permissionID, impliedID int64) *
 		}
 	}
 
-	return SetPermissionImplies(ctx, def.AppID, permissionID, ids)
+	return SetPermissionImplies(ctx, db.R, def.AppID, permissionID, ids)
 }
 
 // listDirectImpliesSQL 查询某权限直接继承的权限定义。

@@ -35,12 +35,12 @@ func CopyFile(src, dst string) error {
 			slog.Warn("Failed to remove temp file", "error", err)
 		}
 	}
-	abort := func(op string, cause error) error {
-		if err := out.Close(); err != nil {
-			slog.Warn("Failed to close temp file", "error", err)
+	abort := func(op string, err error) error {
+		if e := out.Close(); e != nil {
+			slog.Warn("Failed to close temp file", "error", e)
 		}
 		removeTemp()
-		return fmt.Errorf("%s: %w", op, cause)
+		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	// 复制内容，失败时关闭并删除临时文件

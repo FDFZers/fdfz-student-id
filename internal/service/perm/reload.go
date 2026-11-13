@@ -165,9 +165,9 @@ func (r *Reloader) loop(ctx context.Context) {
 			timerC = nil
 
 			reloadCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			loadErr := r.ReloadNow(reloadCtx)
+			err := r.ReloadNow(reloadCtx)
 			cancel()
-			if loadErr != nil {
+			if err != nil {
 				// 加载失败时重新投递通知，在节流间隔后重试。
 				r.Notify()
 			}

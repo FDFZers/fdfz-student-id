@@ -3,6 +3,7 @@ package healthcheck
 import (
 	"context"
 	"fdfz-student-id/internal/db"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"sync"
 	"time"
@@ -114,7 +115,7 @@ func check(ctx context.Context) HealthStatus {
 // /healthz 在任一依赖 DOWN 时返回 503，供负载均衡与 K8s 探针判断是否摘流量。
 func RegisterHealthCheckRoutes(r *gin.Engine) {
 	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{})
+		handling.RespondOK(c)
 	})
 
 	r.GET("/healthz", func(c *gin.Context) {

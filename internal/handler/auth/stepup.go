@@ -4,8 +4,8 @@ import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/user"
+	authsvc "fdfz-student-id/internal/service/auth"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
@@ -25,7 +25,7 @@ func stepupInitHandler(c *gin.Context) *errs.Error {
 		return errs.PermissionDeniedError().AppendDetails("临时会话不支持二次验证")
 	}
 
-	ban, err := user.GetUserBan(c.Request.Context(), claims.UserID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	}
@@ -33,7 +33,7 @@ func stepupInitHandler(c *gin.Context) *errs.Error {
 		return handling.BannedError(ban)
 	}
 
-	session, err := auth.CreateAuthSession(c.Request.Context(), auth.AuthSessionTypeStepup, false, claims.UserID, false)
+	session, err := authsvc.CreateAuthSession(c.Request.Context(), authsvc.AuthSessionTypeStepup, false, claims.UserID, false)
 	if err != nil {
 		return err
 	}
@@ -66,8 +66,8 @@ type stepupFinalizeReq struct {
 // 注意：会话必须属于当前用户且已通过二次验证；签发后删除鉴权会话，提权令牌由 Cookie 承载。
 func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 	var req stepupFinalizeReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if err := handling.ValidateUUID(req.SessionID, "鉴权会话 ID"); err != nil {
 		return err
@@ -76,14 +76,14 @@ func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	// 校验提权会话的归属与状态
-	session, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
+	session, err := authsvc.GetAuthSessionByID(c.Request.Context(), req.SessionID)
 	if err != nil {
 		return err
 	} else if session == nil {
 		return errs.NotFoundError().AppendDetails("鉴权会话不存在")
 	}
 
-	if session.Type != auth.AuthSessionTypeStepup {
+	if session.Type != authsvc.AuthSessionTypeStepup {
 		return errs.BadRequestError().AppendDetails("鉴权会话类型错误")
 	}
 	if session.UserID != claims.UserID {
@@ -103,13 +103,13 @@ func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.CreateAndLogInternalError(e, "Failed to generate stepup token").AppendDetails("令牌生成失败")
 	}
 
-	if err := auth.DeleteAuthSession(c.Request.Context(), session); err != nil {
+	if err := authsvc.DeleteAuthSession(c.Request.Context(), session); err != nil {
 		slog.Warn("Failed to delete stepup auth session", "error", err.Info.Error, "session_id", session.ID)
 	}
 
 	maxAge := int(cfg.C.StepupTokenTTL.Seconds())
 	handling.SetStepupCookie(c, stepupToken, maxAge)
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

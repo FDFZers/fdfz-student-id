@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	appsvc "fdfz-student-id/internal/service/app"
@@ -24,7 +25,7 @@ func setAppStatus(c *gin.Context, status model.AppStatus) *errs.Error {
 		return nil
 	}
 
-	updated, err := appsvc.SetAppStatus(c.Request.Context(), a.ID, status)
+	updated, err := appsvc.SetAppStatus(c.Request.Context(), db.R, a.ID, status)
 	if err != nil {
 		return err
 	}

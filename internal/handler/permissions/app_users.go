@@ -1,14 +1,14 @@
 package permissions
 
 import (
-	"fdfz-student-id/internal/service/search"
+	searchsvc "fdfz-student-id/internal/service/search"
 	"net/http"
 	"strings"
 	"time"
 
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/userperm"
+	userpermsvc "fdfz-student-id/internal/service/userperm"
 	"fdfz-student-id/internal/util/handling"
 
 	"github.com/gin-gonic/gin"
@@ -28,17 +28,14 @@ func listAppUserGrantsHandler(c *gin.Context) *errs.Error {
 	if err := handling.EnsureUserExists(c, userID); err != nil {
 		return err
 	}
-	limit, offset := search.ParseQueryPagination(c)
+	limit, offset := searchsvc.ParseQueryPagination(c)
 
-	grants, count, err := userperm.ListUserPermissionGrantsInApp(c.Request.Context(), userID, app.ID, limit, offset)
+	grants, count, err := userpermsvc.ListUserPermissionGrantsInApp(c.Request.Context(), userID, app.ID, limit, offset)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"count": count,
-		"data":  grantsJSON(grants),
-	})
+	handling.RespondList(c, count, handling.GrantsJSON(grants))
 	return nil
 }
 
@@ -64,8 +61,8 @@ func grantAppUserGrantHandler(c *gin.Context) *errs.Error {
 
 	// 解析请求体并校验权限名、备注与有效期区间。
 	var body grantAppUserGrantRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 	if err := handling.ValidateGrantPermission(body.Permission); err != nil {
 		return err
@@ -78,7 +75,7 @@ func grantAppUserGrantHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 权限必须属于该应用（同时完成归属校验）。
-	defs, err := userperm.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, []string{body.Permission})
+	defs, err := userpermsvc.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, []string{body.Permission})
 	if err != nil {
 		return err
 	}
@@ -98,11 +95,11 @@ func grantAppUserGrantHandler(c *gin.Context) *errs.Error {
 		ValidUntil:      null.TimeFromPtr(body.ValidUntil),
 		Note:            body.Note,
 	}
-	if err := userperm.GrantUserPermission(c.Request.Context(), grant); err != nil {
+	if err := userpermsvc.GrantUserPermission(c.Request.Context(), grant); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, grantJSON(grant))
+	c.JSON(http.StatusOK, handling.GrantJSON(grant))
 	return nil
 }
 
@@ -122,7 +119,7 @@ func revokeAppUserGrantHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	existing, err := userperm.GetUserPermissionGrant(c.Request.Context(), userID, permStr)
+	existing, err := userpermsvc.GetUserPermissionGrant(c.Request.Context(), userID, permStr)
 	if err != nil {
 		return err
 	}
@@ -130,11 +127,11 @@ func revokeAppUserGrantHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户授权不存在")
 	}
 
-	if err := userperm.RevokeUserPermission(c.Request.Context(), userID, permStr); err != nil {
+	if err := userpermsvc.RevokeUserPermission(c.Request.Context(), userID, permStr); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
@@ -152,7 +149,7 @@ func getAppUserEffectivePermissionsHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	permissions, err := userperm.ListUserEffectivePermissions(c.Request.Context(), userID)
+	permissions, err := userpermsvc.ListUserEffectivePermissions(c.Request.Context(), userID)
 	if err != nil {
 		return err
 	}

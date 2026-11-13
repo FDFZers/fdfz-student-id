@@ -3,7 +3,7 @@ package userperm
 import (
 	"context"
 	"errors"
-	"fdfz-student-id/internal/service/search"
+	searchsvc "fdfz-student-id/internal/service/search"
 
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
@@ -95,7 +95,7 @@ LIMIT $2 OFFSET $3
 
 // ListRolesVisibleToApp 分页查询对某应用可见的用户组（本应用 ∪ 其他应用的公开组），返回当前页与总数。
 func ListRolesVisibleToApp(ctx context.Context, appID int64, limit, offset int32) ([]*model.Role, int32, *errs.Error) {
-	limit, offset = search.NormalizePagination(limit, offset)
+	limit, offset = searchsvc.NormalizePagination(limit, offset)
 
 	var count int32
 	if e := db.R.QueryRow(ctx, countRolesVisibleToAppSQL, appID).Scan(&count); e != nil {

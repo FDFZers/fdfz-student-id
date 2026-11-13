@@ -1,10 +1,12 @@
 package app
 
 import (
+	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	appsvc "fdfz-student-id/internal/service/app"
 	"fdfz-student-id/internal/util/handling"
+	"fdfz-student-id/internal/util/slicex"
 
 	"github.com/gin-gonic/gin"
 	"github.com/guregu/null/v6"
@@ -40,8 +42,8 @@ func (r *updateAppRequest) empty() bool {
 // 写库使用 updated_at 乐观锁，应用并发修改时返回 409。
 func updateAppHandler(c *gin.Context) *errs.Error {
 	var req updateAppRequest
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if req.empty() {
 		return errs.BadRequestError().AppendDetails("没有需要更新的字段")
@@ -117,14 +119,14 @@ func updateAppHandler(c *gin.Context) *errs.Error {
 		a.ClientType = *req.ClientType
 	}
 	if req.RedirectURIs != nil {
-		redirectURIs := dedupeStrings(*req.RedirectURIs)
+		redirectURIs := slicex.DedupeStrings(*req.RedirectURIs)
 		if err := handling.ValidateAppRedirectURIs(redirectURIs); err != nil {
 			return err
 		}
 		a.RedirectURIs = redirectURIs
 	}
 	if req.RequestedPerms != nil {
-		requestedPerms := dedupeStrings(*req.RequestedPerms)
+		requestedPerms := slicex.DedupeStrings(*req.RequestedPerms)
 		if err := handling.ValidateAppRequestedPermissions(requestedPerms); err != nil {
 			return err
 		}
@@ -136,7 +138,7 @@ func updateAppHandler(c *gin.Context) *errs.Error {
 		a.SecretHash = null.String{}
 	}
 
-	if err := appsvc.UpdateApp(c.Request.Context(), a, oldNamespace, expectedUpdatedAt); err != nil {
+	if err := appsvc.UpdateApp(c.Request.Context(), db.R, a, oldNamespace, expectedUpdatedAt); err != nil {
 		return err
 	}
 

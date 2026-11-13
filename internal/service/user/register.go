@@ -148,6 +148,7 @@ WHERE id = $1
 // 并发审核同一申请时，后到的事务读到非 pending 状态并返回 409。
 func ReviewRegisterRequest(
 	ctx context.Context,
+	dh db.Handle,
 	id uuid.UUID,
 	status model.RegisterRequestStatus,
 	reviewComment string,
@@ -157,15 +158,15 @@ func ReviewRegisterRequest(
 		return errs.BadRequestError().AppendDetails("审核状态取值错误")
 	}
 
-	tx, txErr := db.R.Begin(ctx)
-	if txErr != nil {
-		return errs.CreateAndLogInternalError(txErr, "Failed to begin transaction for reviewing register request").
+	tx, err := dh.Begin(ctx)
+	if err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to begin transaction for reviewing register request").
 			AppendDetails("注册请求审核失败")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var req model.RegisterRequest
-	err := tx.QueryRow(ctx, lockRegisterRequestSQL, id).Scan(
+	err = tx.QueryRow(ctx, lockRegisterRequestSQL, id).Scan(
 		&req.ID,
 		&req.Username,
 		&req.Password,

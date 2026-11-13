@@ -1,7 +1,10 @@
 package handling
 
 import (
+	"encoding/json/v2"
 	"fdfz-student-id/internal/errs"
+	"io"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,4 +35,29 @@ func Wrap(failMsg string, h Handler) gin.HandlerFunc {
 		}
 		err.AppendDetails(failMsg).Respond(c)
 	}
+}
+
+// BindJSON 解析 JSON 请求体；失败时统一返回 400 与「请求解析失败」。
+func BindJSON[T any](c *gin.Context, target *T) *errs.Error {
+	if c.Request.Body == nil {
+		return errs.BadRequestError().AppendDetails("请求解析失败")
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err == nil {
+		err = json.Unmarshal(body, target)
+	}
+	if err != nil {
+		return errs.BadRequestError().AppendDetails("请求解析失败")
+	}
+	return nil
+}
+
+// RespondOK 写出空对象响应。
+func RespondOK(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{})
+}
+
+// RespondList 写出 count + data 的列表响应。
+func RespondList(c *gin.Context, count, data any) {
+	c.JSON(http.StatusOK, gin.H{"count": count, "data": data})
 }

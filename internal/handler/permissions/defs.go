@@ -6,7 +6,7 @@ import (
 
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/userperm"
+	userpermsvc "fdfz-student-id/internal/service/userperm"
 	"fdfz-student-id/internal/util/handling"
 
 	"github.com/guregu/null/v6"
@@ -31,8 +31,8 @@ func createAppPermissionHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body createAppPermissionRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 
 	// 解析并校验权限串（必须属于当前应用的命名空间）
@@ -52,11 +52,11 @@ func createAppPermissionHandler(c *gin.Context) *errs.Error {
 		Requestable: body.Requestable,
 		CreatedBy:   null.IntFrom(claims.UserID),
 	}
-	if err := userperm.CreatePermissionDef(c.Request.Context(), def); err != nil {
+	if err := userpermsvc.CreatePermissionDef(c.Request.Context(), def); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, defJSON(def, app.Namespace))
+	c.JSON(http.StatusOK, handling.DefJSON(def, app.Namespace))
 	return nil
 }
 
@@ -78,15 +78,15 @@ func updateAppPermissionHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body updateAppPermissionRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 	if body.Description == nil && body.Requestable == nil {
 		return errs.BadRequestError().AppendDetails("没有需要更新的字段")
 	}
 
 	// 确认权限定义存在且属于该应用
-	def, err := userperm.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
+	def, err := userpermsvc.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
 	if err != nil {
 		return err
 	}
@@ -109,13 +109,13 @@ func updateAppPermissionHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	if err := userperm.UpdatePermissionDef(c.Request.Context(), permissionID, description, requestable); err != nil {
+	if err := userpermsvc.UpdatePermissionDef(c.Request.Context(), permissionID, description, requestable); err != nil {
 		return err
 	}
 	def.Description = description
 	def.Requestable = requestable
 
-	c.JSON(http.StatusOK, defJSON(def, app.Namespace))
+	c.JSON(http.StatusOK, handling.DefJSON(def, app.Namespace))
 	return nil
 }
 
@@ -131,7 +131,7 @@ func deleteAppPermissionHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	def, err := userperm.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
+	def, err := userpermsvc.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
 	if err != nil {
 		return err
 	}
@@ -144,10 +144,10 @@ func deleteAppPermissionHandler(c *gin.Context) *errs.Error {
 		return errs.IllegalStateError().AppendDetails("核心权限定义不允许删除").Seal()
 	}
 
-	if err := userperm.DeletePermissionDef(c.Request.Context(), permissionID); err != nil {
+	if err := userpermsvc.DeletePermissionDef(c.Request.Context(), permissionID); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

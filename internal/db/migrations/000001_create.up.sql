@@ -9,7 +9,7 @@ CREATE TYPE register_request_status AS ENUM ('pending', 'approved', 'rejected');
 
 CREATE TYPE app_type AS ENUM ('confidential', 'public', 'confidential_device', 'public_device');
 CREATE TYPE app_status AS ENUM ('active', 'suspended');
-CREATE TYPE app_auth_status AS ENUM ('active', 'pending');
+CREATE TYPE app_auth_status AS ENUM ('active', 'update_suspended');
 
 -- =============================================
 -- 通用 updated_at 触发器函数

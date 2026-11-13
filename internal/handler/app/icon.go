@@ -3,7 +3,7 @@ package app
 import (
 	"fdfz-student-id/internal/errs"
 	appsvc "fdfz-student-id/internal/service/app"
-	"fdfz-student-id/internal/service/filestore"
+	filestoresvc "fdfz-student-id/internal/service/filestore"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"strconv"
@@ -40,7 +40,7 @@ func setIconHandler(c *gin.Context) *errs.Error {
 
 	// 路径与应用 ID 绑定，文件名统一由服务端检测结果生成
 	appID := strconv.FormatInt(a.ID, 10)
-	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
+	if err := filestoresvc.UploadFile(fileHeader, &filestoresvc.StoreFileReq{
 		Slug:         appIconSlug(a.ID),
 		FileName:     appID + extension,
 		Description:  "OAuth 应用图标",
@@ -63,11 +63,11 @@ func deleteIconHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	if e := filestore.DeleteFile(appIconSlug(a.ID)); e != nil {
-		if e.HTTPCode == http.StatusNotFound {
+	if err := filestoresvc.DeleteFile(appIconSlug(a.ID)); err != nil {
+		if err.HTTPCode == http.StatusNotFound {
 			return errs.NotFoundError().AppendDetails("未设置图标")
 		}
-		return e
+		return err
 	}
 
 	respondApp(c, a)
@@ -90,7 +90,7 @@ func getIconHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("应用不存在")
 	}
 
-	fileURL, err := filestore.BuildFileUrl(appIconSlug(appID))
+	fileURL, err := filestoresvc.BuildFileUrl(appIconSlug(appID))
 	if err != nil {
 		return err
 	}

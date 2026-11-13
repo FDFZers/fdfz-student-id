@@ -3,8 +3,8 @@ package app
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/service/search"
+	permsvc "fdfz-student-id/internal/service/perm"
+	searchsvc "fdfz-student-id/internal/service/search"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
@@ -13,7 +13,7 @@ import (
 )
 
 // appSearchCfg 是应用搜索配置；Table 只含 oauth_apps，附加条件由 handler 按调用方范围注入。
-var appSearchCfg = search.SearchConfig{
+var appSearchCfg = searchsvc.SearchConfig{
 	Table: "oauth_apps",
 	Item:  "应用",
 	Columns: []string{
@@ -21,7 +21,7 @@ var appSearchCfg = search.SearchConfig{
 		"homepage_url", "client_type", "redirect_uris", "requested_perms", "status",
 		"created_at", "updated_at",
 	},
-	Fields: []search.Field{
+	Fields: []searchsvc.Field{
 		{ID: "id", Column: "id", Numeric: true},
 		{ID: "namespace", Column: "namespace"},
 		{ID: "owner_user_id", Column: "owner_user_id", Numeric: true},
@@ -29,29 +29,29 @@ var appSearchCfg = search.SearchConfig{
 		{ID: "description", Column: "description"},
 		{ID: "homepage_url", Column: "homepage_url"},
 	},
-	MatchMethods: search.MatchMethodValues(),
-	SortableFields: []search.Field{
+	MatchMethods: searchsvc.MatchMethodValues(),
+	SortableFields: []searchsvc.Field{
 		{ID: "id", Column: "id"},
 		{ID: "namespace", Column: "namespace"},
 		{ID: "name", Column: "name"},
 		{ID: "created_at", Column: "created_at"},
 		{ID: "updated_at", Column: "updated_at"},
 	},
-	Tags: []search.Tag{
-		{ID: "status", Column: "status", ValueMap: search.ValueMapOf(model.AppStatusNames())},
-		{ID: "client_type", Column: "client_type", ValueMap: search.ValueMapOf(model.AppTypeNames())},
+	Tags: []searchsvc.Tag{
+		{ID: "status", Column: "status", ValueMap: searchsvc.ValueMapOf(model.AppStatusNames())},
+		{ID: "client_type", Column: "client_type", ValueMap: searchsvc.ValueMapOf(model.AppTypeNames())},
 	},
 	DefaultSortColumn: "id",
 }
 
 // appSearchConfigForClaims 按调用方范围生成搜索配置：
 // 全局管理员可搜索全部应用；普通所有者只能搜索自己名下的应用。
-func appSearchConfigForClaims(claims *model.RegisteredTokenClaims) (*search.SearchConfig, *errs.Error) {
+func appSearchConfigForClaims(claims *model.RegisteredTokenClaims) (*searchsvc.SearchConfig, *errs.Error) {
 	cfg := appSearchCfg
 	where := []sq.Sqlizer{sq.Expr("deleted_at IS NULL")}
 
 	if !handling.IsGlobalAppReader(claims) {
-		if !perm.HasPermission(claims, perm.PermAppRead) {
+		if !permsvc.HasPermission(claims, permsvc.PermAppRead) {
 			return nil, errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 		}
 		where = append(where, sq.Eq{"owner_user_id": claims.UserID})
@@ -69,15 +69,15 @@ func appSearchInfoHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	c.JSON(http.StatusOK, search.GetInfo(cfg))
+	c.JSON(http.StatusOK, searchsvc.GetInfo(cfg))
 	return nil
 }
 
 // appSearchQueryHandler 执行应用搜索并返回总数与应用信息；不会返回密钥哈希。
 func appSearchQueryHandler(c *gin.Context) *errs.Error {
-	var req search.SearchRequest
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	var req searchsvc.SearchRequest
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 
 	claims := handling.MustGetClaims(c)
@@ -86,14 +86,11 @@ func appSearchQueryHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	result, err := search.ExecSearch[model.OAuthApp](c.Request.Context(), cfg, &req)
+	result, err := searchsvc.ExecSearch[model.OAuthApp](c.Request.Context(), cfg, &req)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"count": result.Count,
-		"data":  appsJSON(result.Data),
-	})
+	handling.RespondList(c, result.Count, handling.AppsJSON(result.Data))
 	return nil
 }

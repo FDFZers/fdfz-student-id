@@ -3,7 +3,7 @@ package auth
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/middleware"
-	"fdfz-student-id/internal/service/captcha"
+	captchasvc "fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
@@ -48,7 +48,7 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 
 // challengeHandler 生成 Altcha 人机验证 Challenge，供前端完成工作量证明后随表单回传。
 func challengeHandler(c *gin.Context) *errs.Error {
-	challenge, err := captcha.CreateChallenge()
+	challenge, err := captchasvc.CreateChallenge()
 	if err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to create altcha challenge")
 	}

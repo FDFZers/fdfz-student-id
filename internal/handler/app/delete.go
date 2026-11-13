@@ -1,10 +1,11 @@
 package app
 
 import (
+	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	appsvc "fdfz-student-id/internal/service/app"
-	"fdfz-student-id/internal/service/filestore"
-	"fdfz-student-id/internal/service/perm"
+	filestoresvc "fdfz-student-id/internal/service/filestore"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
@@ -21,8 +22,8 @@ func deleteAppHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	isGlobal := perm.HasPermission(claims, perm.PermAppsDelete)
-	isOwner := a.OwnerUserID == claims.UserID && perm.HasPermission(claims, perm.PermAppDelete)
+	isGlobal := permsvc.HasPermission(claims, permsvc.PermAppsDelete)
+	isOwner := a.OwnerUserID == claims.UserID && permsvc.HasPermission(claims, permsvc.PermAppDelete)
 	if !isGlobal && !isOwner {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
@@ -30,17 +31,17 @@ func deleteAppHandler(c *gin.Context) *errs.Error {
 		return errs.IllegalStateError().AppendDetails("核心应用不允许删除").Seal()
 	}
 
-	deleted, err := appsvc.DeleteApp(c.Request.Context(), a.ID)
+	deleted, err := appsvc.DeleteApp(c.Request.Context(), db.R, a.ID)
 	if err != nil {
 		return err
 	}
 
 	// 图标文件按应用 ID 固定存放；删除应用后尽力清理，失败只记录日志
-	if e := filestore.DeleteFile(appIconSlug(deleted.ID)); e != nil && e.HTTPCode != http.StatusNotFound {
+	if err := filestoresvc.DeleteFile(appIconSlug(deleted.ID)); err != nil && err.HTTPCode != http.StatusNotFound {
 		slog.Warn("Failed to delete app icon file",
-			"app_id", deleted.ID, "slug", appIconSlug(deleted.ID), "error", e.Info.Error)
+			"app_id", deleted.ID, "slug", appIconSlug(deleted.ID), "error", err.Info.Error)
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

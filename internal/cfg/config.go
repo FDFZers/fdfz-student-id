@@ -1,7 +1,7 @@
 package cfg
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fdfz-student-id/internal/model"
 	"fmt"
 	"os"

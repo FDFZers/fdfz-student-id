@@ -4,7 +4,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
@@ -16,9 +16,9 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	group := internal.Group("/app")
 
 	// 创建应用、停用/启用仅管理员可用；删除允许全局删除权限或应用所有者删除自己的应用。
-	group.POST("", middleware.RequirePermission(perm.PermAppsCreate), handling.Wrap("OAuth 应用创建失败", createAppHandler))
-	group.POST("/:appID/suspend", middleware.RequirePermission(perm.PermAppsSuspend), handling.Wrap("OAuth 应用停用失败", suspendAppHandler))
-	group.POST("/:appID/activate", middleware.RequirePermission(perm.PermAppsSuspend), handling.Wrap("OAuth 应用启用失败", activateAppHandler))
+	group.POST("", middleware.RequirePermission(permsvc.PermAppsCreate), handling.Wrap("OAuth 应用创建失败", createAppHandler))
+	group.POST("/:appID/suspend", middleware.RequirePermission(permsvc.PermAppsSuspend), handling.Wrap("OAuth 应用停用失败", suspendAppHandler))
+	group.POST("/:appID/activate", middleware.RequirePermission(permsvc.PermAppsSuspend), handling.Wrap("OAuth 应用启用失败", activateAppHandler))
 	group.DELETE("/:appID", middleware.RequireToken(), handling.Wrap("OAuth 应用删除失败", deleteAppHandler))
 
 	// 搜索、详情、修改、密钥与图标：管理员可操作全部应用，应用所有者可操作自己的应用。
@@ -29,6 +29,11 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	group.POST("/:appID/secret/rotate", middleware.RequireToken(), handling.Wrap("OAuth 应用密钥重置失败", rotateSecretHandler))
 	group.PUT("/:appID/icon", middleware.RequireToken(), middleware.LimitSize(5<<20), handling.Wrap("OAuth 应用图标设置失败", setIconHandler))
 	group.DELETE("/:appID/icon", middleware.RequireToken(), handling.Wrap("OAuth 应用图标删除失败", deleteIconHandler))
+
+	// 用户授权管理：查看/撤销自己授予应用的权限；oauths.* 可管理他人。
+	group.GET("/authorizations", handling.Wrap("授权列表获取失败", listAuthorizationsHandler))
+	group.GET("/authorizations/:id", handling.Wrap("授权列表获取失败", listAuthorizationsHandler))
+	group.DELETE("/authorizations/:authID", middleware.RequireUserToken(), handling.Wrap("授权撤销失败", revokeAuthorizationHandler))
 
 	// 图标需要出现在 OAuth 授权页等公开页面，走无需令牌的对外接口。
 	api.GET("/app/:appID/icon", handling.Wrap("OAuth 应用图标获取失败", getIconHandler))
@@ -44,10 +49,10 @@ func managedApp(c *gin.Context, write bool) (*model.OAuthApp, *errs.Error) {
 	var isGlobal, hasOwnedPermission bool
 	if write {
 		isGlobal = handling.IsGlobalAppAdmin(claims)
-		hasOwnedPermission = perm.HasPermission(claims, perm.PermAppUpdate)
+		hasOwnedPermission = permsvc.HasPermission(claims, permsvc.PermAppUpdate)
 	} else {
 		isGlobal = handling.IsGlobalAppReader(claims)
-		hasOwnedPermission = perm.HasPermission(claims, perm.PermAppRead)
+		hasOwnedPermission = permsvc.HasPermission(claims, permsvc.PermAppRead)
 	}
 	if !isGlobal && !hasOwnedPermission {
 		return nil, errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
@@ -63,50 +68,7 @@ func managedApp(c *gin.Context, write bool) (*model.OAuthApp, *errs.Error) {
 	return a, nil
 }
 
-// appJSON 把应用渲染为 API 响应；不暴露密钥哈希，仅返回是否已设置密钥。
-func appJSON(a *model.OAuthApp) gin.H {
-	data := gin.H{
-		"id":              a.ID,
-		"namespace":       a.Namespace,
-		"owner_user_id":   a.OwnerUserID,
-		"name":            a.Name,
-		"description":     a.Description,
-		"homepage_url":    a.HomepageURL,
-		"client_type":     a.ClientType,
-		"redirect_uris":   a.RedirectURIs,
-		"requested_perms": a.RequestedPerms,
-		"status":          a.Status,
-		"has_secret":      a.ClientType.IsConfidential() && a.SecretHash.Valid,
-		"created_at":      a.CreatedAt,
-		"updated_at":      a.UpdatedAt,
-	}
-	return data
-}
-
-// appsJSON 把应用列表渲染为数组。
-func appsJSON(apps []*model.OAuthApp) []gin.H {
-	data := make([]gin.H, 0, len(apps))
-	for _, a := range apps {
-		data = append(data, appJSON(a))
-	}
-	return data
-}
-
-// dedupeStrings 按首次出现顺序去重，空列表返回空切片而不是 nil。
-func dedupeStrings(items []string) []string {
-	seen := make(map[string]struct{}, len(items))
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		result = append(result, item)
-	}
-	return result
-}
-
 // respondApp 写出单个应用响应。
 func respondApp(c *gin.Context, a *model.OAuthApp) {
-	c.JSON(http.StatusOK, appJSON(a))
+	c.JSON(http.StatusOK, handling.AppJSON(a))
 }

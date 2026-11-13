@@ -3,13 +3,16 @@ package app
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/crypto"
+	"fdfz-student-id/internal/util/slicex"
 
 	"github.com/guregu/null/v6"
 	"github.com/jackc/pgx/v5"
@@ -170,6 +173,8 @@ RETURNING ` + appColumns
 
 const appExistsSQL = `SELECT EXISTS (SELECT 1 FROM oauth_apps WHERE id = $1 AND deleted_at IS NULL)`
 
+const appRequestedPermsSQL = `SELECT requested_perms FROM oauth_apps WHERE id = $1`
+
 // updateGrantNamespaceSQL 把以旧命名空间开头的直接授权改写为新命名空间。
 // 注意：必须按 ":" 精确切分，不能用 LIKE，因为命名空间允许下划线（LIKE 通配符）。
 const updateGrantNamespaceSQL = `
@@ -227,6 +232,7 @@ WHERE EXISTS (
 // 命名空间变化后触发权限目录异步重载。
 func UpdateApp(
 	ctx context.Context,
+	dh db.Handle,
 	a *model.OAuthApp,
 	oldNamespace string,
 	expectedUpdatedAt time.Time,
@@ -244,25 +250,31 @@ func UpdateApp(
 		a.SecretHash = null.String{}
 	}
 
-	tx, err := db.R.Begin(ctx)
-	if err != nil {
-		return errs.CreatePGError(err, "应用", "Failed to begin transaction")
+	tx, e := dh.Begin(ctx)
+	if e != nil {
+		return errs.CreatePGError(e, "应用", "Failed to begin transaction")
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
 
-	updated, e := scanApp(tx.QueryRow(ctx, updateAppSQL,
+	// 记录更新前的申请权限，用于判断是否需要强制用户重新授权。
+	var oldRequestedPerms []string
+	if e := tx.QueryRow(ctx, appRequestedPermsSQL, a.ID).Scan(&oldRequestedPerms); e != nil && !errors.Is(e, pgx.ErrNoRows) {
+		return errs.CreatePGError(e, "应用", "Failed to load app requested perms")
+	}
+
+	updated, err := scanApp(tx.QueryRow(ctx, updateAppSQL,
 		a.ID, a.Namespace, a.OwnerUserID, a.SecretHash, a.Name, a.Description, a.HomepageURL,
 		a.ClientType, a.RedirectURIs, a.RequestedPerms, expectedUpdatedAt,
 	), "应用")
-	if e != nil {
-		return e
+	if err != nil {
+		return err
 	}
 	if updated == nil {
 		var exists bool
-		if qErr := tx.QueryRow(ctx, appExistsSQL, a.ID).Scan(&exists); qErr != nil {
-			return errs.CreatePGError(qErr, "应用", "Failed to check app existence")
+		if e := tx.QueryRow(ctx, appExistsSQL, a.ID).Scan(&exists); e != nil {
+			return errs.CreatePGError(e, "应用", "Failed to check app existence")
 		}
 		if exists {
 			return errs.ConflictError().AppendDetails("应用已被修改，请刷新后重试")
@@ -283,14 +295,27 @@ func UpdateApp(
 		}
 
 		// 级联可能再次修改当前应用（requested_perms 命中旧命名空间），重新读取以保证返回值最新
-		refetched, e := scanApp(tx.QueryRow(ctx, getAppByIDSQL, a.ID), "应用")
-		if e != nil {
-			return e
+		refetched, err := scanApp(tx.QueryRow(ctx, getAppByIDSQL, a.ID), "应用")
+		if err != nil {
+			return err
 		}
 		if refetched == nil {
 			return errs.NotFoundError().AppendDetails("应用不存在")
 		}
 		updated = refetched
+	}
+
+	// 申请权限发生变化时把该应用的全部授权置为 update_suspended，强制用户重新授权；
+	if !slices.Equal(
+		normalizeRequestedPerms(oldRequestedPerms, oldNamespace, updated.Namespace),
+		normalizeRequestedPerms(updated.RequestedPerms, updated.Namespace, updated.Namespace),
+	) {
+		if _, e := tx.Exec(ctx, suspendAppAuthorizationsSQL, a.ID, model.AppAuthStatusUpdateSuspended); e != nil {
+			return errs.CreatePGError(e, "应用授权", "Failed to suspend app authorizations after permission change")
+		}
+		if _, e := tx.Exec(ctx, deleteAppRefreshTokensSQL, a.ID); e != nil {
+			return errs.CreatePGError(e, "应用授权", "Failed to revoke app refresh tokens after permission change")
+		}
 	}
 
 	if e := tx.Commit(ctx); e != nil {
@@ -299,7 +324,7 @@ func UpdateApp(
 
 	*a = *updated
 	if updated.Namespace != oldNamespace {
-		perm.NotifyReload()
+		permsvc.NotifyReload()
 	}
 	return nil
 }
@@ -319,18 +344,18 @@ WHERE auth_id IN (SELECT id FROM oauth_authorizations WHERE app_id = $1)
 
 // SetAppStatus 管理员设置应用状态；停用时同时删除刷新令牌，使应用立即失去续期能力。
 // 应用状态影响权限目录，成功后触发异步重载。
-func SetAppStatus(ctx context.Context, appID int64, status model.AppStatus) (*model.OAuthApp, *errs.Error) {
-	tx, err := db.R.Begin(ctx)
-	if err != nil {
-		return nil, errs.CreatePGError(err, "应用", "Failed to begin transaction")
+func SetAppStatus(ctx context.Context, dh db.Handle, appID int64, status model.AppStatus) (*model.OAuthApp, *errs.Error) {
+	tx, e := dh.Begin(ctx)
+	if e != nil {
+		return nil, errs.CreatePGError(e, "应用", "Failed to begin transaction")
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
 
-	a, e := scanApp(tx.QueryRow(ctx, setAppStatusSQL, appID, status), "应用")
-	if e != nil {
-		return nil, e
+	a, err := scanApp(tx.QueryRow(ctx, setAppStatusSQL, appID, status), "应用")
+	if err != nil {
+		return nil, err
 	}
 	if a == nil {
 		return nil, errs.NotFoundError().AppendDetails("应用不存在")
@@ -346,7 +371,7 @@ func SetAppStatus(ctx context.Context, appID int64, status model.AppStatus) (*mo
 		return nil, errs.CreatePGError(e, "应用", "Failed to commit transaction")
 	}
 
-	perm.NotifyReload()
+	permsvc.NotifyReload()
 	return a, nil
 }
 
@@ -359,6 +384,9 @@ RETURNING ` + appColumns
 
 // deleteAppAuthorizationsSQL 删除应用的全部用户授权，刷新令牌随外键级联删除。
 const deleteAppAuthorizationsSQL = `DELETE FROM oauth_authorizations WHERE app_id = $1`
+
+// suspendAppAuthorizationsSQL 把应用的全部授权置为 update_suspended，用于申请权限变化后强制重新授权。
+const suspendAppAuthorizationsSQL = `UPDATE oauth_authorizations SET status = $2 WHERE app_id = $1`
 
 // deleteAppGrantsSQL 删除由该应用发起的直接授权，以及旧命名空间下的全部授权。
 // 命名空间在应用软删除后可被新应用复用，必须清理旧授权避免新应用继承历史授权。
@@ -403,18 +431,18 @@ WHERE EXISTS (
 
 // DeleteApp 管理员软删除应用：同时删除用户授权、相关直接授权与刷新令牌，权限目录随后重载。
 // 返回删除前的应用记录，供调用方清理外部资源。
-func DeleteApp(ctx context.Context, appID int64) (*model.OAuthApp, *errs.Error) {
-	tx, err := db.R.Begin(ctx)
-	if err != nil {
-		return nil, errs.CreatePGError(err, "应用", "Failed to begin transaction")
+func DeleteApp(ctx context.Context, dh db.Handle, appID int64) (*model.OAuthApp, *errs.Error) {
+	tx, e := dh.Begin(ctx)
+	if e != nil {
+		return nil, errs.CreatePGError(e, "应用", "Failed to begin transaction")
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
 
-	a, e := scanApp(tx.QueryRow(ctx, deleteAppSQL, appID), "应用")
-	if e != nil {
-		return nil, e
+	a, err := scanApp(tx.QueryRow(ctx, deleteAppSQL, appID), "应用")
+	if err != nil {
+		return nil, err
 	}
 	if a == nil {
 		return nil, errs.NotFoundError().AppendDetails("应用不存在")
@@ -437,7 +465,7 @@ func DeleteApp(ctx context.Context, appID int64) (*model.OAuthApp, *errs.Error) 
 		return nil, errs.CreatePGError(e, "应用", "Failed to commit transaction")
 	}
 
-	perm.NotifyReload()
+	permsvc.NotifyReload()
 	return a, nil
 }
 
@@ -447,9 +475,9 @@ const rotateAppSecretSQL = `UPDATE oauth_apps SET secret_hash = $2 WHERE id = $1
 // GenerateClientSecret 生成 64 位随机客户端密钥，并返回明文与 SHA-512 哈希。
 // 明文只在创建或重置响应中返回一次，数据库只保存哈希。
 func GenerateClientSecret() (string, string, *errs.Error) {
-	secret, e := crypto.GenerateCode(64, crypto.TokenCharset)
-	if e != nil {
-		return "", "", errs.CreateAndLogInternalError(e, "Failed to generate client secret").AppendDetails("客户端密钥生成失败")
+	secret, err := crypto.GenerateCode(64, crypto.TokenCharset)
+	if err != nil {
+		return "", "", errs.CreateAndLogInternalError(err, "Failed to generate client secret").AppendDetails("客户端密钥生成失败")
 	}
 	return secret, crypto.HashSHA512(secret), nil
 }
@@ -469,4 +497,19 @@ func RotateAppSecret(ctx context.Context, appID int64) (string, *errs.Error) {
 		return "", errs.NotFoundError().AppendDetails("应用不存在")
 	}
 	return secret, nil
+}
+
+// normalizeRequestedPerms 把申请权限中的旧命名空间改写为新命名空间，排序去重后用于比较。
+// 这样仅修改命名空间（权限语义不变）时不会被误判为申请权限变化。
+func normalizeRequestedPerms(perms []string, fromNamespace, toNamespace string) []string {
+	normalized := make([]string, 0, len(perms))
+	for _, permission := range perms {
+		if fromNamespace != toNamespace {
+			if rest, ok := strings.CutPrefix(permission, fromNamespace+":"); ok {
+				permission = toNamespace + ":" + rest
+			}
+		}
+		normalized = append(normalized, permission)
+	}
+	return slicex.SortDedupe(normalized)
 }

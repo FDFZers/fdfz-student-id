@@ -5,12 +5,12 @@ import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/app"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/captcha"
-	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/service/user"
-	"fdfz-student-id/internal/service/userperm"
+	appsvc "fdfz-student-id/internal/service/app"
+	authsvc "fdfz-student-id/internal/service/auth"
+	captchasvc "fdfz-student-id/internal/service/captcha"
+	permsvc "fdfz-student-id/internal/service/perm"
+	usersvc "fdfz-student-id/internal/service/user"
+	userpermsvc "fdfz-student-id/internal/service/userperm"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
@@ -34,11 +34,11 @@ type loginInitRequestReq struct {
 // 用户不存在时也执行一次密码哈希，避免通过响应耗时枚举账号。
 func loginInitHandler(c *gin.Context) *errs.Error {
 	var req loginInitRequestReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 
-	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
+	if err := captchasvc.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
 
@@ -49,7 +49,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	usr, err := user.GetUserByUsername(c.Request.Context(), req.Username)
+	usr, err := usersvc.GetUserByUsername(c.Request.Context(), req.Username)
 	if err != nil {
 		return err
 	} else if usr == nil {
@@ -57,11 +57,11 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 
-	if err := auth.ValidateUserPassword(c.Request.Context(), usr.ID, req.Password); err != nil {
+	if err := authsvc.ValidateUserPassword(c.Request.Context(), usr.ID, req.Password); err != nil {
 		return err
 	}
 
-	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), usr.ID)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 
 	// 校园 IP 内登录免二次验证，其余场景按已绑定的方式启用验证。
 	_, isSchoolIP := cfg.C.SchoolIPs[c.ClientIP()]
-	session, err := auth.CreateAuthSession(c.Request.Context(), auth.AuthSessionTypeLogin, isSchoolIP, usr.ID, req.IsTemporary)
+	session, err := authsvc.CreateAuthSession(c.Request.Context(), authsvc.AuthSessionTypeLogin, isSchoolIP, usr.ID, req.IsTemporary)
 	if err != nil {
 		return err
 	}
@@ -104,19 +104,19 @@ type loginFinalizeRequestReq struct {
 // 注意：会话必须已通过二次验证；登录成功会取消冷静期内的账号注销，若注销已到期则先执行注销再拒绝登录。
 func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	var req loginFinalizeRequestReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 
 	// 校验鉴权会话状态
-	authSession, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
+	authSession, err := authsvc.GetAuthSessionByID(c.Request.Context(), req.SessionID)
 	if err != nil {
 		return err
 	} else if authSession == nil {
 		return errs.NotFoundError().AppendDetails("鉴权会话不存在")
 	}
 
-	if authSession.Type != auth.AuthSessionTypeLogin {
+	if authSession.Type != authsvc.AuthSessionTypeLogin {
 		return errs.BadRequestError().AppendDetails("鉴权会话类型错误")
 	}
 	if !authSession.Passed2FA {
@@ -124,7 +124,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 二次校验封禁状态，防止用户在校验密码后被封禁
-	ban, err := user.GetUserBan(c.Request.Context(), authSession.UserID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return err
 	}
@@ -133,14 +133,14 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 冷静期内重新登录取消账号注销
-	cancelled, err := user.CancelPendingAccountDeletion(c.Request.Context(), authSession.UserID)
+	cancelled, err := usersvc.CancelPendingAccountDeletion(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return err
 	} else if cancelled {
 		slog.Info("Cancelled scheduled account deletion on login", "user_id", authSession.UserID)
 	}
 	// 注销可能已到期：先执行注销，再按凭据错误返回，避免泄露账号已注销
-	finalized, err := user.FinalizeOverdueAccountDeletion(c.Request.Context(), authSession.UserID)
+	finalized, err := usersvc.FinalizeOverdueAccountDeletion(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return err
 	} else if finalized {
@@ -148,7 +148,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 
-	if usr, err := user.GetUserByID(c.Request.Context(), authSession.UserID); err != nil {
+	if usr, err := usersvc.GetUserByID(c.Request.Context(), authSession.UserID); err != nil {
 		return err
 	} else if usr == nil {
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
@@ -175,24 +175,24 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		IsTemporary:      authSession.IsTemporary,
 		ExpiresAt:        time.Now().Add(dur),
 	}
-	if err := auth.CreateSession(c.Request.Context(), session); err != nil {
+	if err := authsvc.CreateSession(c.Request.Context(), session); err != nil {
 		return err
 	}
 
 	// rollback 在后续步骤失败时删除刚创建的会话，避免留下无法使用的会话记录
-	rollback := func(err *errs.Error) *errs.Error {
-		if deleteErr := auth.DeleteSession(c.Request.Context(), session.UUID); deleteErr != nil {
-			return err.AppendDetails("登录失败且回退失败，请联系管理员").AppendDetails(deleteErr.Info.Details...).Seal()
+	rollback := func(cause *errs.Error) *errs.Error {
+		if err := authsvc.DeleteSession(c.Request.Context(), session.UUID); err != nil {
+			return cause.AppendDetails("登录失败且回退失败，请联系管理员").AppendDetails(err.Info.Details...).Seal()
 		}
-		return err
+		return cause
 	}
 
 	// 解析权限与所属应用，签发访问令牌
-	perms, err := userperm.ListUserEffectivePermissions(c.Request.Context(), authSession.UserID)
+	perms, err := userpermsvc.ListUserEffectivePermissions(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return rollback(err)
 	}
-	ownedApps, err := app.ListOwnedAppIDs(c.Request.Context(), authSession.UserID)
+	ownedApps, err := appsvc.ListOwnedAppIDs(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return rollback(err)
 	}
@@ -200,7 +200,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	accessToken, e := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      authSession.UserID,
 		TokenType:   model.TokenTypeUser,
-		Permissions: perm.ResolvePatterns(perms),
+		Permissions: permsvc.ResolvePatterns(perms),
 		OwnedApps:   ownedApps,
 		IsTemporary: authSession.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
@@ -209,19 +209,19 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 刷新会话客户端信息并写入 Cookie
-	exp, err := auth.UpdateSessionClient(c, session.UUID, sessionTokenHash)
+	exp, err := authsvc.UpdateSessionClient(c, session.UUID, sessionTokenHash)
 	if err != nil {
 		return rollback(err)
 	}
 
 	// 登录用鉴权会话已完成使命，删除失败只记录日志，不影响登录结果
-	if err := auth.DeleteAuthSession(c.Request.Context(), authSession); err != nil {
+	if err := authsvc.DeleteAuthSession(c.Request.Context(), authSession); err != nil {
 		slog.Warn("Failed to delete login auth session", "error", err.Info.Error, "session_id", authSession.ID)
 	}
 
 	handling.SetTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
@@ -237,7 +237,7 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 
 	hash := crypto.HashSHA512(sessionToken)
 
-	session, err := auth.GetSessionByTokenHash(c.Request.Context(), hash)
+	session, err := authsvc.GetSessionByTokenHash(c.Request.Context(), hash)
 	if err != nil {
 		return err.AppendDetails("会话获取失败")
 	}
@@ -246,14 +246,14 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 校验用户仍然存在且未被封禁
-	usr, err := user.GetUserByID(c.Request.Context(), session.UserID)
+	usr, err := usersvc.GetUserByID(c.Request.Context(), session.UserID)
 	if err != nil {
 		return err
 	} else if usr == nil {
 		return errs.NotFoundError().AppendDetails("用户不存在")
 	}
 
-	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), usr.ID)
 	if err != nil {
 		return err
 	}
@@ -268,11 +268,11 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	}
 	sessionTokenHash := crypto.HashSHA512(sessionToken)
 
-	perms, err := userperm.ListUserEffectivePermissions(c.Request.Context(), session.UserID)
+	perms, err := userpermsvc.ListUserEffectivePermissions(c.Request.Context(), session.UserID)
 	if err != nil {
 		return err
 	}
-	ownedApps, err := app.ListOwnedAppIDs(c.Request.Context(), session.UserID)
+	ownedApps, err := appsvc.ListOwnedAppIDs(c.Request.Context(), session.UserID)
 	if err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	accessToken, e := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      session.UserID,
 		TokenType:   model.TokenTypeUser,
-		Permissions: perm.ResolvePatterns(perms),
+		Permissions: permsvc.ResolvePatterns(perms),
 		OwnedApps:   ownedApps,
 		IsTemporary: session.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
@@ -289,14 +289,14 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 更新会话客户端信息并重写 Cookie
-	exp, err := auth.UpdateSessionClient(c, session.UUID, sessionTokenHash)
+	exp, err := authsvc.UpdateSessionClient(c, session.UUID, sessionTokenHash)
 	if err != nil {
 		return err
 	}
 
 	handling.SetTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
@@ -310,11 +310,11 @@ func logoutHandler(c *gin.Context) *errs.Error {
 		return errs.InvalidTokenError().AppendDetails("会话 ID 格式错误")
 	}
 
-	if err := auth.RevokeSession(c.Request.Context(), sessionID); err != nil {
+	if err := authsvc.RevokeSession(c.Request.Context(), sessionID); err != nil {
 		return err
 	}
 
 	handling.ClearSessionCookies(c)
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

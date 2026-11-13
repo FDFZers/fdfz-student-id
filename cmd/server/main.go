@@ -8,8 +8,8 @@ import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/router"
-	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/service/schedule"
+	permsvc "fdfz-student-id/internal/service/perm"
+	schedulesvc "fdfz-student-id/internal/service/schedule"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/storage"
 	"log/slog"
@@ -100,16 +100,16 @@ func main() {
 	slog.Info("Database migrations completed")
 
 	// 加载权限目录（同时记录重载状态），并启动后台自动重载。
-	if err := perm.ReloadNow(context.Background()); err != nil {
+	if err := permsvc.ReloadNow(context.Background()); err != nil {
 		slog.Error("Error loading permission catalog", "error", err.Info.Error)
 		os.Exit(1)
 	}
 	permCtx, stopPermReload := context.WithCancel(context.Background())
 	defer stopPermReload()
-	perm.StartAutoReload(permCtx, perm.DefaultReloadThrottle)
+	permsvc.StartAutoReload(permCtx, permsvc.DefaultReloadThrottle)
 
 	// 启动定时任务（过期会话/封禁清理、账号注销到期处理）。
-	cron, e := schedule.ScheduleCron()
+	cron, e := schedulesvc.ScheduleCron()
 	if e != nil {
 		slog.Error("Error starting cron", "error", e)
 		os.Exit(1)

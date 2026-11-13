@@ -3,7 +3,7 @@ package captcha
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"

@@ -15,8 +15,8 @@ import (
 // ---------------------------------------------------------------------------
 
 const (
-	// CodeCharset 是邮箱/QQ 验证码字符集：大写字母加数字，便于用户手动输入。
-	CodeCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	// CodeCharset 是邮箱/QQ 验证码字符集：大写字母数字，去掉 O0IL，便于用户手动输入。
+	CodeCharset = "ABCDEFGHJKMNPQRSTUVWXYZ123456789"
 	// TokenCharset 是会话令牌字符集：大小写字母加数字，用于不可猜测的长随机串。
 	TokenCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )

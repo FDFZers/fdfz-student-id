@@ -3,8 +3,8 @@ package user
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/service/user"
+	permsvc "fdfz-student-id/internal/service/perm"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
@@ -63,14 +63,14 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 	// 解析请求并拒绝空更新
 
 	var req updateProfileReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if req.empty() {
 		return errs.BadRequestError().AppendDetails("未提供需要修改的字段")
 	}
 
-	target, err := user.GetUserByID(c.Request.Context(), targetID)
+	target, err := usersvc.GetUserByID(c.Request.Context(), targetID)
 	if err != nil {
 		return err
 	} else if target == nil {
@@ -89,14 +89,14 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 		SelfPerm  string
 		OtherPerm string
 	}{
-		{"username", req.Username != nil, "", perm.PermUsersProfileUpdateBasic},
-		{"nickname", req.Nickname != nil, perm.PermUserProfileUpdateBasic, perm.PermUsersProfileUpdateBasic},
-		{"signature", req.Signature != nil, perm.PermUserProfileUpdateAbout, perm.PermUsersProfileUpdateAbout},
-		{"bio", req.Bio != nil, perm.PermUserProfileUpdateAbout, perm.PermUsersProfileUpdateAbout},
-		{"real_name", req.RealName != nil, "", perm.PermUsersProfileUpdateIdentity},
-		{"school", req.School != nil, "", perm.PermUsersProfileUpdateIdentity},
-		{"student_num", req.StudentNum != nil, "", perm.PermUsersProfileUpdateIdentity},
-		{"visibilities", req.Visibilities != nil && !req.Visibilities.empty(), perm.PermUserProfileUpdateVisibilities, perm.PermUsersProfileUpdateVisibilities},
+		{"username", req.Username != nil, "", permsvc.PermUsersProfileUpdateBasic},
+		{"nickname", req.Nickname != nil, permsvc.PermUserProfileUpdateBasic, permsvc.PermUsersProfileUpdateBasic},
+		{"signature", req.Signature != nil, permsvc.PermUserProfileUpdateAbout, permsvc.PermUsersProfileUpdateAbout},
+		{"bio", req.Bio != nil, permsvc.PermUserProfileUpdateAbout, permsvc.PermUsersProfileUpdateAbout},
+		{"real_name", req.RealName != nil, "", permsvc.PermUsersProfileUpdateIdentity},
+		{"school", req.School != nil, "", permsvc.PermUsersProfileUpdateIdentity},
+		{"student_num", req.StudentNum != nil, "", permsvc.PermUsersProfileUpdateIdentity},
+		{"visibilities", req.Visibilities != nil && !req.Visibilities.empty(), permsvc.PermUserProfileUpdateVisibilities, permsvc.PermUsersProfileUpdateVisibilities},
 	}
 	for _, field := range fields {
 		if !field.Present {
@@ -106,7 +106,7 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 		if isSelf {
 			required = field.SelfPerm
 		}
-		if required == "" || !perm.HasPermission(claims, required) {
+		if required == "" || !permsvc.HasPermission(claims, required) {
 			return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 		}
 	}
@@ -197,11 +197,11 @@ func updateUserProfileHandler(c *gin.Context) *errs.Error {
 
 	// 写库并返回过滤后的最新资料
 
-	if err := user.UpdateUser(c.Request.Context(), target, expectedUpdatedAt); err != nil {
+	if err := usersvc.UpdateUser(c.Request.Context(), target, expectedUpdatedAt); err != nil {
 		return err
 	}
 
-	filtered, err := filterProfiles(c.Request.Context(), claims, target)
+	filtered, err := handling.UsersJSON(c.Request.Context(), claims, target)
 	if err != nil {
 		return err
 	}

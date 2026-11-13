@@ -21,8 +21,8 @@ type createAppRequest struct {
 // 不自动生成客户端密钥，所有者可在需要时通过密钥轮换接口自行生成。
 func createAppHandler(c *gin.Context) *errs.Error {
 	var req createAppRequest
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 
 	// 只校验必填的命名空间、名称与所有者

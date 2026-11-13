@@ -3,11 +3,10 @@ package security
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/user"
+	authsvc "fdfz-student-id/internal/service/auth"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -24,8 +23,8 @@ type changePasswordReq struct {
 // 注意：默认同时撤销除当前会话外的其他登录会话。
 func changePasswordHandler(c *gin.Context) *errs.Error {
 	var req changePasswordReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 
 	claims := handling.MustGetClaims(c)
@@ -37,7 +36,7 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 封禁用户不允许改密
-	ban, err := user.GetUserBan(c.Request.Context(), claims.UserID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	}
@@ -53,7 +52,7 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("新密码不能与原密码相同")
 	}
 
-	current, err := user.GetUserPassword(c.Request.Context(), claims.UserID)
+	current, err := usersvc.GetUserPassword(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	}
@@ -72,7 +71,7 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 		return errs.CreateAndLogInternalError(e, "Failed to hash new password").AppendDetails("密码哈希失败")
 	}
 
-	if err := user.UpsertUserPassword(c.Request.Context(), &model.UserPassword{
+	if err := usersvc.UpsertUserPassword(c.Request.Context(), &model.UserPassword{
 		UserID:   claims.UserID,
 		Password: pwdHash,
 	}); err != nil {
@@ -80,17 +79,17 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 使全部提权令牌失效，并按需撤销其他会话
-	if err := auth.RevokeUserStepups(c.Request.Context(), claims.UserID); err != nil {
+	if err := authsvc.RevokeUserStepups(c.Request.Context(), claims.UserID); err != nil {
 		return err
 	}
 	handling.ClearStepupCookie(c)
 
 	if req.RevokeOtherSessions == nil || *req.RevokeOtherSessions {
-		if err := auth.RevokeOtherUserSessions(c.Request.Context(), claims.UserID, currentSessionID); err != nil {
+		if err := authsvc.RevokeOtherUserSessions(c.Request.Context(), claims.UserID, currentSessionID); err != nil {
 			return err
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

@@ -3,8 +3,8 @@ package security
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/perm"
+	authsvc "fdfz-student-id/internal/service/auth"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 	"time"
@@ -12,19 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
-
-// sessionInfo 会话列表的响应项；不返回令牌哈希等敏感字段。
-type sessionInfo struct {
-	UUID          string     `json:"uuid"`
-	IsCurrent     bool       `json:"is_current"`   // 是否为当前请求令牌所属的登录会话
-	IsTemporary   bool       `json:"is_temporary"` // 临时会话刷新时不会延长有效期
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	ExpiresAt     time.Time  `json:"expires_at"`
-	LastUsedAt    *time.Time `json:"last_used_at"`
-	LastIP        *string    `json:"last_ip"`
-	LastUserAgent string     `json:"last_user_agent"`
-}
 
 // currentSessionUUID 解析当前请求令牌所属的登录会话 UUID。
 // 注意：提权令牌在 SessionID 中携带会话 UUID，访问令牌则只有 JWT ID，故需回退到 claims.ID。
@@ -40,32 +27,13 @@ func currentSessionUUID(claims *model.RegisteredTokenClaims) *uuid.UUID {
 	return nil
 }
 
-// buildSessionInfos 把会话记录转换为响应项；currentID 为空时（查看他人会话）不标记当前会话。
-func buildSessionInfos(sessions []*model.UserSession, currentID *uuid.UUID) []sessionInfo {
-	results := make([]sessionInfo, 0, len(sessions))
-	for _, session := range sessions {
-		results = append(results, sessionInfo{
-			UUID:          session.UUID.String(),
-			IsCurrent:     currentID != nil && session.UUID == *currentID,
-			IsTemporary:   session.IsTemporary,
-			CreatedAt:     session.CreatedAt,
-			UpdatedAt:     session.UpdatedAt,
-			ExpiresAt:     session.ExpiresAt,
-			LastUsedAt:    session.LastUsedAt,
-			LastIP:        session.LastIP,
-			LastUserAgent: session.LastUserAgent,
-		})
-	}
-	return results
-}
-
 // serveUserSessionList 查询目标用户的有效会话并输出；仅当查看自己时标记当前会话。
 func serveUserSessionList(
 	c *gin.Context,
 	claims *model.RegisteredTokenClaims,
 	targetID int64,
 ) *errs.Error {
-	sessions, err := auth.ListUserSessions(c.Request.Context(), targetID)
+	sessions, err := authsvc.ListUserSessions(c.Request.Context(), targetID)
 	if err != nil {
 		return err
 	}
@@ -76,7 +44,7 @@ func serveUserSessionList(
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"sessions": buildSessionInfos(sessions, currentID),
+		"sessions": handling.SessionInfos(sessions, currentID),
 	})
 	return nil
 }
@@ -93,9 +61,9 @@ func listSessionsHandler(c *gin.Context) *errs.Error {
 	// 自己与他人的会话读取使用不同权限
 	var allowed bool
 	if selfID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserSessionRead)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUserSessionRead)
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersSessionRead)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersSessionRead)
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
@@ -123,7 +91,7 @@ func revokeSessionsHandler(c *gin.Context) *errs.Error {
 	if selfID == claims.UserID {
 		allowed = claims.TokenType == model.TokenTypeStepup
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersSessionWrite)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersSessionWrite)
 	}
 	if !allowed {
 		if selfID == claims.UserID {
@@ -137,10 +105,10 @@ func revokeSessionsHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 撤销全部会话后提权令牌也无存在的意义，一并失效
-	if err := auth.RevokeAllUserSessions(c.Request.Context(), selfID); err != nil {
+	if err := authsvc.RevokeAllUserSessions(c.Request.Context(), selfID); err != nil {
 		return err
 	}
-	if err := auth.RevokeUserStepups(c.Request.Context(), selfID); err != nil {
+	if err := authsvc.RevokeUserStepups(c.Request.Context(), selfID); err != nil {
 		return err
 	}
 
@@ -148,7 +116,7 @@ func revokeSessionsHandler(c *gin.Context) *errs.Error {
 		handling.ClearSessionCookies(c)
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
@@ -167,7 +135,7 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 	if selfID == claims.UserID {
 		allowed = claims.TokenType == model.TokenTypeStepup
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersSessionWrite)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersSessionWrite)
 	}
 	if !allowed {
 		if selfID == claims.UserID {
@@ -186,7 +154,7 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("会话 ID 格式错误")
 	}
 
-	session, err := auth.GetSessionByUUID(c.Request.Context(), sessionID)
+	session, err := authsvc.GetSessionByUUID(c.Request.Context(), sessionID)
 	if err != nil {
 		return err
 	}
@@ -200,7 +168,7 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("会话不存在或已失效")
 	}
 
-	if err := auth.RevokeSession(c.Request.Context(), sessionID); err != nil {
+	if err := authsvc.RevokeSession(c.Request.Context(), sessionID); err != nil {
 		return err
 	}
 
@@ -209,6 +177,6 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 		handling.ClearSessionCookies(c)
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

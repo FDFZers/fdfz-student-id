@@ -2,8 +2,8 @@ package security
 
 import (
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/user"
+	authsvc "fdfz-student-id/internal/service/auth"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
@@ -17,15 +17,15 @@ func deleteAccountHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	// 立即撤销全部登录会话与提权令牌，避免冷静期内会话继续可用
-	if err := auth.RevokeAllUserSessions(c.Request.Context(), claims.UserID); err != nil {
+	if err := authsvc.RevokeAllUserSessions(c.Request.Context(), claims.UserID); err != nil {
 		return err
 	}
-	if err := auth.RevokeUserStepups(c.Request.Context(), claims.UserID); err != nil {
+	if err := authsvc.RevokeUserStepups(c.Request.Context(), claims.UserID); err != nil {
 		return err
 	}
 
 	// 写入冷静期截止时间，重复调用不会延长已排定的时间
-	scheduledAt, err := user.ScheduleAccountDeletion(c.Request.Context(), claims.UserID, user.AccountDeletionDelay)
+	scheduledAt, err := usersvc.ScheduleAccountDeletion(c.Request.Context(), claims.UserID, usersvc.AccountDeletionDelay)
 	if err != nil {
 		return err
 	}
@@ -68,20 +68,20 @@ func deleteUserHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 撤销目标用户会话与提权令牌，防止删除后令牌继续生效
-	if err := auth.RevokeAllUserSessions(c.Request.Context(), targetID); err != nil {
+	if err := authsvc.RevokeAllUserSessions(c.Request.Context(), targetID); err != nil {
 		return err
 	}
-	if err := auth.RevokeUserStepups(c.Request.Context(), targetID); err != nil {
+	if err := authsvc.RevokeUserStepups(c.Request.Context(), targetID); err != nil {
 		return err
 	}
 
 	// 软删除用户并清理关联数据（密码、TOTP、用户组、权限授予等）
-	if err := user.DeleteUser(c.Request.Context(), targetID); err != nil {
+	if err := usersvc.DeleteUser(c.Request.Context(), targetID); err != nil {
 		return err
 	}
 
 	slog.Info("User deleted", "user_id", targetID, "operator_id", claims.UserID)
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

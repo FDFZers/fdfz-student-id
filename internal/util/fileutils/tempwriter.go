@@ -116,8 +116,8 @@ func (w *TempWriter) Commit() error {
 	}
 
 	if err := w.tmpFile.Sync(); err != nil {
-		if closeErr := w.tmpFile.Close(); closeErr != nil {
-			slog.Warn("Failed to close temp file", "error", closeErr)
+		if e := w.tmpFile.Close(); e != nil {
+			slog.Warn("Failed to close temp file", "error", e)
 		}
 		w.closed = true
 		w.removeTemp()

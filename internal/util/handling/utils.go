@@ -5,7 +5,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	appsvc "fdfz-student-id/internal/service/app"
-	"fdfz-student-id/internal/service/user"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -77,7 +77,7 @@ func ResolveApp(c *gin.Context) (*model.OAuthApp, *errs.Error) {
 
 // EnsureUserExists 确认目标用户存在，不存在时返回 404。常用于「操作的别人」的场景。
 func EnsureUserExists(c *gin.Context, userID int64) *errs.Error {
-	target, err := user.GetUserByID(c.Request.Context(), userID)
+	target, err := usersvc.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
 		return err
 	} else if target == nil {

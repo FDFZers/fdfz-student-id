@@ -1,14 +1,15 @@
 package permissions
 
 import (
-	"fdfz-student-id/internal/service/search"
-	"fdfz-student-id/internal/service/user"
+	searchsvc "fdfz-student-id/internal/service/search"
+	usersvc "fdfz-student-id/internal/service/user"
 	"net/http"
 	"time"
 
+	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/userperm"
+	userpermsvc "fdfz-student-id/internal/service/userperm"
 	"fdfz-student-id/internal/util/handling"
 
 	"github.com/guregu/null/v6"
@@ -18,19 +19,16 @@ import (
 
 // respondGroupPermissions 查询并写出用户组直接拥有的权限定义列表（跨应用补充命名空间）。
 func respondGroupPermissions(c *gin.Context, groupID int64) *errs.Error {
-	defs, err := userperm.ListRolePermissions(c.Request.Context(), groupID)
+	defs, err := userpermsvc.ListRolePermissions(c.Request.Context(), groupID)
 	if err != nil {
 		return err
 	}
-	data, err := defsJSONMultiApp(c, defs)
+	data, err := handling.DefsJSONMultiApp(c.Request.Context(), defs)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"count": len(data),
-		"data":  data,
-	})
+	handling.RespondList(c, len(data), data)
 	return nil
 }
 
@@ -49,8 +47,8 @@ func createAppGroupHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body createAppGroupRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 	if err := handling.ValidateUserGroupName(body.Name); err != nil {
 		return err
@@ -65,11 +63,11 @@ func createAppGroupHandler(c *gin.Context) *errs.Error {
 		Note:   body.Note,
 		Public: body.Public,
 	}
-	if err := userperm.CreateRole(c.Request.Context(), role); err != nil {
+	if err := userpermsvc.CreateRole(c.Request.Context(), role); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, groupJSON(role))
+	c.JSON(http.StatusOK, handling.GroupJSON(role))
 	return nil
 }
 
@@ -84,7 +82,7 @@ func getAppGroupHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	role, err := userperm.GetRoleVisibleToApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleVisibleToApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -92,7 +90,7 @@ func getAppGroupHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	c.JSON(http.StatusOK, groupJSON(role))
+	c.JSON(http.StatusOK, handling.GroupJSON(role))
 	return nil
 }
 
@@ -115,14 +113,14 @@ func updateAppGroupHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body updateAppGroupRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 	if body.Name == nil && body.Note == nil && body.Public == nil {
 		return errs.BadRequestError().AppendDetails("没有需要更新的字段")
 	}
 
-	role, err := userperm.GetRoleInApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleInApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -151,14 +149,14 @@ func updateAppGroupHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	if err := userperm.UpdateRole(c.Request.Context(), groupID, name, note, public); err != nil {
+	if err := userpermsvc.UpdateRole(c.Request.Context(), groupID, name, note, public); err != nil {
 		return err
 	}
 	role.Name = name
 	role.Note = note
 	role.Public = public
 
-	c.JSON(http.StatusOK, groupJSON(role))
+	c.JSON(http.StatusOK, handling.GroupJSON(role))
 	return nil
 }
 
@@ -173,7 +171,7 @@ func deleteAppGroupHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	role, err := userperm.GetRoleInApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleInApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -181,11 +179,11 @@ func deleteAppGroupHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	if err := userperm.DeleteRole(c.Request.Context(), groupID); err != nil {
+	if err := userpermsvc.DeleteRole(c.Request.Context(), groupID); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
@@ -200,7 +198,7 @@ func listAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	role, err := userperm.GetRoleVisibleToApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleVisibleToApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -228,11 +226,11 @@ func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body setAppGroupPermissionsRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 
-	role, err := userperm.GetRoleInApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleInApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -240,7 +238,7 @@ func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	defs, err := userperm.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Permissions)
+	defs, err := userpermsvc.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Permissions)
 	if err != nil {
 		return err
 	}
@@ -249,7 +247,7 @@ func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		permissionIDs = append(permissionIDs, def.ID)
 	}
 
-	if err := userperm.SetRolePermissions(c.Request.Context(), app.ID, groupID, permissionIDs); err != nil {
+	if err := userpermsvc.SetRolePermissions(c.Request.Context(), db.R, app.ID, groupID, permissionIDs); err != nil {
 		return err
 	}
 
@@ -274,11 +272,11 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body addAppGroupPermissionsRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 
-	role, err := userperm.GetRoleInApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleInApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -286,7 +284,7 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	defs, err := userperm.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Permissions)
+	defs, err := userpermsvc.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Permissions)
 	if err != nil {
 		return err
 	}
@@ -295,7 +293,7 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		permissionIDs = append(permissionIDs, def.ID)
 	}
 
-	if err := userperm.AddRolePermissions(c.Request.Context(), groupID, permissionIDs); err != nil {
+	if err := userpermsvc.AddRolePermissions(c.Request.Context(), groupID, permissionIDs); err != nil {
 		return err
 	}
 
@@ -313,7 +311,7 @@ func listAppGroupUsersHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	role, err := userperm.GetRoleVisibleToApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleVisibleToApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -321,17 +319,14 @@ func listAppGroupUsersHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	limit, offset := search.ParseQueryPagination(c)
+	limit, offset := searchsvc.ParseQueryPagination(c)
 
-	users, count, err := userperm.ListRoleUsers(c.Request.Context(), groupID, limit, offset)
+	users, count, err := userpermsvc.ListRoleUsers(c.Request.Context(), groupID, limit, offset)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"count": count,
-		"data":  groupUsersJSON(users),
-	})
+	handling.RespondList(c, count, handling.GroupUsersJSON(users))
 	return nil
 }
 
@@ -356,8 +351,8 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 
 	// 解析请求体并校验用户 ID 与有效期区间。
 	var body grantAppGroupUserRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 	if err := handling.ValidateUserID(body.UserID); err != nil {
 		return err
@@ -367,7 +362,7 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 校验用户组与目标用户均存在。
-	role, err := userperm.GetRoleInApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleInApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -375,7 +370,7 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	usr, err := user.GetUserByID(c.Request.Context(), body.UserID)
+	usr, err := usersvc.GetUserByID(c.Request.Context(), body.UserID)
 	if err != nil {
 		return err
 	} else if usr == nil {
@@ -390,11 +385,11 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 		ValidFrom:  null.TimeFromPtr(body.ValidFrom),
 		ValidUntil: null.TimeFromPtr(body.ValidUntil),
 	}
-	if err := userperm.GrantUserRole(c.Request.Context(), grant); err != nil {
+	if err := userpermsvc.GrantUserRole(c.Request.Context(), grant); err != nil {
 		return err
 	}
 
-	member := &userperm.RoleUser{
+	member := &userpermsvc.RoleUser{
 		UserID:     usr.ID,
 		Username:   usr.Username,
 		Nickname:   usr.Nickname,
@@ -406,7 +401,7 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data": groupUserJSON(member),
+		"data": handling.GroupUserJSON(member),
 	})
 	return nil
 }
@@ -426,7 +421,7 @@ func revokeAppGroupUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	role, err := userperm.GetRoleInApp(c.Request.Context(), app.ID, groupID)
+	role, err := userpermsvc.GetRoleInApp(c.Request.Context(), app.ID, groupID)
 	if err != nil {
 		return err
 	}
@@ -434,10 +429,10 @@ func revokeAppGroupUserHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	if err := userperm.RevokeUserRole(c.Request.Context(), userID, groupID); err != nil {
+	if err := userpermsvc.RevokeUserRole(c.Request.Context(), userID, groupID); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

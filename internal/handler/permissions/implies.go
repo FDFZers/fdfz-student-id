@@ -4,9 +4,10 @@ import (
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
+	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/userperm"
+	userpermsvc "fdfz-student-id/internal/service/userperm"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,20 +16,20 @@ import (
 func buildImpliesResponse(c *gin.Context, app *model.OAuthApp, def *model.PermissionDef) *errs.Error {
 	ctx := c.Request.Context()
 
-	direct, transitive, err := userperm.ListImplies(ctx, app.ID, def.ID)
+	direct, transitive, err := userpermsvc.ListImplies(ctx, app.ID, def.ID)
 	if err != nil {
 		return err
 	}
-	impliedBy, err := userperm.ListImpliedBy(ctx, app.ID, def.ID)
+	impliedBy, err := userpermsvc.ListImpliedBy(ctx, app.ID, def.ID)
 	if err != nil {
 		return err
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"permission":         defJSON(def, app.Namespace),
-		"direct_implies":     defsJSON(direct, app.Namespace),
-		"transitive_implies": defsJSON(transitive, app.Namespace),
-		"implied_by":         defsJSON(impliedBy, app.Namespace),
+		"permission":         handling.DefJSON(def, app.Namespace),
+		"direct_implies":     handling.DefsJSON(direct, app.Namespace),
+		"transitive_implies": handling.DefsJSON(transitive, app.Namespace),
+		"implied_by":         handling.DefsJSON(impliedBy, app.Namespace),
 	})
 	return nil
 }
@@ -44,7 +45,7 @@ func getAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	def, err := userperm.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
+	def, err := userpermsvc.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
 	if err != nil {
 		return err
 	}
@@ -73,11 +74,11 @@ func setAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 	}
 
 	var body setAppPermissionImpliesRequestBody
-	if e := c.ShouldBindJSON(&body); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &body); err != nil {
+		return err
 	}
 
-	def, err := userperm.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
+	def, err := userpermsvc.GetPermissionDefInApp(c.Request.Context(), app.ID, permissionID)
 	if err != nil {
 		return err
 	}
@@ -85,7 +86,7 @@ func setAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("权限定义不存在")
 	}
 
-	defs, err := userperm.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Implies)
+	defs, err := userpermsvc.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Implies)
 	if err != nil {
 		return err
 	}
@@ -94,7 +95,7 @@ func setAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 		impliedIDs = append(impliedIDs, implied.ID)
 	}
 
-	if err := userperm.SetPermissionImplies(c.Request.Context(), app.ID, permissionID, impliedIDs); err != nil {
+	if err := userpermsvc.SetPermissionImplies(c.Request.Context(), db.R, app.ID, permissionID, impliedIDs); err != nil {
 		return err
 	}
 

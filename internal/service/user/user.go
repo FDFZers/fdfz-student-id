@@ -2,7 +2,7 @@ package user
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
@@ -62,25 +62,21 @@ FROM new_user u
 JOIN new_password p ON p.user_id = u.id
 `
 
-type rowQuerier interface {
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
 // pwd.Password 须已哈希；excludeRegisterRequestID 用于审核事务内排除仍为 pending 的申请自身，传 nil 表示不排除。
 func createUserWithPasswordAt(
 	ctx context.Context,
-	q rowQuerier,
+	dh db.Handle,
 	u *model.User,
 	pwd *model.UserPassword,
 	excludeRegisterRequestID *uuid.UUID,
 ) *errs.Error {
-	if taken, err := isUsernameTakenAt(ctx, q, u.Username, excludeRegisterRequestID); err != nil {
+	if taken, err := isUsernameTakenAt(ctx, dh, u.Username, excludeRegisterRequestID); err != nil {
 		return errs.CreatePGError(err, "用户", "Failed to check username").AppendDetails("用户创建失败")
 	} else if taken {
 		return errs.ConflictError().AppendDetails("用户名已存在", "用户创建失败")
 	}
 	if u.Type == model.UserTypeStudent {
-		if taken, err := isStudentNumTakenAt(ctx, q, u.School, u.StudentNum, 0, excludeRegisterRequestID); err != nil {
+		if taken, err := isStudentNumTakenAt(ctx, dh, u.School, u.StudentNum, 0, excludeRegisterRequestID); err != nil {
 			return errs.CreatePGError(err, "学号占用信息", "Failed to check student num").AppendDetails("用户创建失败")
 		} else if taken {
 			return errs.ConflictError().AppendDetails("该学校学号已被注册或正在审核中", "用户创建失败")
@@ -94,7 +90,7 @@ func createUserWithPasswordAt(
 
 	// 单条 SQL 同时创建用户与密码，并回填 ID、时间戳
 
-	e = q.QueryRow(ctx, createUserWithPasswordSQL,
+	e = dh.QueryRow(ctx, createUserWithPasswordSQL,
 		u.Username,
 		u.Type,
 		u.StudentNum,
@@ -120,7 +116,7 @@ func createUserWithPasswordAt(
 // CreateUser 创建用户及其密码：先校验用户名/学号占用，再原子写入两张表并刷新缓存。
 // 注意：pwd.Password 必须已由调用方完成哈希；学号占用检查同时覆盖待审核的注册申请。
 func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *errs.Error {
-	if err := createUserWithPasswordAt(ctx, db.R.Pool, u, pwd, nil); err != nil {
+	if err := createUserWithPasswordAt(ctx, db.R, u, pwd, nil); err != nil {
 		return err
 	}
 
@@ -361,8 +357,8 @@ func UpdateUser(ctx context.Context, u *model.User, expectedUpdatedAt time.Time)
 	if e != nil {
 		if errors.Is(e, pgx.ErrNoRows) {
 			var exists bool
-			if qErr := db.R.QueryRow(ctx, userExistsSQL, u.ID).Scan(&exists); qErr != nil {
-				return errs.CreatePGError(qErr, "用户", "Failed to check user existence")
+			if e := db.R.QueryRow(ctx, userExistsSQL, u.ID).Scan(&exists); e != nil {
+				return errs.CreatePGError(e, "用户", "Failed to check user existence")
 			}
 			if exists {
 				return errs.ConflictError().AppendDetails("资料已被他人修改，请刷新后重试")
@@ -429,9 +425,9 @@ SELECT EXISTS (
 `
 
 // isUsernameTakenAt 供审核流程在事务内调用：缓存版 IsUsernameTaken 看不到本事务未提交的写入。
-func isUsernameTakenAt(ctx context.Context, q rowQuerier, username string, excludeRegisterRequestID *uuid.UUID) (bool, error) {
+func isUsernameTakenAt(ctx context.Context, dh db.Handle, username string, excludeRegisterRequestID *uuid.UUID) (bool, error) {
 	var taken bool
-	err := q.QueryRow(ctx, checkUsernameExistsSQL, username, excludeRegisterRequestID).Scan(&taken)
+	err := dh.QueryRow(ctx, checkUsernameExistsSQL, username, excludeRegisterRequestID).Scan(&taken)
 	return taken, err
 }
 
@@ -480,7 +476,7 @@ SELECT EXISTS (
 
 func isStudentNumTakenAt(
 	ctx context.Context,
-	q rowQuerier,
+	dh db.Handle,
 	school model.School,
 	studentNum null.String,
 	excludeUserID int64,
@@ -490,7 +486,7 @@ func isStudentNumTakenAt(
 		return false, nil
 	}
 	var taken bool
-	err := q.QueryRow(ctx, checkStudentNumExistsSQL, school, studentNum.String, excludeUserID, excludeRegisterRequestID).Scan(&taken)
+	err := dh.QueryRow(ctx, checkStudentNumExistsSQL, school, studentNum.String, excludeUserID, excludeRegisterRequestID).Scan(&taken)
 	return taken, err
 }
 
@@ -502,7 +498,7 @@ func IsStudentNumTaken(
 	studentNum null.String,
 	excludeUserID int64,
 ) (bool, *errs.Error) {
-	taken, err := isStudentNumTakenAt(ctx, db.R.Pool, school, studentNum, excludeUserID, nil)
+	taken, err := isStudentNumTakenAt(ctx, db.R, school, studentNum, excludeUserID, nil)
 	if err != nil {
 		return false, errs.CreatePGError(err, "学号占用信息", "Failed to check student num")
 	}

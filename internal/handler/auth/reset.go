@@ -4,9 +4,9 @@ import (
 	"context"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/captcha"
-	"fdfz-student-id/internal/service/user"
+	authsvc "fdfz-student-id/internal/service/auth"
+	captchasvc "fdfz-student-id/internal/service/captcha"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
@@ -20,15 +20,15 @@ import (
 // createPasswordResetAuthSession 创建密码重置用鉴权会话并写入 Redis。
 // userID 为 0 表示邮箱/QQ 未匹配到账号（或账号已封禁），用于返回与正常流程一致的响应，防止账号枚举。
 // 注意：这里用 UpdateAuthSession 而非 CreateAuthSession，因为会话由调用方预先填好 ID 与验证方式。
-func createPasswordResetAuthSession(ctx context.Context, userID int64, email, qq null.String) (*auth.AuthSession, *errs.Error) {
-	session := &auth.AuthSession{
+func createPasswordResetAuthSession(ctx context.Context, userID int64, email, qq null.String) (*authsvc.AuthSession, *errs.Error) {
+	session := &authsvc.AuthSession{
 		ID:     uuid.New(),
-		Type:   auth.AuthSessionTypeResetPassword,
+		Type:   authsvc.AuthSessionTypeResetPassword,
 		UserID: userID,
 		Email:  email,
 		QQ:     qq,
 	}
-	if err := auth.UpdateAuthSession(ctx, session, false); err != nil {
+	if err := authsvc.UpdateAuthSession(ctx, session, false); err != nil {
 		return nil, err
 	}
 	return session, nil
@@ -44,17 +44,17 @@ type resetPasswordEmailInitReq struct {
 // 注意：账号不存在或已封禁时也会创建匿名会话并返回相同结构，防止通过响应差异枚举账号。
 func resetPasswordEmailInitHandler(c *gin.Context) *errs.Error {
 	var req resetPasswordEmailInitReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
-	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
+	if err := captchasvc.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
 	if err := handling.ValidateEmail(req.Email); err != nil {
 		return err
 	}
 
-	usr, err := user.GetUserByEmail(c.Request.Context(), req.Email)
+	usr, err := usersvc.GetUserByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		return err
 	} else if usr == nil {
@@ -69,7 +69,7 @@ func resetPasswordEmailInitHandler(c *gin.Context) *errs.Error {
 		return nil
 	}
 
-	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), usr.ID)
 	if err != nil {
 		return err
 	} else if ban != nil {
@@ -105,17 +105,17 @@ type resetPasswordQQInitReq struct {
 // 注意：账号不存在或已封禁时同样返回匿名会话，防止账号枚举。
 func resetPasswordQQInitHandler(c *gin.Context) *errs.Error {
 	var req resetPasswordQQInitReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
-	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
+	if err := captchasvc.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
 	if err := handling.ValidateQQ(req.QQ); err != nil {
 		return err
 	}
 
-	usr, err := user.GetUserByQQ(c.Request.Context(), req.QQ)
+	usr, err := usersvc.GetUserByQQ(c.Request.Context(), req.QQ)
 	if err != nil {
 		return err
 	} else if usr == nil {
@@ -130,7 +130,7 @@ func resetPasswordQQInitHandler(c *gin.Context) *errs.Error {
 		return nil
 	}
 
-	ban, err := user.GetUserBan(c.Request.Context(), usr.ID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), usr.ID)
 	if err != nil {
 		return err
 	} else if ban != nil {
@@ -166,30 +166,30 @@ type resetPasswordFinalizeReq struct {
 // 注意：匿名会话（UserID=0，账号不存在或已封禁）直接返回成功，不修改任何账号。
 func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 	var req resetPasswordFinalizeReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 
 	// 校验鉴权会话状态
-	session, err := auth.GetAuthSessionByID(c.Request.Context(), req.SessionID)
+	session, err := authsvc.GetAuthSessionByID(c.Request.Context(), req.SessionID)
 	if err != nil {
 		return err
 	} else if session == nil {
 		return errs.NotFoundError().AppendDetails("鉴权会话不存在")
 	}
 
-	if session.Type != auth.AuthSessionTypeResetPassword {
+	if session.Type != authsvc.AuthSessionTypeResetPassword {
 		return errs.BadRequestError().AppendDetails("鉴权会话类型错误")
 	}
 	if !session.Passed2FA {
 		return errs.IllegalStateError().AppendDetails("二次验证未通过")
 	}
 	if session.UserID == 0 {
-		c.JSON(http.StatusOK, gin.H{})
+		handling.RespondOK(c)
 		return nil
 	}
 
-	ban, err := user.GetUserBan(c.Request.Context(), session.UserID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), session.UserID)
 	if err != nil {
 		return err
 	}
@@ -207,7 +207,7 @@ func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.CreateAndLogInternalError(e, "Failed to hash new password").AppendDetails("密码哈希失败")
 	}
 
-	if err := user.UpsertUserPassword(c.Request.Context(), &model.UserPassword{
+	if err := usersvc.UpsertUserPassword(c.Request.Context(), &model.UserPassword{
 		UserID:   session.UserID,
 		Password: pwdHash,
 	}); err != nil {
@@ -215,18 +215,18 @@ func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 重置密码后强制撤销全部会话与提权令牌
-	if err := auth.RevokeAllUserSessions(c.Request.Context(), session.UserID); err != nil {
+	if err := authsvc.RevokeAllUserSessions(c.Request.Context(), session.UserID); err != nil {
 		return err
 	}
-	if err := auth.RevokeUserStepups(c.Request.Context(), session.UserID); err != nil {
+	if err := authsvc.RevokeUserStepups(c.Request.Context(), session.UserID); err != nil {
 		return err
 	}
 	handling.ClearSessionCookies(c)
 
-	if err := auth.DeleteAuthSession(c.Request.Context(), session); err != nil {
+	if err := authsvc.DeleteAuthSession(c.Request.Context(), session); err != nil {
 		slog.Warn("Failed to delete password reset auth session", "error", err.Info.Error, "session_id", session.ID)
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

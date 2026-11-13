@@ -3,7 +3,7 @@ package handling
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"mime/multipart"
 	"net/mail"
 	"net/url"
@@ -307,7 +307,7 @@ func ValidateGrantPermission(permission string) *errs.Error {
 	if permission == "" {
 		return errs.BadRequestError().AppendDetails("未提供权限")
 	}
-	if _, err := perm.ParsePermission(permission); err != nil {
+	if _, err := permsvc.ParsePermission(permission); err != nil {
 		return errs.BadRequestError().AppendDetails("权限格式错误")
 	}
 	if utf8.RuneCountInString(permission) > MaxPermissionLength {
@@ -340,7 +340,7 @@ func ValidateAppNamespace(namespace string) *errs.Error {
 	if namespace == "" {
 		return errs.BadRequestError().AppendDetails("未提供命名空间")
 	}
-	if ok, err := perm.RegexNamespace.MatchString(namespace); err != nil {
+	if ok, err := permsvc.RegexNamespace.MatchString(namespace); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to validate app namespace").AppendDetails("命名空间校验失败")
 	} else if !ok {
 		return errs.BadRequestError().AppendDetails("命名空间格式错误")
@@ -433,7 +433,7 @@ func ValidateAppRequestedPermissions(permissions []string) *errs.Error {
 		return errs.BadRequestError().AppendDetails("申请权限数量过多")
 	}
 	for _, permission := range permissions {
-		if _, err := perm.ParsePermission(permission); err != nil {
+		if _, err := permsvc.ParsePermission(permission); err != nil {
 			return errs.BadRequestError().AppendDetails("权限格式错误")
 		}
 		if utf8.RuneCountInString(permission) > MaxPermissionLength {
@@ -502,7 +502,7 @@ func ValidateAppPermissionPattern(permission, namespace string) *errs.Error {
 	if permission == "" {
 		return errs.BadRequestError().AppendDetails("未提供权限")
 	}
-	parsed, err := perm.ParsePattern(permission)
+	parsed, err := permsvc.ParsePattern(permission)
 	if err != nil {
 		return errs.BadRequestError().AppendDetails("权限格式错误")
 	}
@@ -517,7 +517,7 @@ func ValidateAppPermissionPattern(permission, namespace string) *errs.Error {
 
 // ParseAppPermissionValue 解析属于指定命名空间的权限串，返回不含命名空间的权限值。
 func ParseAppPermissionValue(permission, namespace string) (string, *errs.Error) {
-	parsed, err := perm.ParsePermission(permission)
+	parsed, err := permsvc.ParsePermission(permission)
 	if err != nil {
 		return "", errs.BadRequestError().AppendDetails("权限格式错误")
 	}

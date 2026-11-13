@@ -2,7 +2,7 @@ package db
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fdfz-student-id/internal/errs"
 	"log/slog"

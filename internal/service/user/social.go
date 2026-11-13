@@ -148,10 +148,10 @@ RETURNING id, created_at
 `
 
 // SetUserEmail 绑定邮箱：两步必须在同一事务内，否则会撞上部分唯一索引导致换绑失败。
-func SetUserEmail(ctx context.Context, e *model.UserEmail) *errs.Error {
-	tx, txErr := db.R.Begin(ctx)
-	if txErr != nil {
-		return errs.CreateAndLogInternalError(txErr, "Failed to begin transaction for setting user email").AppendDetails("邮箱设置失败")
+func SetUserEmail(ctx context.Context, dh db.Handle, e *model.UserEmail) *errs.Error {
+	tx, err := dh.Begin(ctx)
+	if err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to begin transaction for setting user email").AppendDetails("邮箱设置失败")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -230,10 +230,10 @@ RETURNING id, created_at
 `
 
 // SetUserQQ 绑定 QQ：两步必须在同一事务内，否则会撞上部分唯一索引导致换绑失败。
-func SetUserQQ(ctx context.Context, e *model.UserQQ) *errs.Error {
-	tx, txErr := db.R.Begin(ctx)
-	if txErr != nil {
-		return errs.CreateAndLogInternalError(txErr, "Failed to begin transaction for setting user QQ").AppendDetails("QQ 设置失败")
+func SetUserQQ(ctx context.Context, dh db.Handle, e *model.UserQQ) *errs.Error {
+	tx, err := dh.Begin(ctx)
+	if err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to begin transaction for setting user QQ").AppendDetails("QQ 设置失败")
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 

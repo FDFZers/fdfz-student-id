@@ -2,8 +2,8 @@ package regreq
 
 import (
 	"fdfz-student-id/internal/errs"
-	"fdfz-student-id/internal/service/captcha"
-	"fdfz-student-id/internal/service/user"
+	captchasvc "fdfz-student-id/internal/service/captcha"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
@@ -13,7 +13,7 @@ import (
 // registerRequestStatusHandler 查询注册申请的审核状态，无需登录。
 // 凭申请 ID + Altcha 人机验证即可查询，只返回状态、审核意见与审核时间，不泄露表单内容。
 func registerRequestStatusHandler(c *gin.Context) *errs.Error {
-	if err := captcha.VerifyPayloadStr(c.Request.Context(), c.Query("altcha_payload")); err != nil {
+	if err := captchasvc.VerifyPayloadStr(c.Request.Context(), c.Query("altcha_payload")); err != nil {
 		return err
 	}
 
@@ -22,7 +22,7 @@ func registerRequestStatusHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	req, err := user.GetRegisterRequestByID(c.Request.Context(), id)
+	req, err := usersvc.GetRegisterRequestByID(c.Request.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -30,10 +30,6 @@ func registerRequestStatusHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("注册请求不存在")
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":         req.Status,
-		"review_comment": req.ReviewComment,
-		"reviewed_at":    req.ReviewedAt,
-	})
+	c.JSON(http.StatusOK, handling.RegisterRequestStatusJSON(req))
 	return nil
 }

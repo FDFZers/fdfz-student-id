@@ -3,10 +3,10 @@ package auth
 import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/captcha"
-	"fdfz-student-id/internal/service/filestore"
-	"fdfz-student-id/internal/service/user"
+	authsvc "fdfz-student-id/internal/service/auth"
+	captchasvc "fdfz-student-id/internal/service/captcha"
+	filestoresvc "fdfz-student-id/internal/service/filestore"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
@@ -37,12 +37,12 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	if err := captcha.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
+	if err := captchasvc.VerifyPayloadStr(c.Request.Context(), req.AltchaPayload); err != nil {
 		return err
 	}
 
 	// 单 IP 每小时注册请求配额：抬高批量探测用户名/学号是否存在的成本。
-	if err := auth.TryAcquireRegisterIPQuota(c.Request.Context(), c.ClientIP()); err != nil {
+	if err := authsvc.TryAcquireRegisterIPQuota(c.Request.Context(), c.ClientIP()); err != nil {
 		return err
 	}
 
@@ -92,7 +92,7 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 注意：用户名冲突与学号冲突统一使用同一句模糊提示，避免被用来探测用户名/学号是否被占用。
-	if taken, err := user.IsUsernameTaken(c.Request.Context(), req.Username); err != nil {
+	if taken, err := usersvc.IsUsernameTaken(c.Request.Context(), req.Username); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to check username availability").AppendDetails("用户名占用信息查询失败")
 	} else if taken {
 		return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试")
@@ -115,18 +115,18 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		Password:   pwdHash,
 	}
 
-	if err := user.CreateRegisterRequest(c.Request.Context(), r); err != nil {
+	if err := usersvc.CreateRegisterRequest(c.Request.Context(), r); err != nil {
 		return err
 	}
 
 	// 上传佐证图片，失败时回滚删除注册申请
-	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
+	if err := filestoresvc.UploadFile(fileHeader, &filestoresvc.StoreFileReq{
 		Slug:        "/student_id/proof_images/" + r.ID.String(),
 		FileName:    r.ID.String() + extension,
 		ContentType: null.StringFrom(mimeType),
 		AppID:       null.IntFrom(1),
 	}); err != nil {
-		if err := user.DeleteRegisterRequest(c.Request.Context(), r.ID); err != nil {
+		if err := usersvc.DeleteRegisterRequest(c.Request.Context(), r.ID); err != nil {
 			return err.AppendDetails("注册失败且回退失败，请联系管理员").Seal()
 		}
 		return err

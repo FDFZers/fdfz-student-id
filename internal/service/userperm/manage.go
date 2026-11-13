@@ -3,7 +3,7 @@ package userperm
 import (
 	"context"
 	"errors"
-	"fdfz-student-id/internal/service/search"
+	searchsvc "fdfz-student-id/internal/service/search"
 	"fmt"
 	"strings"
 	"time"
@@ -12,7 +12,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	appsvc "fdfz-student-id/internal/service/app"
-	"fdfz-student-id/internal/service/perm"
+	permsvc "fdfz-student-id/internal/service/perm"
 
 	"github.com/guregu/null/v6"
 	"github.com/jackc/pgx/v5"
@@ -89,7 +89,7 @@ LIMIT $2 OFFSET $3
 
 // ListAllPermissionDefs 分页查询权限定义，appID 为 nil 时跨应用查询，返回当前页与总数。
 func ListAllPermissionDefs(ctx context.Context, appID *int64, limit, offset int32) ([]*model.PermissionDef, int32, *errs.Error) {
-	limit, offset = search.NormalizePagination(limit, offset)
+	limit, offset = searchsvc.NormalizePagination(limit, offset)
 
 	var count int32
 	if e := db.R.QueryRow(ctx, countAllPermissionDefsSQL, appID).Scan(&count); e != nil {
@@ -122,7 +122,7 @@ LIMIT $2 OFFSET $3
 
 // ListAllRoles 分页查询用户组，appID 为 nil 时跨应用查询，返回当前页与总数。
 func ListAllRoles(ctx context.Context, appID *int64, limit, offset int32) ([]*model.Role, int32, *errs.Error) {
-	limit, offset = search.NormalizePagination(limit, offset)
+	limit, offset = searchsvc.NormalizePagination(limit, offset)
 
 	var count int32
 	if e := db.R.QueryRow(ctx, countAllRolesSQL, appID).Scan(&count); e != nil {
@@ -155,7 +155,7 @@ WHERE app_id = $1 AND value = ANY($2::text[])
 // parseFullPermission 解析「命名空间:节点...」形式的完整权限串并校验命名空间，
 // 返回去掉命名空间、以 "." 连接的权限值。
 func parseFullPermission(value, namespace string) (string, *errs.Error) {
-	parsed, err := perm.ParsePermission(value)
+	parsed, err := permsvc.ParsePermission(value)
 	if err != nil {
 		return "", errs.BadRequestError().AppendDetails(
 			fmt.Sprintf("权限“%s”格式错误", value),
@@ -223,7 +223,7 @@ func ResolvePermissionValues(ctx context.Context, appID int64, namespace string,
 // ResolvePermissionValue 把单个完整权限串（如 "app:network.read"）解析为权限定义。
 // 先按命名空间找到应用，再按权限值查询定义。
 func ResolvePermissionValue(ctx context.Context, value string) (*model.PermissionDef, *errs.Error) {
-	parsed, e := perm.ParsePermission(value)
+	parsed, e := permsvc.ParsePermission(value)
 	if e != nil {
 		return nil, errs.BadRequestError().AppendDetails(
 			fmt.Sprintf("权限“%s”格式错误", value),
@@ -311,7 +311,7 @@ ON CONFLICT (permission_id, implied_permission_id) DO NOTHING
 // SetPermissionImplies 用 impliedIDs 整体替换某权限的直接继承关系。
 // 写入前校验所有权限定义属于同一应用，并在应用级 advisory lock 内检测循环继承。
 // 成功后触发权限目录异步重载。
-func SetPermissionImplies(ctx context.Context, appID, permissionID int64, impliedIDs []int64) *errs.Error {
+func SetPermissionImplies(ctx context.Context, dh db.Handle, appID, permissionID int64, impliedIDs []int64) *errs.Error {
 	// 去重并前置拒绝自继承，避免无意义的事务。
 	seen := make(map[int64]struct{}, len(impliedIDs))
 	unique := make([]int64, 0, len(impliedIDs))
@@ -326,7 +326,7 @@ func SetPermissionImplies(ctx context.Context, appID, permissionID int64, implie
 		unique = append(unique, impliedID)
 	}
 
-	tx, err := db.R.Begin(ctx)
+	tx, err := dh.Begin(ctx)
 	if err != nil {
 		return errs.CreatePGError(err, "权限继承", "Failed to begin transaction")
 	}
@@ -405,7 +405,7 @@ func SetPermissionImplies(ctx context.Context, appID, permissionID int64, implie
 	// 逐条模拟加边并检测循环依赖。permissionID 的旧出边已移除，
 	// 后续新边必须参与检测，否则多条新边组合可能成环。
 	for _, impliedID := range unique {
-		if perm.WouldCreateCycle(edges, permissionID, impliedID) {
+		if permsvc.WouldCreateCycle(edges, permissionID, impliedID) {
 			return errs.BadRequestError().AppendDetails(
 				"权限存在循环继承",
 				fmt.Sprintf("权限（ID %d）继承权限（ID %d）会形成环", permissionID, impliedID),
@@ -427,7 +427,7 @@ func SetPermissionImplies(ctx context.Context, appID, permissionID int64, implie
 	if err := tx.Commit(ctx); err != nil {
 		return errs.CreatePGError(err, "权限继承", "Failed to commit transaction")
 	}
-	perm.NotifyReload()
+	permsvc.NotifyReload()
 	return nil
 }
 
@@ -569,7 +569,7 @@ func AddRolePermissions(ctx context.Context, roleID int64, permissionIDs []int64
 
 // SetRolePermissions 用 permissionIDs 整体替换用户组在当前应用内的组权限。
 // 事务内校验用户组与权限定义的应用归属；成功后不触发权限目录重载（角色变化不改变目录）。
-func SetRolePermissions(ctx context.Context, appID, roleID int64, permissionIDs []int64) *errs.Error {
+func SetRolePermissions(ctx context.Context, dh db.Handle, appID, roleID int64, permissionIDs []int64) *errs.Error {
 	// 去重，避免重复插入。
 	seen := make(map[int64]struct{}, len(permissionIDs))
 	unique := make([]int64, 0, len(permissionIDs))
@@ -581,7 +581,7 @@ func SetRolePermissions(ctx context.Context, appID, roleID int64, permissionIDs 
 		unique = append(unique, permissionID)
 	}
 
-	tx, err := db.R.Begin(ctx)
+	tx, err := dh.Begin(ctx)
 	if err != nil {
 		return errs.CreatePGError(err, "用户组权限", "Failed to begin transaction")
 	}
@@ -683,7 +683,7 @@ LIMIT $2 OFFSET $3
 
 // ListRoleUsers 分页查询某用户组的成员（含已注销用户），返回当前页与总数。
 func ListRoleUsers(ctx context.Context, roleID int64, limit, offset int32) ([]*RoleUser, int32, *errs.Error) {
-	limit, offset = search.NormalizePagination(limit, offset)
+	limit, offset = searchsvc.NormalizePagination(limit, offset)
 
 	var count int32
 	if err := db.R.QueryRow(ctx, countRoleUsersSQLForManage, roleID).Scan(&count); err != nil {
@@ -739,7 +739,7 @@ func ListUserPermissionGrantsInApp(
 	userID, appID int64,
 	limit, offset int32,
 ) ([]*model.UserPermissionGrant, int32, *errs.Error) {
-	limit, offset = search.NormalizePagination(limit, offset)
+	limit, offset = searchsvc.NormalizePagination(limit, offset)
 
 	var count int32
 	if e := db.R.QueryRow(ctx, countUserPermissionGrantsInAppSQL, userID, appID).Scan(&count); e != nil {

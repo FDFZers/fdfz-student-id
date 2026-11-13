@@ -21,12 +21,16 @@ func (t AppType) IsDevice() bool {
 	return t == AppTypeConfidentialDevice || t == AppTypePublicDevice
 }
 
+// OAuthDeviceCodeStatus 设备授权码状态：pending 等待用户在浏览器确认、approved 已同意、denied 已拒绝。
+// ENUM(pending, approved, denied)
+type OAuthDeviceCodeStatus string
+
 // AppStatus 应用状态：active 正常、suspended 已暂停。
 // ENUM(active, suspended)
 type AppStatus string
 
-// AppAuthStatus 应用授权状态：active 已生效、pending 待确认。
-// ENUM(active, pending)
+// AppAuthStatus 应用授权状态：active 已生效、update_suspended 已暂停（应用权限变更后需重新授权）。
+// ENUM(active, update_suspended)
 type AppAuthStatus string
 
 // OAuthApp OAuth 应用实体，对应 oauth_apps 表；应用同时是权限定义的命名空间所有者。

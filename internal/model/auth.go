@@ -74,11 +74,12 @@ type UserSession struct {
 type TokenClaims struct {
 	UserID      int64       `json:"user_id"`
 	TokenType   TokenType   `json:"token_type"`            // 令牌类型，决定其可访问的接口
-	AppID       null.String `json:"app_id,omitzero"`       // OAuth 应用令牌所属应用 ID，OAuth 授权流程未实现，暂未使用
-	SessionID   null.String `json:"session_id,omitzero"`   // 提权令牌绑定的登录会话 UUID，用户访问令牌不填
-	Permissions []string    `json:"permissions"`           // 已解析的权限模式，如 student_id:users.list
-	OwnedApps   []int64     `json:"owned_apps,omitzero"`   // 用户名下有效应用 ID，用于应用所有者鉴权
-	IsTemporary bool        `json:"is_temporary,omitzero"` // 是否为临时会话
+	Permissions []string    `json:"permissions"`           // 已解析的权限，如 student_id:users.list
+	AppID       null.String `json:"app_id,omitzero"`       // 【OAuth 令牌】所属应用 ID
+	AuthID      null.Int    `json:"auth_id,omitzero"`      // 【OAuth 令牌】对应的授权记录 ID
+	SessionID   null.String `json:"session_id,omitzero"`   // 【提权令牌】绑定的登录会话 UUID
+	OwnedApps   []int64     `json:"owned_apps,omitzero"`   // 【用户令牌】用户名下有效应用 ID，用于应用所有者鉴权
+	IsTemporary bool        `json:"is_temporary,omitzero"` // 【用户令牌】是否为临时会话
 }
 
 // RegisteredTokenClaims jwt 标准声明与 TokenClaims 的组合，用于签发与解析 JWT。

@@ -3,12 +3,13 @@ package security
 import (
 	"context"
 	"crypto/subtle"
+	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/auth"
-	"fdfz-student-id/internal/service/email"
-	"fdfz-student-id/internal/service/qq"
-	"fdfz-student-id/internal/service/user"
+	authsvc "fdfz-student-id/internal/service/auth"
+	emailsvc "fdfz-student-id/internal/service/email"
+	qqsvc "fdfz-student-id/internal/service/qq"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
@@ -26,8 +27,8 @@ type emailBindInitReq struct {
 // emailBindInitHandler 发起邮箱绑定：检查邮箱可用后生成验证码，暂存待绑定记录并发送邮件。
 func emailBindInitHandler(c *gin.Context) *errs.Error {
 	var req emailBindInitReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if err := handling.ValidateEmail(req.Email); err != nil {
 		return err
@@ -36,7 +37,7 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	// 校验邮箱是否已绑定当前用户或已被其他用户占用
-	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
+	current, err := usersvc.GetUserEmail(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	}
@@ -44,7 +45,7 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 		return errs.ConflictError().AppendDetails("该邮箱已绑定")
 	}
 
-	taken, err := user.IsEmailTaken(c.Request.Context(), req.Email)
+	taken, err := usersvc.IsEmailTaken(c.Request.Context(), req.Email)
 	if err != nil {
 		return err
 	}
@@ -53,11 +54,11 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 检查邮箱发送频控与用户、全站发送配额
-	if err := auth.TryAcquireEmailRateLimit(c.Request.Context(), req.Email); err != nil {
+	if err := authsvc.TryAcquireEmailRateLimit(c.Request.Context(), req.Email); err != nil {
 		return err
 	}
 
-	if err := auth.TryAcquireEmailBindQuota(c.Request.Context(), claims.UserID); err != nil {
+	if err := authsvc.TryAcquireEmailBindQuota(c.Request.Context(), claims.UserID); err != nil {
 		return err
 	}
 
@@ -68,18 +69,18 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 			AppendDetails("验证码生成失败")
 	}
 
-	if err := auth.SetPendingEmailBind(c.Request.Context(), claims.UserID, req.Email, code); err != nil {
+	if err := authsvc.SetPendingEmailBind(c.Request.Context(), claims.UserID, req.Email, code); err != nil {
 		return err
 	}
 
 	// 邮件发送失败时清除待绑定记录，避免用户拿到无法校验的验证码
-	if e := email.SendBindEmailCode(req.Email, code); e != nil {
-		auth.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
+	if e := emailsvc.SendBindEmailCode(req.Email, code); e != nil {
+		authsvc.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
 		return errs.CreateAndLogInternalError(e, "Failed to send email bind code").
 			AppendDetails("邮件发送失败")
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
@@ -92,8 +93,8 @@ type emailBindVerifyReq struct {
 // emailBindVerifyHandler 校验邮箱绑定验证码：通过后把邮箱写入用户邮箱表，并清理待绑定状态。
 func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req emailBindVerifyReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if err := handling.ValidateEmail(req.Email); err != nil {
 		return err
@@ -105,7 +106,7 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	// 读取待绑定记录，未发起或已过期时拒绝
-	pending, err := auth.GetPendingEmailBind(c.Request.Context(), claims.UserID)
+	pending, err := authsvc.GetPendingEmailBind(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if pending == nil {
@@ -130,42 +131,42 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 校验通过：换绑邮箱（旧记录软删除）并清理待绑定状态与失败计数
-	if err := user.SetUserEmail(c.Request.Context(), &model.UserEmail{
+	if err := usersvc.SetUserEmail(c.Request.Context(), db.R, &model.UserEmail{
 		UserID: claims.UserID,
 		Email:  pending.Email,
 	}); err != nil {
 		return err
 	}
 
-	auth.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
-	auth.ResetBindAttempts(c.Request.Context(), bindEmailAttemptsKind, claims.UserID)
+	authsvc.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
+	authsvc.ResetBindAttempts(c.Request.Context(), bindEmailAttemptsKind, claims.UserID)
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
 // emailUnbindHandler 解绑当前用户的邮箱：邮箱记录软删除，保留历史。
 func emailUnbindHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
-	current, err := user.GetUserEmail(c.Request.Context(), claims.UserID)
+	current, err := usersvc.GetUserEmail(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if current == nil {
 		return errs.NotFoundError().AppendDetails("未绑定邮箱")
 	}
 
-	if err := user.DeleteUserEmail(c.Request.Context(), claims.UserID); err != nil {
+	if err := usersvc.DeleteUserEmail(c.Request.Context(), claims.UserID); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
 // totpBindInitHandler 发起 TOTP 绑定：生成密钥与 otpauth URL，并暂存待校验密钥。
 func totpBindInitHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
-	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
+	existing, err := usersvc.GetUserTOTP(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if existing != nil {
@@ -179,7 +180,7 @@ func totpBindInitHandler(c *gin.Context) *errs.Error {
 			AppendDetails("TOTP 密钥生成失败")
 	}
 
-	if err := auth.SetPendingTOTPBind(c.Request.Context(), claims.UserID, secret); err != nil {
+	if err := authsvc.SetPendingTOTPBind(c.Request.Context(), claims.UserID, secret); err != nil {
 		return err
 	}
 
@@ -199,8 +200,8 @@ type totpBindVerifyReq struct {
 // totpBindVerifyHandler 校验 TOTP 验证码：通过后把密钥写入用户 TOTP 表，并清理待绑定状态。
 func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req totpBindVerifyReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if err := handling.ValidateTOTPCode(req.Code); err != nil {
 		return err
@@ -209,7 +210,7 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	// 读取待校验密钥，未发起或已过期时拒绝
-	pending, err := auth.GetPendingTOTPBind(c.Request.Context(), claims.UserID)
+	pending, err := authsvc.GetPendingTOTPBind(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if pending == nil {
@@ -234,35 +235,35 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 校验通过：写入密钥并清理待绑定状态与失败计数
-	if err := user.UpsertUserTotp(c.Request.Context(), &model.UserTOTP{
+	if err := usersvc.UpsertUserTotp(c.Request.Context(), &model.UserTOTP{
 		UserID: claims.UserID,
 		Secret: pending.Secret,
 	}); err != nil {
 		return err
 	}
 
-	auth.DeletePendingTOTPBind(c.Request.Context(), claims.UserID)
-	auth.ResetBindAttempts(c.Request.Context(), bindTOTPAttemptsKind, claims.UserID)
+	authsvc.DeletePendingTOTPBind(c.Request.Context(), claims.UserID)
+	authsvc.ResetBindAttempts(c.Request.Context(), bindTOTPAttemptsKind, claims.UserID)
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
 // totpUnbindHandler 解绑当前用户的 TOTP：直接删除密钥记录。
 func totpUnbindHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
-	existing, err := user.GetUserTOTP(c.Request.Context(), claims.UserID)
+	existing, err := usersvc.GetUserTOTP(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if existing == nil {
 		return errs.NotFoundError().AppendDetails("未绑定 TOTP")
 	}
 
-	if err := user.DeleteUserTotp(c.Request.Context(), claims.UserID); err != nil {
+	if err := usersvc.DeleteUserTotp(c.Request.Context(), claims.UserID); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
@@ -274,8 +275,8 @@ type qqBindInitReq struct {
 // qqBindInitHandler 发起 QQ 绑定：检查 QQ 可用后生成验证码并暂存，验证码返回给用户自行发送。
 func qqBindInitHandler(c *gin.Context) *errs.Error {
 	var req qqBindInitReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if err := handling.ValidateQQ(req.QQ); err != nil {
 		return err
@@ -284,7 +285,7 @@ func qqBindInitHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	// 校验 QQ 是否已绑定当前用户或已被其他用户占用
-	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
+	current, err := usersvc.GetUserQQ(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	}
@@ -292,7 +293,7 @@ func qqBindInitHandler(c *gin.Context) *errs.Error {
 		return errs.ConflictError().AppendDetails("该 QQ 已绑定")
 	}
 
-	taken, err := user.IsQQTaken(c.Request.Context(), req.QQ)
+	taken, err := usersvc.IsQQTaken(c.Request.Context(), req.QQ)
 	if err != nil {
 		return err
 	}
@@ -307,7 +308,7 @@ func qqBindInitHandler(c *gin.Context) *errs.Error {
 			AppendDetails("验证码生成失败")
 	}
 
-	if err := auth.SetPendingQQBind(c.Request.Context(), claims.UserID, req.QQ, code); err != nil {
+	if err := authsvc.SetPendingQQBind(c.Request.Context(), claims.UserID, req.QQ, code); err != nil {
 		return err
 	}
 
@@ -327,8 +328,8 @@ type qqBindVerifyReq struct {
 // 注意：只认待绑定发起后 PendingBindDuration 内的消息，避免历史消息被重放。
 func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	var req qqBindVerifyReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if err := handling.ValidateQQ(req.QQ); err != nil {
 		return err
@@ -337,7 +338,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	// 读取待绑定记录并核对 QQ
-	pending, err := auth.GetPendingQQBind(c.Request.Context(), claims.UserID)
+	pending, err := authsvc.GetPendingQQBind(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if pending == nil {
@@ -352,21 +353,21 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 限制单个 QQ 的拉取频率，防止频繁查询 NapCat
-	if err := auth.TryAcquireQQRateLimit(c.Request.Context(), pending.QQ); err != nil {
+	if err := authsvc.TryAcquireQQRateLimit(c.Request.Context(), pending.QQ); err != nil {
 		return err
 	}
 
-	pullCtx, cancel := context.WithTimeout(c.Request.Context(), auth.QQPullTimeout)
+	pullCtx, cancel := context.WithTimeout(c.Request.Context(), authsvc.QQPullTimeout)
 	defer cancel()
 
-	messages, e := qq.GetFriendMsgHistory(pullCtx, pending.QQ, 20)
+	messages, e := qqsvc.GetFriendMsgHistory(pullCtx, pending.QQ, 20)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to pull QQ messages from NapCat").
 			AppendDetails("NapCat 错误")
 	}
 
 	// 只在待绑定有效期内、且文本与验证码完全一致的消息中匹配
-	cutoff := time.Now().Add(-auth.PendingBindDuration).Unix()
+	cutoff := time.Now().Add(-authsvc.PendingBindDuration).Unix()
 	matched := false
 	for _, msg := range messages {
 		if msg.Time < cutoff {
@@ -388,46 +389,46 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 匹配成功：写入 QQ（旧记录软删除）并清理待绑定状态与失败计数
-	if err := user.SetUserQQ(c.Request.Context(), &model.UserQQ{
+	if err := usersvc.SetUserQQ(c.Request.Context(), db.R, &model.UserQQ{
 		UserID: claims.UserID,
 		QQ:     pending.QQ,
 	}); err != nil {
 		return err
 	}
 
-	auth.DeletePendingQQBind(c.Request.Context(), claims.UserID)
-	auth.ResetBindAttempts(c.Request.Context(), bindQQAttemptsKind, claims.UserID)
+	authsvc.DeletePendingQQBind(c.Request.Context(), claims.UserID)
+	authsvc.ResetBindAttempts(c.Request.Context(), bindQQAttemptsKind, claims.UserID)
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
 // qqUnbindHandler 解绑当前用户的 QQ：QQ 记录软删除，保留历史。
 func qqUnbindHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
-	current, err := user.GetUserQQ(c.Request.Context(), claims.UserID)
+	current, err := usersvc.GetUserQQ(c.Request.Context(), claims.UserID)
 	if err != nil {
 		return err
 	} else if current == nil {
 		return errs.NotFoundError().AppendDetails("未绑定 QQ")
 	}
 
-	if err := user.DeleteUserQQ(c.Request.Context(), claims.UserID); err != nil {
+	if err := usersvc.DeleteUserQQ(c.Request.Context(), claims.UserID); err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
 // checkBindAttempts 检查绑定验证码错误次数是否已达上限；kind 为绑定方式，见包级常量。
 // 注意：失败计数在首次失败时设置 PendingBindDuration 过期，到期自动清零。
 func checkBindAttempts(ctx context.Context, kind string, userID int64) *errs.Error {
-	attempts, err := auth.GetBindAttempts(ctx, kind, userID)
+	attempts, err := authsvc.GetBindAttempts(ctx, kind, userID)
 	if err != nil {
 		return err
 	}
-	if attempts >= auth.MaxBindAttempts {
+	if attempts >= authsvc.MaxBindAttempts {
 		return errs.RateLimitExceededError().
 			AppendDetails("验证码错误次数过多，请重新发起绑定")
 	}
@@ -436,7 +437,7 @@ func checkBindAttempts(ctx context.Context, kind string, userID int64) *errs.Err
 
 // recordBindFailure 记录一次绑定验证码错误，达到上限后由 checkBindAttempts 拦截。
 func recordBindFailure(ctx context.Context, kind string, userID int64) *errs.Error {
-	if _, err := auth.IncreaseBindAttempts(ctx, kind, userID); err != nil {
+	if _, err := authsvc.IncreaseBindAttempts(ctx, kind, userID); err != nil {
 		return err
 	}
 	return nil

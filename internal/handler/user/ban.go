@@ -1,10 +1,11 @@
 package user
 
 import (
+	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	"fdfz-student-id/internal/service/perm"
-	"fdfz-student-id/internal/service/user"
+	permsvc "fdfz-student-id/internal/service/perm"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
@@ -26,9 +27,9 @@ func getUserBanHandler(c *gin.Context) *errs.Error {
 
 	var allowed bool
 	if targetID == claims.UserID {
-		allowed = perm.HasPermission(claims, perm.PermUserBanRead)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUserBanRead)
 	} else {
-		allowed = perm.HasPermission(claims, perm.PermUsersBanRead)
+		allowed = permsvc.HasPermission(claims, permsvc.PermUsersBanRead)
 	}
 	if !allowed {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
@@ -38,21 +39,12 @@ func getUserBanHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	ban, err := user.GetUserBan(c.Request.Context(), targetID)
+	ban, err := usersvc.GetUserBan(c.Request.Context(), targetID)
 	if err != nil {
 		return err
-	} else if ban == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"banned": false,
-		})
-		return nil
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"banned":   true,
-		"reason":   ban.Reason,
-		"end_time": ban.EndTime,
-	})
+	c.JSON(http.StatusOK, handling.BanJSON(ban))
 	return nil
 }
 
@@ -76,8 +68,8 @@ func banUserHandler(c *gin.Context) *errs.Error {
 	// 校验请求体与封禁原因、结束时间
 
 	var req banUserReq
-	if e := c.ShouldBindJSON(&req); e != nil {
-		return errs.BadRequestError().AppendDetails("请求解析失败")
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
 	}
 	if err := handling.ValidateBanReason(req.Reason); err != nil {
 		return err
@@ -107,7 +99,7 @@ func banUserHandler(c *gin.Context) *errs.Error {
 		Reason:  req.Reason,
 		EndTime: req.EndTime,
 	}
-	if err := user.BanUser(c.Request.Context(), newBan); err != nil {
+	if err := usersvc.BanUser(c.Request.Context(), db.R, newBan); err != nil {
 		return err
 	}
 
@@ -121,7 +113,7 @@ func banUserHandler(c *gin.Context) *errs.Error {
 	}
 	slog.Info("User banned", attrs...)
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }
 
@@ -141,12 +133,12 @@ func unbanUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	if err := user.UnbanUser(c.Request.Context(), targetID); err != nil {
+	if err := usersvc.UnbanUser(c.Request.Context(), targetID); err != nil {
 		return err
 	}
 
 	slog.Info("User unbanned", "user_id", targetID, "operator_id", claims.UserID)
 
-	c.JSON(http.StatusOK, gin.H{})
+	handling.RespondOK(c)
 	return nil
 }

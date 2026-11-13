@@ -15,15 +15,15 @@ import (
 const (
 	// AppAuthStatusActive is a AppAuthStatus of type active.
 	AppAuthStatusActive AppAuthStatus = "active"
-	// AppAuthStatusPending is a AppAuthStatus of type pending.
-	AppAuthStatusPending AppAuthStatus = "pending"
+	// AppAuthStatusUpdateSuspended is a AppAuthStatus of type update_suspended.
+	AppAuthStatusUpdateSuspended AppAuthStatus = "update_suspended"
 )
 
 var ErrInvalidAppAuthStatus = fmt.Errorf("not a valid AppAuthStatus, try [%s]", strings.Join(_AppAuthStatusNames, ", "))
 
 var _AppAuthStatusNames = []string{
 	string(AppAuthStatusActive),
-	string(AppAuthStatusPending),
+	string(AppAuthStatusUpdateSuspended),
 }
 
 // AppAuthStatusNames returns a list of possible string values of AppAuthStatus.
@@ -37,7 +37,7 @@ func AppAuthStatusNames() []string {
 func AppAuthStatusValues() []AppAuthStatus {
 	return []AppAuthStatus{
 		AppAuthStatusActive,
-		AppAuthStatusPending,
+		AppAuthStatusUpdateSuspended,
 	}
 }
 
@@ -54,8 +54,8 @@ func (x AppAuthStatus) IsValid() bool {
 }
 
 var _AppAuthStatusValue = map[string]AppAuthStatus{
-	"active":  AppAuthStatusActive,
-	"pending": AppAuthStatusPending,
+	"active":           AppAuthStatusActive,
+	"update_suspended": AppAuthStatusUpdateSuspended,
 }
 
 // ParseAppAuthStatus attempts to convert a string to a AppAuthStatus.
@@ -370,5 +370,127 @@ func (x *AppType) Scan(value interface{}) (err error) {
 
 // Value implements the driver Valuer interface.
 func (x AppType) Value() (driver.Value, error) {
+	return x.String(), nil
+}
+
+const (
+	// OAuthDeviceCodeStatusPending is a OAuthDeviceCodeStatus of type pending.
+	OAuthDeviceCodeStatusPending OAuthDeviceCodeStatus = "pending"
+	// OAuthDeviceCodeStatusApproved is a OAuthDeviceCodeStatus of type approved.
+	OAuthDeviceCodeStatusApproved OAuthDeviceCodeStatus = "approved"
+	// OAuthDeviceCodeStatusDenied is a OAuthDeviceCodeStatus of type denied.
+	OAuthDeviceCodeStatusDenied OAuthDeviceCodeStatus = "denied"
+)
+
+var ErrInvalidOAuthDeviceCodeStatus = fmt.Errorf("not a valid OAuthDeviceCodeStatus, try [%s]", strings.Join(_OAuthDeviceCodeStatusNames, ", "))
+
+var _OAuthDeviceCodeStatusNames = []string{
+	string(OAuthDeviceCodeStatusPending),
+	string(OAuthDeviceCodeStatusApproved),
+	string(OAuthDeviceCodeStatusDenied),
+}
+
+// OAuthDeviceCodeStatusNames returns a list of possible string values of OAuthDeviceCodeStatus.
+func OAuthDeviceCodeStatusNames() []string {
+	tmp := make([]string, len(_OAuthDeviceCodeStatusNames))
+	copy(tmp, _OAuthDeviceCodeStatusNames)
+	return tmp
+}
+
+// OAuthDeviceCodeStatusValues returns a list of the values for OAuthDeviceCodeStatus
+func OAuthDeviceCodeStatusValues() []OAuthDeviceCodeStatus {
+	return []OAuthDeviceCodeStatus{
+		OAuthDeviceCodeStatusPending,
+		OAuthDeviceCodeStatusApproved,
+		OAuthDeviceCodeStatusDenied,
+	}
+}
+
+// String implements the Stringer interface.
+func (x OAuthDeviceCodeStatus) String() string {
+	return string(x)
+}
+
+// IsValid provides a quick way to determine if the typed value is
+// part of the allowed enumerated values
+func (x OAuthDeviceCodeStatus) IsValid() bool {
+	_, err := ParseOAuthDeviceCodeStatus(string(x))
+	return err == nil
+}
+
+var _OAuthDeviceCodeStatusValue = map[string]OAuthDeviceCodeStatus{
+	"pending":  OAuthDeviceCodeStatusPending,
+	"approved": OAuthDeviceCodeStatusApproved,
+	"denied":   OAuthDeviceCodeStatusDenied,
+}
+
+// ParseOAuthDeviceCodeStatus attempts to convert a string to a OAuthDeviceCodeStatus.
+func ParseOAuthDeviceCodeStatus(name string) (OAuthDeviceCodeStatus, error) {
+	if x, ok := _OAuthDeviceCodeStatusValue[name]; ok {
+		return x, nil
+	}
+	return OAuthDeviceCodeStatus(""), fmt.Errorf("%s is %w", name, ErrInvalidOAuthDeviceCodeStatus)
+}
+
+// MarshalText implements the text marshaller method.
+func (x OAuthDeviceCodeStatus) MarshalText() ([]byte, error) {
+	return []byte(string(x)), nil
+}
+
+// UnmarshalText implements the text unmarshaller method.
+func (x *OAuthDeviceCodeStatus) UnmarshalText(text []byte) error {
+	tmp, err := ParseOAuthDeviceCodeStatus(string(text))
+	if err != nil {
+		return err
+	}
+	*x = tmp
+	return nil
+}
+
+// AppendText appends the textual representation of itself to the end of b
+// (allocating a larger slice if necessary) and returns the updated slice.
+//
+// Implementations must not retain b, nor mutate any bytes within b[:len(b)].
+func (x OAuthDeviceCodeStatus) AppendText(b []byte) ([]byte, error) {
+	return append(b, x.String()...), nil
+}
+
+var errOAuthDeviceCodeStatusNilPtr = errors.New("value pointer is nil") // one per type for package clashes
+
+// Scan implements the Scanner interface.
+func (x *OAuthDeviceCodeStatus) Scan(value interface{}) (err error) {
+	if value == nil {
+		*x = OAuthDeviceCodeStatus("")
+		return
+	}
+
+	// A wider range of scannable types.
+	// driver.Value values at the top of the list for expediency
+	switch v := value.(type) {
+	case string:
+		*x, err = ParseOAuthDeviceCodeStatus(v)
+	case []byte:
+		*x, err = ParseOAuthDeviceCodeStatus(string(v))
+	case OAuthDeviceCodeStatus:
+		*x = v
+	case *OAuthDeviceCodeStatus:
+		if v == nil {
+			return errOAuthDeviceCodeStatusNilPtr
+		}
+		*x = *v
+	case *string:
+		if v == nil {
+			return errOAuthDeviceCodeStatusNilPtr
+		}
+		*x, err = ParseOAuthDeviceCodeStatus(*v)
+	default:
+		return errors.New("invalid type for OAuthDeviceCodeStatus")
+	}
+
+	return
+}
+
+// Value implements the driver Valuer interface.
+func (x OAuthDeviceCodeStatus) Value() (driver.Value, error) {
 	return x.String(), nil
 }
