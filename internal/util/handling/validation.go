@@ -6,11 +6,24 @@ import (
 	"fdfz-student-id/internal/service/perm"
 	"mime/multipart"
 	"net/mail"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/dlclark/regexp2"
+	"github.com/google/uuid"
+)
+
+// 输入校验使用的取值限制。
+const (
+	MaxAppRedirectURIs      = 10   // 单个应用允许配置的回调地址数量
+	MaxAppRequestedPerms    = 100  // 单个应用允许申请的权限数量
+	MaxAppURLLength         = 512  // 回调地址与主页地址的最大长度
+	MaxAppNameLength        = 128  // 应用名称最大字符数
+	MaxAppDescriptionLength = 2048 // 应用描述最大字符数
+	MaxPermissionLength     = 128  // 完整权限串的最大字符数
+	MaxReviewCommentLength  = 1024 // 注册申请审核意见最大字符数
 )
 
 // 各类输入的格式校验规则。统一使用 regexp2 的 \A...\z 全串匹配。
@@ -36,6 +49,13 @@ var (
 // emailBlockedDomains 禁止注册/绑定使用的邮箱域名（校内域名不允许作为联系方式）。
 var emailBlockedDomains = map[string]struct{}{
 	"fdfz.top": {},
+}
+
+// imageMIMETypes 是允许上传的图片类型；SVG 等可携带脚本的类型不在白名单内。
+var imageMIMETypes = map[string]struct{}{
+	"image/jpeg": {},
+	"image/png":  {},
+	"image/webp": {},
 }
 
 // containsNUL 判断字符串是否包含 NUL 字节；PostgreSQL 的 text 无法存储 NUL，需提前拒绝。
@@ -290,7 +310,7 @@ func ValidateGrantPermission(permission string) *errs.Error {
 	if _, err := perm.ParsePermission(permission); err != nil {
 		return errs.BadRequestError().AppendDetails("权限格式错误")
 	}
-	if utf8.RuneCountInString(permission) > 128 {
+	if utf8.RuneCountInString(permission) > MaxPermissionLength {
 		return errs.BadRequestError().AppendDetails("权限过长")
 	}
 	return nil
@@ -313,4 +333,247 @@ func ValidateValidRange(validFrom, validUntil *time.Time) *errs.Error {
 		return errs.BadRequestError().AppendDetails("有效期范围错误")
 	}
 	return nil
+}
+
+// ValidateAppNamespace 校验应用命名空间：小写字母开头、2-32 位，并拒绝系统保留命名空间。
+func ValidateAppNamespace(namespace string) *errs.Error {
+	if namespace == "" {
+		return errs.BadRequestError().AppendDetails("未提供命名空间")
+	}
+	if ok, err := perm.RegexNamespace.MatchString(namespace); err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to validate app namespace").AppendDetails("命名空间校验失败")
+	} else if !ok {
+		return errs.BadRequestError().AppendDetails("命名空间格式错误")
+	}
+	return nil
+}
+
+// ValidateAppName 校验应用名称：不能为空白，最长 128 个字符。
+func ValidateAppName(name string) *errs.Error {
+	if strings.TrimSpace(name) == "" {
+		return errs.BadRequestError().AppendDetails("未提供应用名称")
+	}
+	if containsNUL(name) {
+		return errs.BadRequestError().AppendDetails("应用名称格式错误")
+	}
+	if utf8.RuneCountInString(name) > MaxAppNameLength {
+		return errs.BadRequestError().AppendDetails("应用名称过长")
+	}
+	return nil
+}
+
+// ValidateAppDescription 校验应用描述长度（允许为空）。
+func ValidateAppDescription(description string) *errs.Error {
+	if containsNUL(description) {
+		return errs.BadRequestError().AppendDetails("应用描述格式错误")
+	}
+	if utf8.RuneCountInString(description) > MaxAppDescriptionLength {
+		return errs.BadRequestError().AppendDetails("应用描述过长")
+	}
+	return nil
+}
+
+// validateAppHTTPURL 校验一个 http/https 绝对地址：必须有主机、不允许携带用户信息或 fragment。
+func validateAppHTTPURL(raw, item string) *errs.Error {
+	if raw == "" {
+		return errs.BadRequestError().AppendDetails("未提供" + item)
+	}
+	if containsNUL(raw) {
+		return errs.BadRequestError().AppendDetails(item + "格式错误")
+	}
+	if utf8.RuneCountInString(raw) > MaxAppURLLength {
+		return errs.BadRequestError().AppendDetails(item + "过长")
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" {
+		return errs.BadRequestError().AppendDetails(item + "格式错误")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errs.BadRequestError().AppendDetails(item + "必须使用 http 或 https")
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return errs.BadRequestError().AppendDetails(item + "格式错误")
+	}
+	return nil
+}
+
+// ValidateAppHomepageURL 校验应用主页地址；空字符串表示未设置。
+func ValidateAppHomepageURL(homepageURL string) *errs.Error {
+	if homepageURL == "" {
+		return nil
+	}
+	return validateAppHTTPURL(homepageURL, "主页地址")
+}
+
+// ValidateAppClientType 校验客户端类型枚举取值。
+func ValidateAppClientType(clientType model.AppType) *errs.Error {
+	if !clientType.IsValid() {
+		return errs.BadRequestError().AppendDetails("客户端类型取值错误")
+	}
+	return nil
+}
+
+// ValidateAppRedirectURIs 校验回调地址列表：数量、长度、协议与格式。
+func ValidateAppRedirectURIs(redirectURIs []string) *errs.Error {
+	if len(redirectURIs) > MaxAppRedirectURIs {
+		return errs.BadRequestError().AppendDetails("回调地址数量过多")
+	}
+	for _, redirectURI := range redirectURIs {
+		if err := validateAppHTTPURL(redirectURI, "回调地址"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateAppRequestedPermissions 校验应用申请的可授权权限：必须是完整的权限串且数量受限。
+func ValidateAppRequestedPermissions(permissions []string) *errs.Error {
+	if len(permissions) > MaxAppRequestedPerms {
+		return errs.BadRequestError().AppendDetails("申请权限数量过多")
+	}
+	for _, permission := range permissions {
+		if _, err := perm.ParsePermission(permission); err != nil {
+			return errs.BadRequestError().AppendDetails("权限格式错误")
+		}
+		if utf8.RuneCountInString(permission) > MaxPermissionLength {
+			return errs.BadRequestError().AppendDetails("权限过长")
+		}
+	}
+	return nil
+}
+
+// ValidateAppOwnerID 校验应用所有者 ID 为正整数；用户是否存在由调用方另行确认。
+func ValidateAppOwnerID(ownerUserID int64) *errs.Error {
+	if ownerUserID <= 0 {
+		return errs.BadRequestError().AppendDetails("未提供应用所有者")
+	}
+	return nil
+}
+
+// ValidateImageUpload 校验单张图片上传：最多 1 个文件，仅允许 JPEG/PNG/WebP。
+// item 用于错误文案（如「头像」「佐证图片」）；返回文件、检测到的 MIME 类型与固定扩展名。
+func ValidateImageUpload(files []*multipart.FileHeader, item string) (*multipart.FileHeader, string, string, *errs.Error) {
+	switch {
+	case len(files) == 0:
+		return nil, "", "", errs.BadRequestError().AppendDetails("未提供" + item)
+	case len(files) > 1:
+		return nil, "", "", errs.BadRequestError().AppendDetails(item + "最多上传 1 张")
+	}
+
+	fileHeader := files[0]
+	mimeType, err := DetectMIMEType(fileHeader, imageMIMETypes)
+	if err != nil {
+		return nil, "", "", err
+	}
+	extension := ImageExtension(mimeType)
+	if extension == "" {
+		return nil, "", "", errs.UnsupportedMediaTypeError().AppendDetails("文件类型不受支持")
+	}
+	return fileHeader, mimeType, extension, nil
+}
+
+// ValidateUserID 校验用户 ID 为正整数；用户是否存在由调用方另行确认。
+func ValidateUserID(userID int64) *errs.Error {
+	if userID <= 0 {
+		return errs.BadRequestError().AppendDetails("用户 ID 格式错误")
+	}
+	return nil
+}
+
+// ValidateFutureTime 校验时间晚于当前时间；item 用于拼出错误文案。
+func ValidateFutureTime(t time.Time, item string) *errs.Error {
+	if !t.After(time.Now()) {
+		return errs.BadRequestError().AppendDetails(item + "必须晚于当前时间")
+	}
+	return nil
+}
+
+// ValidateVerificationCode 校验验证码非空；具体格式由各验证流程自行判断。
+func ValidateVerificationCode(code string) *errs.Error {
+	if code == "" {
+		return errs.BadRequestError().AppendDetails("未提供验证码")
+	}
+	return nil
+}
+
+// ValidateAppPermissionPattern 校验权限模式串（允许 * / ** 通配）属于指定应用命名空间。
+func ValidateAppPermissionPattern(permission, namespace string) *errs.Error {
+	if permission == "" {
+		return errs.BadRequestError().AppendDetails("未提供权限")
+	}
+	parsed, err := perm.ParsePattern(permission)
+	if err != nil {
+		return errs.BadRequestError().AppendDetails("权限格式错误")
+	}
+	if utf8.RuneCountInString(permission) > MaxPermissionLength {
+		return errs.BadRequestError().AppendDetails("权限过长")
+	}
+	if parsed.Namespace != namespace {
+		return errs.BadRequestError().AppendDetails("权限不属于该应用")
+	}
+	return nil
+}
+
+// ParseAppPermissionValue 解析属于指定命名空间的权限串，返回不含命名空间的权限值。
+func ParseAppPermissionValue(permission, namespace string) (string, *errs.Error) {
+	parsed, err := perm.ParsePermission(permission)
+	if err != nil {
+		return "", errs.BadRequestError().AppendDetails("权限格式错误")
+	}
+	if parsed.Namespace != namespace {
+		return "", errs.BadRequestError().AppendDetails("权限命名空间不可用")
+	}
+	value := strings.Join(parsed.Nodes, ".")
+	if err := ValidatePermissionValue(value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+// ValidateRegisterStudentNum 校验注册表单中学号与用户类型的组合，并校验学生学号格式。
+func ValidateRegisterStudentNum(userType model.UserType, studentNum string) *errs.Error {
+	if userType != model.UserTypeStudent {
+		if studentNum != "" {
+			return errs.BadRequestError().AppendDetails("非学生账号不能提供学号")
+		}
+		return nil
+	}
+	if studentNum == "" {
+		return errs.BadRequestError().AppendDetails("学生账号未提供学号")
+	}
+	return ValidateStudentNum(studentNum)
+}
+
+// ValidateRegisterReviewStatus 校验注册申请审核状态：只能是 approved 或 rejected。
+func ValidateRegisterReviewStatus(status model.RegisterRequestStatus) *errs.Error {
+	if !status.IsValid() || status == model.RegisterRequestStatusPending {
+		return errs.BadRequestError().AppendDetails("审核状态取值错误")
+	}
+	return nil
+}
+
+// ValidateRegisterReviewComment 校验注册申请审核意见长度（允许为空）。
+func ValidateRegisterReviewComment(comment string) *errs.Error {
+	if utf8.RuneCountInString(comment) > MaxReviewCommentLength {
+		return errs.BadRequestError().AppendDetails("审核意见过长")
+	}
+	return nil
+}
+
+// ValidateUUID 校验 UUID 非空；item 用于拼出「未提供 xxx」错误文案。
+func ValidateUUID(id uuid.UUID, item string) *errs.Error {
+	if id == uuid.Nil {
+		return errs.BadRequestError().AppendDetails("未提供" + item)
+	}
+	return nil
+}
+
+// ParseUUID 解析 UUID 字符串；格式非法时返回 bad_request。
+func ParseUUID(raw, item string) (uuid.UUID, *errs.Error) {
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, errs.BadRequestError().AppendDetails(item + "格式错误")
+	}
+	return id, nil
 }

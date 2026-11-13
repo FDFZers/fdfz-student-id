@@ -98,8 +98,8 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	if err := handling.ValidateEmail(req.Email); err != nil {
 		return err
 	}
-	if req.Code == "" {
-		return errs.BadRequestError().AppendDetails("未提供验证码")
+	if err := handling.ValidateVerificationCode(req.Code); err != nil {
+		return err
 	}
 
 	claims := handling.MustGetClaims(c)

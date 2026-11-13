@@ -1,4 +1,3 @@
-// Package storage 管理本地存储目录与上传临时路径的生成。
 package storage
 
 import (

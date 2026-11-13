@@ -1,7 +1,6 @@
 package permissions
 
 import (
-	"fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/service/search"
 	"net/http"
 	"strings"
@@ -119,14 +118,8 @@ func revokeAppUserGrantHandler(c *gin.Context) *errs.Error {
 	}
 
 	permStr := c.Query("permission")
-	if permStr == "" {
-		return errs.BadRequestError().AppendDetails("未提供权限")
-	}
-
-	if parsed, e := perm.ParsePattern(permStr); e != nil {
-		return errs.BadRequestError().AppendDetails("权限格式错误")
-	} else if parsed.Namespace != app.Namespace {
-		return errs.BadRequestError().AppendDetails("权限不属于该应用")
+	if err := handling.ValidateAppPermissionPattern(permStr, app.Namespace); err != nil {
+		return err
 	}
 
 	existing, err := userperm.GetUserPermissionGrant(c.Request.Context(), userID, permStr)

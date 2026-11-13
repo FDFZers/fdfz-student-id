@@ -1,4 +1,3 @@
-// Package db 提供 PostgreSQL / Redis 连接、数据库迁移与 Redis 缓存读写辅助。
 package db
 
 import (

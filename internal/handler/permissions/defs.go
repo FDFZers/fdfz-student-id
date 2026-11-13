@@ -1,7 +1,6 @@
 package permissions
 
 import (
-	"fdfz-student-id/internal/service/perm"
 	"net/http"
 	"strings"
 
@@ -37,15 +36,8 @@ func createAppPermissionHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 解析并校验权限串（必须属于当前应用的命名空间）
-	parsed, e := perm.ParsePermission(body.Permission)
-	if e != nil {
-		return errs.BadRequestError().AppendDetails("权限格式错误")
-	}
-	if parsed.Namespace != app.Namespace {
-		return errs.BadRequestError().AppendDetails("权限命名空间不可用")
-	}
-	value := strings.Join(parsed.Nodes, ".")
-	if err := handling.ValidatePermissionValue(value); err != nil {
+	value, err := handling.ParseAppPermissionValue(body.Permission, app.Namespace)
+	if err != nil {
 		return err
 	}
 	if err := handling.ValidatePermissionDescription(body.Description); err != nil {

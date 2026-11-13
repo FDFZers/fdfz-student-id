@@ -1,7 +1,3 @@
-// Package errs 定义统一的 API 错误对象：错误 id + HTTP 状态码 + 可选的中文 details。
-//
-// 处理器返回 *Error，由 handling.Wrap 统一写响应；错误对象在返回途中可继续追加 details
-// （具体原因在前），端点级失败文案由路由层的 Wrap 统一追加在最后。
 package errs
 
 import (

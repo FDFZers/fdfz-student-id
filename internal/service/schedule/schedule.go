@@ -1,4 +1,3 @@
-// Package schedule 注册并运行后台定时任务（会话、封禁与账号注销的过期清理）。
 package schedule
 
 import (

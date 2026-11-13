@@ -1,4 +1,3 @@
-// Package email 通过 SMTP 发送 HTML 验证码邮件，支持登录/重置密码/二次验证与邮箱绑定场景。
 package email
 
 import (

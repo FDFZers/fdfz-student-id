@@ -1,9 +1,9 @@
-// Package router 负责注册 HTTP 路由，并挂载全局中间件（CORS、令牌解析、内部接口鉴权）。
 package router
 
 import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
+	"fdfz-student-id/internal/handler/app"
 	"fdfz-student-id/internal/handler/auth"
 	"fdfz-student-id/internal/handler/healthcheck"
 	"fdfz-student-id/internal/handler/misc"
@@ -83,6 +83,7 @@ func InitRouter(r *gin.Engine) {
 	user.InitRoutes(v1, internal)
 	security.InitRoutes(internal)
 	permissions.InitRoutes(internal)
+	app.InitRoutes(v1, internal)
 }
 
 // InitHealthCheckRouter 注册健康检查路由（生产环境单独监听 8080 端口）。

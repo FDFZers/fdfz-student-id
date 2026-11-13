@@ -1,4 +1,3 @@
-// Package filestore 封装文件存储服务：HMAC 令牌签发、文件上传/删除、文件地址拼接。
 package filestore
 
 import (

@@ -1,9 +1,5 @@
 package perm
 
-// 本文件列出内置 student_id 应用（FDFZ 学生身份后端自身）使用的权限串常量。
-// 这些常量对应数据库 permission_defs 中的权限定义，供中间件与处理器做鉴权判断。
-// 注意：常量值必须与已有权限定义保持一致，改动会直接影响各接口的鉴权结果。
-
 // 注册申请
 const (
 	PermRegisterRequestList   = "student_id:register_requests.list"
@@ -11,7 +7,7 @@ const (
 	PermRegisterRequestReview = "student_id:register_requests.review"
 )
 
-// 用户（user 为当前登录用户本人，users 为管理员视角的其他用户）
+// 用户
 const (
 	PermUsersList   = "student_id:users.list"
 	PermUsersDelete = "student_id:users.delete"
@@ -63,11 +59,23 @@ const (
 	PermUsersRelationWrite       = "student_id:users.relation.write"
 )
 
-// 权限管理（全局权限，以及按「是否拥有应用」放权的 owned_apps 权限）
+// 权限管理
 const (
+	PermPermissionRead   = "student_id:permission.read"
+	PermPermissionWrite  = "student_id:permission.write"
 	PermPermissionsRead  = "student_id:permissions.read"
 	PermPermissionsWrite = "student_id:permissions.write"
+)
 
-	PermPermissionsReadOwnedApps  = "student_id:permissions.read.owned_apps"
-	PermPermissionsWriteOwnedApps = "student_id:permissions.write.owned_apps"
+// 应用管理
+const (
+	PermAppRead   = "student_id:app.read"
+	PermAppUpdate = "student_id:app.update"
+	PermAppDelete = "student_id:app.delete"
+
+	PermAppsList    = "student_id:apps.list"
+	PermAppsCreate  = "student_id:apps.create"
+	PermAppsUpdate  = "student_id:apps.update"
+	PermAppsSuspend = "student_id:apps.suspend"
+	PermAppsDelete  = "student_id:apps.delete"
 )

@@ -1,4 +1,3 @@
-// Package crypto 提供验证码与 TOTP 生成、密码哈希、令牌摘要以及 JWT 签发/校验等密码学工具。
 package crypto
 
 import (

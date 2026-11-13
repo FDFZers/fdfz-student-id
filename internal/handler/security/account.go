@@ -7,7 +7,6 @@ import (
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -48,9 +47,9 @@ func deleteUserHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	// 校验目标用户 ID
-	targetID, e := strconv.ParseInt(c.Param("id"), 10, 64)
-	if e != nil || targetID <= 0 {
-		return errs.BadRequestError().AppendDetails("用户 ID 格式错误")
+	targetID, err := handling.ParseID(c, "id", "用户")
+	if err != nil {
+		return err
 	}
 	if targetID == claims.UserID {
 		return errs.BadRequestError().AppendDetails("不能删除自己")

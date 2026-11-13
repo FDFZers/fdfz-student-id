@@ -87,26 +87,9 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 		return err
 	}
 
-	fileHeaders := form.File[kind.Field]
-	switch {
-	case len(fileHeaders) == 0:
-		return errs.BadRequestError().AppendDetails("未提供" + kind.Item)
-	case len(fileHeaders) > 1:
-		return errs.BadRequestError().AppendDetails(kind.Item + "最多上传 1 张")
-	}
-	fileHeader := fileHeaders[0]
-
-	mimeType, err := handling.DetectMIMEType(fileHeader, map[string]struct{}{
-		"image/jpeg": {},
-		"image/png":  {},
-		"image/webp": {},
-	})
+	fileHeader, mimeType, extension, err := handling.ValidateImageUpload(form.File[kind.Field], kind.Item)
 	if err != nil {
 		return err
-	}
-	extension := handling.ImageExtension(mimeType)
-	if extension == "" {
-		return errs.UnsupportedMediaTypeError().AppendDetails("文件类型不受支持")
 	}
 
 	// 上传到 filestore：路径固定为 /student_id/{avatars|banners}/{userID}，同路径覆盖

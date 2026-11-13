@@ -1,5 +1,3 @@
-// Package security 实现账号安全相关的内部接口：邮箱/TOTP/QQ 绑定与解绑、修改密码、会话管理与账号注销。
-// 路由统一挂在 /api/internal/security 下：除会话列表外均要求提权令牌，端点级失败文案由 handling.Wrap 追加。
 package security
 
 import (

@@ -1,7 +1,3 @@
-// Package perm 实现权限的解析与格式化、通配符匹配、权限继承图计算，以及权限目录快照的加载、原子替换与异步重载。
-//
-// 权限字符串形如「命名空间:value」，例如 student_id:users.list；命名空间即 oauth_apps.namespace，
-// value 为 "." 分隔的节点路径。Permission 既表示具体权限，也表示可含 "*" / "**" 的模式。
 package perm
 
 import (

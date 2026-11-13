@@ -1,4 +1,3 @@
-// Package handling 提供 HTTP 处理器公共能力：错误包装、参数解析、校验、Cookie 与响应辅助。
 package handling
 
 import (

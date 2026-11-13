@@ -1,7 +1,3 @@
-// Package regreq 实现注册申请（register_requests）的查询、搜索与审核 HTTP 处理器。
-//
-// 注册申请的创建在 auth 包（POST /api/internal/auth/register），本包只负责审核侧接口；
-// 端点级失败文案由路由上的 handling.Wrap 追加，处理器内部只追加具体原因。
 package regreq
 
 import (

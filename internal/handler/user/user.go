@@ -1,4 +1,3 @@
-// Package user 实现用户资料、头像/背景图、关注关系、封禁与用户搜索的 HTTP 处理器。
 package user
 
 import (

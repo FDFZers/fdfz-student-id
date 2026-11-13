@@ -1,6 +1,3 @@
-// Package user 实现用户域的业务逻辑与数据访问：用户资料、密码/TOTP、邮箱/QQ、关注关系、封禁、
-// 注册申请与账号注销。错误 details 只追加具体原因或子步骤失败，端点级失败文案由处理器所在的
-// handling.Wrap 统一追加。
 package user
 
 import (

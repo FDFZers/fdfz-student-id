@@ -8,7 +8,6 @@ import (
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/guregu/null/v6"
@@ -83,8 +82,10 @@ func banUserHandler(c *gin.Context) *errs.Error {
 	if err := handling.ValidateBanReason(req.Reason); err != nil {
 		return err
 	}
-	if req.EndTime.Valid && !req.EndTime.Time.After(time.Now()) {
-		return errs.BadRequestError().AppendDetails("封禁结束时间必须晚于当前时间")
+	if req.EndTime.Valid {
+		if err := handling.ValidateFutureTime(req.EndTime.Time, "封禁结束时间"); err != nil {
+			return err
+		}
 	}
 
 	if err := handling.EnsureUserExists(c, targetID); err != nil {

@@ -1,5 +1,3 @@
-// Package userperm 实现用户组（Role）、用户组成员、组权限与用户直接授权的数据库读写，
-// 以及用户有效权限和权限值的解析。
 package userperm
 
 import (

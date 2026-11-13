@@ -1,4 +1,3 @@
-// Package healthcheck 提供存活探针与 PostgreSQL / Redis 依赖健康检查。
 package healthcheck
 
 import (

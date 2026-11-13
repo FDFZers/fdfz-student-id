@@ -1,4 +1,3 @@
-// Package cfg 负责加载环境变量配置与构建信息。
 package cfg
 
 import (
@@ -72,7 +71,7 @@ func LoadConfig() error {
 
 	cfg.FilestorePublicEndpoint = env("FILESTORE_PUBLIC_ENDPOINT", "https://filestore.fdfz.top/")
 	cfg.FilestoreInternalEndpoint = env("FILESTORE_INTERNAL_ENDPOINT", "https://filestore.fdfz.top/")
-	cfg.NapCatEndpoint = env("NAPCAT_ENDPOINT", "https://fdfz.top:7010/")
+	cfg.NapCatEndpoint = env("NAPCAT_ENDPOINT", "http://fdfz.top:7010/")
 	cfg.AltchaTimeout = envDur("ALTCHA_TIMEOUT", 30*time.Second)
 	cfg.AccessTokenTTL = envDur("ACCESS_TOKEN_TTL", 10*time.Minute)
 	cfg.PermSessionTokenTTL = envDur("PERM_SESSION_TOKEN_TTL", 30*24*time.Hour)

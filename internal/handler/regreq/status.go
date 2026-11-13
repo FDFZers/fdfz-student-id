@@ -4,10 +4,10 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/service/captcha"
 	"fdfz-student-id/internal/service/user"
+	"fdfz-student-id/internal/util/handling"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // registerRequestStatusHandler 查询注册申请的审核状态，无需登录。
@@ -17,9 +17,9 @@ func registerRequestStatusHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	id, e := uuid.Parse(c.Query("id"))
-	if e != nil {
-		return errs.BadRequestError().AppendDetails("注册请求 ID 格式错误")
+	id, err := handling.ParseUUID(c.Query("id"), "注册请求 ID")
+	if err != nil {
+		return err
 	}
 
 	req, err := user.GetRegisterRequestByID(c.Request.Context(), id)

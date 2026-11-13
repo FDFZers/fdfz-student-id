@@ -1,4 +1,3 @@
-// Package auth 实现鉴权会话、用户会话、提权撤销与认证频率限制等认证服务。
 package auth
 
 import (

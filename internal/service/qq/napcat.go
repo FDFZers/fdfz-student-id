@@ -1,4 +1,3 @@
-// Package qq 封装 NapCat（OneBot 11 HTTP）接口，用于拉取 QQ 私聊消息以校验验证码，并预留主动发送私聊消息能力。
 package qq
 
 import (

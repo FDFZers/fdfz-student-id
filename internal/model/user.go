@@ -1,7 +1,4 @@
 //go:generate go tool go-enum --names --values --marshal --sql
-
-// Package model 定义数据库实体、枚举与 JWT 令牌声明；枚举取值以各文件顶部的 ENUM 声明为准。
-// 手写模型与 go-enum 生成的 *_enum.go 一一对应，生成文件不手动修改。
 package model
 
 import (

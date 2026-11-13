@@ -1,4 +1,3 @@
-// Package middleware 提供通用 Gin 中间件：JWT 解析与鉴权、提权令牌校验、应用访问控制与请求体大小限制。
 package middleware
 
 import (

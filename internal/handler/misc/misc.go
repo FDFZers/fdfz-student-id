@@ -1,4 +1,3 @@
-// Package misc 提供根路径、版本信息与客户端 IP 归属等杂项接口。
 package misc
 
 import (

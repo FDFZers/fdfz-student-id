@@ -8,7 +8,6 @@ import (
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
 	"net/http"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -29,16 +28,15 @@ func reviewRegisterHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	if req.ID == uuid.Nil {
-		return errs.BadRequestError().AppendDetails("未提供注册请求 ID")
+	if err := handling.ValidateUUID(req.ID, "注册请求 ID"); err != nil {
+		return err
 	}
 
-	if !req.Status.IsValid() || req.Status == model.RegisterRequestStatusPending {
-		return errs.BadRequestError().AppendDetails("审核状态取值错误")
+	if err := handling.ValidateRegisterReviewStatus(req.Status); err != nil {
+		return err
 	}
-
-	if utf8.RuneCountInString(req.Comment) > 1024 {
-		return errs.BadRequestError().AppendDetails("审核意见过长")
+	if err := handling.ValidateRegisterReviewComment(req.Comment); err != nil {
+		return err
 	}
 
 	claims := handling.MustGetClaims(c)

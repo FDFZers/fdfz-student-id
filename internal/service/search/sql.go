@@ -1,4 +1,3 @@
-// Package search 实现基于 squirrel 的可配置搜索：构建参数化的计数与数据 SQL，并执行分页查询。
 package search
 
 import (

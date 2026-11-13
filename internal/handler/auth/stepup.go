@@ -69,8 +69,8 @@ func stepupFinalizeHandler(c *gin.Context) *errs.Error {
 	if e := c.ShouldBindJSON(&req); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
-	if req.SessionID == uuid.Nil {
-		return errs.BadRequestError().AppendDetails("未提供鉴权会话 ID")
+	if err := handling.ValidateUUID(req.SessionID, "鉴权会话 ID"); err != nil {
+		return err
 	}
 
 	claims := handling.MustGetClaims(c)

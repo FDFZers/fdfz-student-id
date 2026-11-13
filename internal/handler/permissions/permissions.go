@@ -1,5 +1,3 @@
-// Package permissions 实现权限管理相关的 HTTP 处理器：权限定义 CRUD、权限继承、权限定义/用户组搜索、
-// 权限目录重载，以及应用维度的用户组与用户授权接口。用户组的业务规则详见 docs/user-groups.md。
 package permissions
 
 import (
@@ -20,8 +18,8 @@ import (
 func InitRoutes(internal *gin.RouterGroup) {
 	group := internal.Group("/permissions")
 
-	appRead := middleware.RequireAppAccess("appID", perm.PermPermissionsRead, perm.PermPermissionsReadOwnedApps)
-	appWrite := middleware.RequireAppAccess("appID", perm.PermPermissionsWrite, perm.PermPermissionsWriteOwnedApps)
+	appRead := middleware.RequireAppAccess("appID", perm.PermPermissionsRead, perm.PermPermissionRead)
+	appWrite := middleware.RequireAppAccess("appID", perm.PermPermissionsWrite, perm.PermPermissionWrite)
 	globalRead := middleware.RequirePermission(perm.PermPermissionsRead)
 	globalWrite := middleware.RequirePermission(perm.PermPermissionsWrite)
 

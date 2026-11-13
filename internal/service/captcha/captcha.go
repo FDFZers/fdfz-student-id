@@ -1,4 +1,3 @@
-// Package captcha 封装 Altcha 人机验证：签发 challenge、校验 payload 并保证同一 challenge 仅能消费一次。
 package captcha
 
 import (

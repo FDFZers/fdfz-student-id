@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // getRegisterRequestHandler 查询单条注册申请详情，需要 register_requests.read 权限。
@@ -20,9 +19,9 @@ func getRegisterRequestHandler(c *gin.Context) *errs.Error {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
-	id, e := uuid.Parse(c.Param("id"))
-	if e != nil {
-		return errs.BadRequestError().AppendDetails("注册请求 ID 格式错误")
+	id, err := handling.ParseUUID(c.Param("id"), "注册请求 ID")
+	if err != nil {
+		return err
 	}
 
 	request, err := user.GetRegisterRequestByID(c.Request.Context(), id)
@@ -58,9 +57,9 @@ func getRegisterRequestProofImageHandler(c *gin.Context) *errs.Error {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
-	id, e := uuid.Parse(c.Param("id"))
-	if e != nil {
-		return errs.BadRequestError().AppendDetails("注册请求 ID 格式错误")
+	id, err := handling.ParseUUID(c.Param("id"), "注册请求 ID")
+	if err != nil {
+		return err
 	}
 
 	request, err := user.GetRegisterRequestByID(c.Request.Context(), id)

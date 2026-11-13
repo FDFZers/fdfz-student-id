@@ -1,4 +1,3 @@
-// Package auth 实现注册、登录、二次验证、令牌刷新与密码重置等认证相关的 HTTP 处理器。
 package auth
 
 import (
@@ -52,33 +51,19 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
 
-	fileHeaders := form.File["proof_image"]
-	switch {
-	case len(fileHeaders) == 0:
-		return errs.BadRequestError().AppendDetails("未提供佐证图片")
-	case len(fileHeaders) > 1:
-		return errs.BadRequestError().AppendDetails("佐证图片最多上传 1 张")
+	fileHeader, mimeType, extension, err := handling.ValidateImageUpload(form.File["proof_image"], "佐证图片")
+	if err != nil {
+		return err
 	}
-	fileHeader := fileHeaders[0]
 
-	// 非学生账号不应填写学号：避免用学号字段占用/探测学生学号
-	if req.Type != model.UserTypeStudent && req.StudentNum != "" {
-		return errs.BadRequestError().AppendDetails("非学生账号不能提供学号")
+	// 校验学号与用户类型的组合（学生必填，其他类型不能填写）
+	if err := handling.ValidateRegisterStudentNum(req.Type, req.StudentNum); err != nil {
+		return err
 	}
 
 	var studentNum null.String
 	if req.StudentNum != "" {
 		studentNum = null.StringFrom(req.StudentNum)
-	}
-
-	// 校验注册表单字段
-	if req.Type == model.UserTypeStudent {
-		if !studentNum.Valid {
-			return errs.BadRequestError().AppendDetails("学生账号未提供学号")
-		}
-		if err := handling.ValidateStudentNum(studentNum.String); err != nil {
-			return err
-		}
 	}
 
 	if err := handling.ValidateUsername(req.Username); err != nil {
@@ -101,16 +86,6 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 	if err := handling.ValidateUserType(req.Type); err != nil {
 		return err
 	}
-	// 以服务端检测到的 MIME 为准，忽略客户端文件名中的扩展名
-	mimeType, err := handling.DetectMIMEType(fileHeader, map[string]struct{}{
-		"image/jpeg": {},
-		"image/png":  {},
-		"image/webp": {},
-	})
-	if err != nil {
-		return err
-	}
-
 	var nickname null.String
 	if req.Nickname != "" && req.Nickname != req.Username {
 		nickname = null.StringFrom(req.Nickname)
@@ -147,7 +122,7 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 	// 上传佐证图片，失败时回滚删除注册申请
 	if err := filestore.UploadFile(fileHeader, &filestore.StoreFileReq{
 		Slug:        "/student_id/proof_images/" + r.ID.String(),
-		FileName:    r.ID.String() + handling.ImageExtension(mimeType),
+		FileName:    r.ID.String() + extension,
 		ContentType: null.StringFrom(mimeType),
 		AppID:       null.IntFrom(1),
 	}); err != nil {

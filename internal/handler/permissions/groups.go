@@ -359,8 +359,8 @@ func grantAppGroupUserHandler(c *gin.Context) *errs.Error {
 	if e := c.ShouldBindJSON(&body); e != nil {
 		return errs.BadRequestError().AppendDetails("请求解析失败")
 	}
-	if body.UserID <= 0 {
-		return errs.BadRequestError().AppendDetails("用户 ID 格式错误")
+	if err := handling.ValidateUserID(body.UserID); err != nil {
+		return err
 	}
 	if err := handling.ValidateValidRange(body.ValidFrom, body.ValidUntil); err != nil {
 		return err

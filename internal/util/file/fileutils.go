@@ -1,4 +1,3 @@
-// Package fileutils 提供文件复制、移动与带 SHA-512 校验的临时文件写入。
 package fileutils
 
 import (
