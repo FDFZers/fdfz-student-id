@@ -28,7 +28,7 @@ client_type, redirect_uris, requested_perms, status,
 created_at, updated_at, deleted_at
 `
 
-// scanApp 扫描一行 apps 数据；记录不存在时返回 (nil, nil)，由调用方决定如何报错。
+// scanApp 扫描一行 apps 数据；记录不存在时返回 (nil, nil)。
 func scanApp(row pgx.Row, item string) (*model.OAuthApp, *errs.Error) {
 	var a model.OAuthApp
 	err := row.Scan(

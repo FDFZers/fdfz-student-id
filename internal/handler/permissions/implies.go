@@ -3,6 +3,7 @@ package permissions
 import (
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
+	"time"
 
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
@@ -10,6 +11,7 @@ import (
 	userpermsvc "fdfz-student-id/internal/service/userperm"
 
 	"github.com/gin-gonic/gin"
+	"github.com/guregu/null/v6"
 )
 
 // buildImpliesResponse 构造权限继承信息响应：直接继承、传递继承以及反查（被哪些权限继承）。
@@ -27,9 +29,9 @@ func buildImpliesResponse(c *gin.Context, app *model.OAuthApp, def *model.Permis
 
 	c.JSON(http.StatusOK, gin.H{
 		"permission":         handling.DefJSON(def, app.Namespace),
-		"direct_implies":     handling.DefsJSON(direct, app.Namespace),
+		"direct_implies":     handling.ImplicationsJSON(direct, app.Namespace),
 		"transitive_implies": handling.DefsJSON(transitive, app.Namespace),
-		"implied_by":         handling.DefsJSON(impliedBy, app.Namespace),
+		"implied_by":         handling.ImplicationsJSON(impliedBy, app.Namespace),
 	})
 	return nil
 }
@@ -56,9 +58,15 @@ func getAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 	return buildImpliesResponse(c, app, def)
 }
 
-// setAppPermissionImpliesRequestBody 是设置直接继承关系的请求体；Implies 为完整权限串列表，语义为整体替换。
+type permissionImplyRequest struct {
+	Permission string     `json:"permission"`
+	ValidFrom  *time.Time `json:"valid_from"`
+	ValidUntil *time.Time `json:"valid_until"`
+	Note       string     `json:"note"`
+}
+
 type setAppPermissionImpliesRequestBody struct {
-	Implies []string `json:"implies"`
+	Implies []permissionImplyRequest `json:"implies"`
 }
 
 // setAppPermissionImpliesHandler 整体替换权限定义的直接继承关系。
@@ -86,16 +94,31 @@ func setAppPermissionImpliesHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("权限定义不存在")
 	}
 
-	defs, err := userpermsvc.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Implies)
+	values := make([]string, 0, len(body.Implies))
+	for _, item := range body.Implies {
+		values = append(values, item.Permission)
+	}
+	defs, err := userpermsvc.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, values)
 	if err != nil {
 		return err
 	}
-	impliedIDs := make([]int64, 0, len(defs))
-	for _, implied := range defs {
-		impliedIDs = append(impliedIDs, implied.ID)
+
+	claims := handling.MustGetClaims(c)
+	implications := make([]*model.PermissionImply, 0, len(defs))
+	for i, implied := range defs {
+		implications = append(implications, &model.PermissionImply{
+			PermissionID:        permissionID,
+			ImpliedPermissionID: implied.ID,
+			GrantedByUserID:     null.IntFrom(claims.UserID),
+			ValidFrom:           null.TimeFromPtr(body.Implies[i].ValidFrom),
+			ValidUntil:          null.TimeFromPtr(body.Implies[i].ValidUntil),
+			Note:                body.Implies[i].Note,
+		})
 	}
 
-	if err := userpermsvc.SetPermissionImplies(c.Request.Context(), db.R, app.ID, permissionID, impliedIDs); err != nil {
+	if err := userpermsvc.SetPermissionImplies(
+		c.Request.Context(), db.R, app.ID, permissionID, implications,
+	); err != nil {
 		return err
 	}
 

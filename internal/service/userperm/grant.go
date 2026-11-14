@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	permsvc "fdfz-student-id/internal/service/perm"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -160,67 +161,55 @@ func collectUserPermissionGrants(rows pgx.Rows, item string) ([]*model.UserPermi
 // ---------------------------------------------------------------------------
 // 用户有效权限
 //
-// 有效权限 = 有效的用户组权限（含 permission_implies 递归）∪ 有效的直接授权。
-// 两类来源都受 valid_from/valid_until 约束，且要求所属应用处于 active 且未软删除。
+// 有效权限 = 用户组权限模式 ∪ 直接授权，两者都受时间窗与应用状态约束。
 // ---------------------------------------------------------------------------
 
-// listUserEffectivePermissionsSQL 汇总用户的有效组权限与有效直接授权，返回完整权限串。
-const listUserEffectivePermissionsSQL = `
-WITH RECURSIVE granted AS (
-    SELECT rp.permission_id AS id
-    FROM user_roles ur
-    JOIN role_permissions rp ON rp.role_id = ur.role_id
-    WHERE ur.user_id = $1
-      AND (ur.valid_from  IS NULL OR ur.valid_from  <= now())
-      AND (ur.valid_until IS NULL OR ur.valid_until >  now())
-    UNION
-    SELECT pd.id
-    FROM user_permission_grants g
-    JOIN apps a ON a.id = g.granted_by_app_id
-        AND a.status = 'active' AND a.deleted_at IS NULL
-    JOIN permission_defs pd ON pd.app_id = a.id
-        AND g.permission = a.namespace || ':' || pd.value
-    WHERE g.user_id = $1
-      AND (g.valid_from  IS NULL OR g.valid_from  <= now())
-      AND (g.valid_until IS NULL OR g.valid_until >  now())
-),
-expanded AS (
-    SELECT id FROM granted
-    UNION
-    SELECT pi.implied_permission_id
-    FROM permission_implies pi
-    JOIN expanded e ON pi.permission_id = e.id
-)
-SELECT DISTINCT a.namespace || ':' || pd.value AS permission
-FROM permission_defs pd
-JOIN apps a ON a.id = pd.app_id
-JOIN expanded e ON e.id = pd.id
-WHERE a.status = 'active' AND a.deleted_at IS NULL
-ORDER BY 1
+const listUserEffectivePermissionPatternsSQL = `
+SELECT rp.permission
+FROM user_roles ur
+JOIN roles r ON r.id = ur.role_id
+JOIN apps a ON a.id = r.app_id
+    AND a.status = 'active' AND a.deleted_at IS NULL
+JOIN role_permissions rp ON rp.role_id = ur.role_id
+    AND split_part(rp.permission, ':', 1) = a.namespace
+WHERE ur.user_id = $1
+  AND (ur.valid_from  IS NULL OR ur.valid_from  <= now())
+  AND (ur.valid_until IS NULL OR ur.valid_until >  now())
+  AND (rp.valid_from  IS NULL OR rp.valid_from  <= now())
+  AND (rp.valid_until IS NULL OR rp.valid_until >  now())
+UNION
+SELECT g.permission
+FROM user_permission_grants g
+JOIN apps a ON a.id = g.granted_by_app_id
+    AND a.status = 'active' AND a.deleted_at IS NULL
+WHERE g.user_id = $1
+  AND split_part(g.permission, ':', 1) = a.namespace
+  AND (g.valid_from  IS NULL OR g.valid_from  <= now())
+  AND (g.valid_until IS NULL OR g.valid_until >  now())
 `
 
 // ListUserEffectivePermissions 解析用户当前生效的全部权限，返回字典序升序的完整权限串。
-// 登录签发令牌与应用维度有效权限查询共用该逻辑。
 func ListUserEffectivePermissions(ctx context.Context, userID int64) ([]string, *errs.Error) {
-	rows, err := db.R.Query(ctx, listUserEffectivePermissionsSQL, userID)
+	rows, err := db.R.Query(ctx, listUserEffectivePermissionPatternsSQL, userID)
 	if err != nil {
-		return nil, errs.CreatePGError(err, "用户权限", "Failed to query effective permissions").
+		return nil, errs.CreatePGError(err, "用户权限", "Failed to query effective permission patterns").
 			AppendDetails("用户权限获取失败")
 	}
 	defer rows.Close()
 
-	perms := make([]string, 0)
+	patterns := make([]string, 0)
 	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			return nil, errs.CreatePGError(err, "用户权限", "Failed to scan effective permission").
+		var pattern string
+		if err := rows.Scan(&pattern); err != nil {
+			return nil, errs.CreatePGError(err, "用户权限", "Failed to scan effective permission pattern").
 				AppendDetails("用户权限获取失败")
 		}
-		perms = append(perms, p)
+		patterns = append(patterns, pattern)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, errs.CreatePGError(err, "用户权限", "Failed to iterate effective permissions").
+		return nil, errs.CreatePGError(err, "用户权限", "Failed to iterate effective permission patterns").
 			AppendDetails("用户权限获取失败")
 	}
-	return perms, nil
+
+	return permsvc.ResolvePatterns(patterns), nil
 }

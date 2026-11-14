@@ -17,17 +17,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// respondGroupPermissions 查询并写出用户组直接拥有的权限定义列表（跨应用补充命名空间）。
 func respondGroupPermissions(c *gin.Context, groupID int64) *errs.Error {
-	defs, err := userpermsvc.ListRolePermissions(c.Request.Context(), groupID)
-	if err != nil {
-		return err
-	}
-	data, err := handling.DefsJSONMultiApp(c.Request.Context(), defs)
+	grants, err := userpermsvc.ListRolePermissions(c.Request.Context(), groupID)
 	if err != nil {
 		return err
 	}
 
+	data := make([]gin.H, 0, len(grants))
+	for _, grant := range grants {
+		data = append(data, handling.RolePermissionJSON(grant))
+	}
 	handling.RespondList(c, len(data), data)
 	return nil
 }
@@ -128,6 +127,11 @@ func updateAppGroupHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
+	// 系统用户组由平台按名称自动分配，重命名会导致新用户无法获得默认权限。
+	if role.System && body.Name != nil && *body.Name != role.Name {
+		return errs.IllegalStateError().AppendDetails("系统用户组不允许重命名").Seal()
+	}
+
 	// 未提供的字段沿用当前值。
 	name := role.Name
 	if body.Name != nil {
@@ -178,6 +182,9 @@ func deleteAppGroupHandler(c *gin.Context) *errs.Error {
 	if role == nil {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
+	if role.System {
+		return errs.IllegalStateError().AppendDetails("系统用户组不允许删除").Seal()
+	}
 
 	if err := userpermsvc.DeleteRole(c.Request.Context(), groupID); err != nil {
 		return err
@@ -209,12 +216,39 @@ func listAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	return respondGroupPermissions(c, groupID)
 }
 
-// setAppGroupPermissionsRequestBody 是整体替换组权限的请求体，权限为完整权限串。
-type setAppGroupPermissionsRequestBody struct {
-	Permissions []string `json:"permissions"`
+type groupPermissionGrantRequest struct {
+	Permission string     `json:"permission"`
+	ValidFrom  *time.Time `json:"valid_from"`
+	ValidUntil *time.Time `json:"valid_until"`
+	Note       string     `json:"note"`
 }
 
-// setAppGroupPermissionsHandler 处理组权限整体替换：只能修改本应用用户组，权限须属于当前应用。
+type groupPermissionsRequestBody struct {
+	Permissions []groupPermissionGrantRequest `json:"permissions"`
+}
+
+func buildRolePermissionGrants(
+	c *gin.Context,
+	roleID int64,
+	items []groupPermissionGrantRequest,
+) []*model.RolePermission {
+	claims := handling.MustGetClaims(c)
+
+	grants := make([]*model.RolePermission, 0, len(items))
+	for _, item := range items {
+		grants = append(grants, &model.RolePermission{
+			RoleID:          roleID,
+			Permission:      item.Permission,
+			GrantedByUserID: null.IntFrom(claims.UserID),
+			ValidFrom:       null.TimeFromPtr(item.ValidFrom),
+			ValidUntil:      null.TimeFromPtr(item.ValidUntil),
+			Note:            item.Note,
+		})
+	}
+	return grants
+}
+
+// setAppGroupPermissionsHandler 处理组权限整体替换：只能修改本应用用户组，权限模式须属于当前应用。
 func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
 	if err != nil {
@@ -225,7 +259,7 @@ func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	var body setAppGroupPermissionsRequestBody
+	var body groupPermissionsRequestBody
 	if err := handling.BindJSON(c, &body); err != nil {
 		return err
 	}
@@ -238,28 +272,17 @@ func setAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	defs, err := userpermsvc.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Permissions)
-	if err != nil {
-		return err
-	}
-	permissionIDs := make([]int64, 0, len(defs))
-	for _, def := range defs {
-		permissionIDs = append(permissionIDs, def.ID)
-	}
-
-	if err := userpermsvc.SetRolePermissions(c.Request.Context(), db.R, app.ID, groupID, permissionIDs); err != nil {
+	grants := buildRolePermissionGrants(c, groupID, body.Permissions)
+	if err := userpermsvc.SetRolePermissions(
+		c.Request.Context(), db.R, app.ID, app.Namespace, groupID, grants,
+	); err != nil {
 		return err
 	}
 
 	return respondGroupPermissions(c, groupID)
 }
 
-// addAppGroupPermissionsRequestBody 是追加组权限的请求体，权限为完整权限串。
-type addAppGroupPermissionsRequestBody struct {
-	Permissions []string `json:"permissions"`
-}
-
-// addAppGroupPermissionsHandler 处理组权限追加：空权限列表直接成功，重复权限由服务层去重。
+// addAppGroupPermissionsHandler 处理组权限追加。
 // 写操作仅限本应用的用户组，防止越权修改其他应用的组权限。
 func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 	app, err := handling.ResolveApp(c)
@@ -271,7 +294,7 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	var body addAppGroupPermissionsRequestBody
+	var body groupPermissionsRequestBody
 	if err := handling.BindJSON(c, &body); err != nil {
 		return err
 	}
@@ -284,16 +307,10 @@ func addAppGroupPermissionsHandler(c *gin.Context) *errs.Error {
 		return errs.NotFoundError().AppendDetails("用户组不存在")
 	}
 
-	defs, err := userpermsvc.ResolvePermissionValues(c.Request.Context(), app.ID, app.Namespace, body.Permissions)
-	if err != nil {
-		return err
-	}
-	permissionIDs := make([]int64, 0, len(defs))
-	for _, def := range defs {
-		permissionIDs = append(permissionIDs, def.ID)
-	}
-
-	if err := userpermsvc.AddRolePermissions(c.Request.Context(), groupID, permissionIDs); err != nil {
+	grants := buildRolePermissionGrants(c, groupID, body.Permissions)
+	if err := userpermsvc.AddRolePermissions(
+		c.Request.Context(), app.Namespace, groupID, grants,
+	); err != nil {
 		return err
 	}
 

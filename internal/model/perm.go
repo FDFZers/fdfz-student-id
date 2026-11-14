@@ -21,9 +21,16 @@ type PermissionDef struct {
 
 // PermissionImply 是一条权限继承边：拥有 PermissionID 即隐含拥有 ImpliedPermissionID。
 // 两条边必须属于同一个应用，由服务层与目录加载校验。
+// GrantedByUserID 为 NULL 表示系统内置；ValidFrom/ValidUntil 为空表示不限制时间窗。
 type PermissionImply struct {
-	PermissionID        int64 `json:"permission_id" db:"permission_id"`
-	ImpliedPermissionID int64 `json:"implied_permission_id" db:"implied_permission_id"`
+	PermissionID        int64      `json:"permission_id" db:"permission_id"`
+	ImpliedPermissionID int64      `json:"implied_permission_id" db:"implied_permission_id"`
+	GrantedByUserID     null.Int64 `json:"granted_by_user_id" db:"granted_by_user_id"`
+	ValidFrom           null.Time  `json:"valid_from" db:"valid_from"`
+	ValidUntil          null.Time  `json:"valid_until" db:"valid_until"`
+	Note                string     `json:"note" db:"note"`
+	CreatedAt           time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // Role 是用户组（数据库表名 roles，API 与错误文案中统一称「用户组」）。
@@ -34,14 +41,22 @@ type Role struct {
 	Name      string    `json:"name" db:"name"`
 	Note      string    `json:"note" db:"note"`
 	Public    bool      `json:"public" db:"is_public"`
+	System    bool      `json:"is_system" db:"is_system"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// RolePermission 是用户组与权限定义的关联：该用户组包含该权限。
+// RolePermission 是用户组权限模式，Permission 为完整权限模式（可能含 * / ** 通配）。
+// GrantedByUserID 为 NULL 表示系统内置；ValidFrom/ValidUntil 为空表示不限制时间窗。
 type RolePermission struct {
-	RoleID       int64 `json:"role_id" db:"role_id"`
-	PermissionID int64 `json:"permission_id" db:"permission_id"`
+	RoleID          int64      `json:"role_id" db:"role_id"`
+	Permission      string     `json:"permission" db:"permission"`
+	GrantedByUserID null.Int64 `json:"granted_by_user_id" db:"granted_by_user_id"`
+	ValidFrom       null.Time  `json:"valid_from" db:"valid_from"`
+	ValidUntil      null.Time  `json:"valid_until" db:"valid_until"`
+	Note            string     `json:"note" db:"note"`
+	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // UserRole 表示用户被授予某个用户组，可带生效时间窗。

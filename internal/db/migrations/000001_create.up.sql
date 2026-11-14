@@ -363,15 +363,34 @@ EXECUTE FUNCTION fn_update_timestamp();
 -- =============================================
 CREATE TABLE permission_implies
 (
-    permission_id         BIGINT NOT NULL REFERENCES permission_defs (id) ON DELETE CASCADE,
-    implied_permission_id BIGINT NOT NULL REFERENCES permission_defs (id) ON DELETE CASCADE,
+    permission_id         BIGINT       NOT NULL REFERENCES permission_defs (id) ON DELETE CASCADE,
+    implied_permission_id BIGINT       NOT NULL REFERENCES permission_defs (id) ON DELETE CASCADE,
+
+    -- 授权记录：granted_by_user_id 为 NULL 表示系统内置；时间窗为空表示永久有效。
+    granted_by_user_id    BIGINT                DEFAULT NULL REFERENCES users (id) ON DELETE SET NULL,
+    valid_from            TIMESTAMPTZ           DEFAULT NULL,
+    valid_until           TIMESTAMPTZ           DEFAULT NULL,
+    note                  VARCHAR(256) NOT NULL DEFAULT '',
+    created_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
 
     PRIMARY KEY (permission_id, implied_permission_id),
-    CONSTRAINT chk_permission_implies_not_self CHECK (permission_id <> implied_permission_id)
+    CONSTRAINT chk_permission_implies_not_self CHECK (permission_id <> implied_permission_id),
+    CONSTRAINT chk_permission_implies_valid_range
+        CHECK (valid_until IS NULL OR valid_from IS NULL OR valid_until > valid_from)
 );
 
 CREATE INDEX idx_permission_implies_implied_permission_id
     ON permission_implies (implied_permission_id);
+CREATE INDEX idx_permission_implies_granted_by_user_id
+    ON permission_implies (granted_by_user_id)
+    WHERE granted_by_user_id IS NOT NULL;
+
+CREATE TRIGGER trg_permission_implies_updated_at
+    BEFORE UPDATE
+    ON permission_implies
+    FOR EACH ROW
+EXECUTE FUNCTION fn_update_timestamp();
 
 -- =============================================
 -- 用户组 roles
@@ -383,6 +402,7 @@ CREATE TABLE roles
     name       VARCHAR(128) NOT NULL,
     note       VARCHAR(256) NOT NULL DEFAULT '',
     is_public  BOOLEAN      NOT NULL DEFAULT false,
+    is_system  BOOLEAN      NOT NULL DEFAULT false, -- 系统用户组：由平台创建与分配，不允许删除或重命名
     created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
 
@@ -396,18 +416,34 @@ CREATE TRIGGER trg_roles_updated_at
 EXECUTE FUNCTION fn_update_timestamp();
 
 -- =============================================
--- 用户组包含的权限 role_permissions
+-- 用户组包含的权限模式 role_permissions
+-- permission 为完整权限模式（如 student_id:users.*），支持 * / ** 通配，运行时展开。
 -- =============================================
 CREATE TABLE role_permissions
 (
-    role_id       BIGINT NOT NULL REFERENCES roles (id) ON DELETE CASCADE,
-    permission_id BIGINT NOT NULL REFERENCES permission_defs (id) ON DELETE CASCADE,
+    role_id            BIGINT       NOT NULL REFERENCES roles (id) ON DELETE CASCADE,
+    permission         VARCHAR(128) NOT NULL,
+    granted_by_user_id BIGINT                DEFAULT NULL REFERENCES users (id) ON DELETE SET NULL, -- null 表示系统
+    valid_from         TIMESTAMPTZ           DEFAULT NULL,
+    valid_until        TIMESTAMPTZ           DEFAULT NULL,
+    note               VARCHAR(256) NOT NULL DEFAULT '',
+    created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
 
-    PRIMARY KEY (role_id, permission_id)
+    PRIMARY KEY (role_id, permission),
+    CONSTRAINT chk_role_permissions_valid_range
+        CHECK (valid_until IS NULL OR valid_from IS NULL OR valid_until > valid_from)
 );
 
-CREATE INDEX idx_role_permissions_permission_id
-    ON role_permissions (permission_id);
+CREATE TRIGGER trg_role_permissions_updated_at
+    BEFORE UPDATE
+    ON role_permissions
+    FOR EACH ROW
+EXECUTE FUNCTION fn_update_timestamp();
+
+CREATE INDEX idx_role_permissions_granted_by_user_id
+    ON role_permissions (granted_by_user_id)
+    WHERE granted_by_user_id IS NOT NULL;
 
 -- =============================================
 -- 用户组成员 user_roles
@@ -515,140 +551,35 @@ CREATE INDEX idx_oauth_refresh_tokens_expires_at
     ON oauth_refresh_tokens (expires_at);
 
 -- =============================================
--- 核心权限定义
+-- 内置管理员用户与核心应用
+--
+-- 内置管理员固定为 id=1；默认密码 Admin123456（Argon2id），首次登录后请立即修改。
 -- =============================================
 DO
 $$
     DECLARE
-        core_app_id BIGINT;
+        admin_user_id BIGINT;
+        core_app_id   BIGINT;
     BEGIN
-        SELECT id
-        INTO core_app_id
-        FROM apps
-        WHERE id = 1
-          AND namespace = 'student_id'
-          AND deleted_at IS NULL;
+        INSERT INTO users (username, type, real_name, school)
+        VALUES ('admin', 'teacher', '管理员', 'fdfz')
+        RETURNING id INTO admin_user_id;
 
-        IF core_app_id IS NULL THEN
-            RAISE NOTICE '核心应用（id=1, namespace=student_id）不存在，跳过权限定义种子';
-            RETURN;
+        IF admin_user_id <> 1 THEN
+            RAISE EXCEPTION '内置管理员必须是第一个用户（id=1），当前 id=%', admin_user_id;
         END IF;
 
-        INSERT INTO permission_defs (app_id, value, description, requestable)
-        VALUES
-            -- 注册申请
-            (core_app_id, 'register_requests.list', '查看注册申请列表', false),
-            (core_app_id, 'register_requests.read', '查看注册申请详情', false),
-            (core_app_id, 'register_requests.review', '审核注册申请', false),
-            -- 用户
-            (core_app_id, 'users.list', '搜索全部用户', false),
-            (core_app_id, 'users.delete', '删除用户', false),
-            -- 自己的资料
-            (core_app_id, 'user.profile.read.basic', '读取个人基础资料', true),
-            (core_app_id, 'user.profile.read.identity', '读取个人身份信息', true),
-            (core_app_id, 'user.profile.read.real_name', '读取个人真实姓名', true),
-            (core_app_id, 'user.profile.read.about', '读取个人简介与签名', true),
-            (core_app_id, 'user.profile.read.visibilities', '读取个人资料可见性', true),
-            (core_app_id, 'user.profile.update.basic', '修改个人基础资料', true),
-            (core_app_id, 'user.profile.update.about', '修改个人简介与签名', true),
-            (core_app_id, 'user.profile.update.visibilities', '修改个人资料可见性', true),
-            -- 他人资料
-            (core_app_id, 'users.profile.read.basic', '读取他人基础资料', false),
-            (core_app_id, 'users.profile.read.identity', '读取他人身份信息', false),
-            (core_app_id, 'users.profile.read.real_name.allowed', '按可见性读取他人真实姓名', false),
-            (core_app_id, 'users.profile.read.real_name', '无视可见性读取他人真实姓名', false),
-            (core_app_id, 'users.profile.read.about', '读取他人简介与签名', false),
-            (core_app_id, 'users.profile.read.visibilities', '读取他人资料可见性', false),
-            (core_app_id, 'users.profile.update.basic', '修改他人基础资料', false),
-            (core_app_id, 'users.profile.update.identity', '修改他人身份信息', false),
-            (core_app_id, 'users.profile.update.about', '修改他人简介与签名', false),
-            (core_app_id, 'users.profile.update.visibilities', '修改他人资料可见性', false),
-            -- 用户封禁
-            (core_app_id, 'user.ban.read', '查看个人封禁信息', true),
-            (core_app_id, 'users.ban.read', '查看他人封禁信息', false),
-            (core_app_id, 'users.ban.write', '封禁或解封用户', false),
-            -- 用户会话
-            (core_app_id, 'user.session.read', '查看个人登录会话', false),
-            (core_app_id, 'user.session.write', '管理个人登录会话', false),
-            (core_app_id, 'users.session.read', '查看他人登录会话', false),
-            (core_app_id, 'users.session.write', '管理他人登录会话', false),
-            -- 用户关注
-            (core_app_id, 'user.relation.read', '查看个人关注关系', true),
-            (core_app_id, 'user.relation.write', '管理个人关注关系', true),
-            (core_app_id, 'users.relation.read', '查看他人关注关系（不受可见性限制）', false),
-            (core_app_id, 'users.relation.read.allowed', '按可见性查看他人关注关系', false),
-            (core_app_id, 'users.relation.write', '管理他人关注关系', false),
-            -- 权限管理
-            (core_app_id, 'permission.read', '读取拥有的应用权限定义', false),
-            (core_app_id, 'permission.write', '管理拥有的应用权限定义', false),
-            (core_app_id, 'permissions.read', '读取全部权限定义', false),
-            (core_app_id, 'permissions.write', '管理全部权限定义', false),
-            -- 应用管理
-            (core_app_id, 'app.read', '读取拥有的应用信息', false),
-            (core_app_id, 'app.update', '修改拥有的应用信息', false),
-            (core_app_id, 'app.delete', '删除拥有的应用', false),
-            (core_app_id, 'apps.list', '查看全部应用', false),
-            (core_app_id, 'apps.create', '创建应用', false),
-            (core_app_id, 'apps.update', '修改全部应用', false),
-            (core_app_id, 'apps.suspend', '停用或启用应用', false),
-            (core_app_id, 'apps.delete', '删除全部应用', false),
-            -- OAuth 授权管理
-            (core_app_id, 'oauth.read', '查看个人 OAuth 授权', false),
-            (core_app_id, 'oauth.revoke', '撤销个人 OAuth 授权', false),
-            (core_app_id, 'oauths.read', '查看他人 OAuth 授权', false),
-            (core_app_id, 'oauths.revoke', '撤销他人 OAuth 授权', false)
-        ON CONFLICT (app_id, value) DO NOTHING;
+        INSERT INTO user_passwords (user_id, password)
+        VALUES (admin_user_id,
+                '$argon2id$v=19$m=65536,t=3,p=4$fber5HgkNuz/FmQ+2gafV8K4F3A2ZOR1yoR4zCLeuJA$ROQzMHzBF8iJkgMHbkMD+GHH1E8YORH49FGGAFcVMog');
 
-        -- 权限继承：只写入直接边，传递闭包由权限目录在运行时展开。
-        --   list 继承同路径的 read；
-        --   write / update / delete / review / suspend / revoke 等写操作继承同路径的 list 与 read；
-        --   他人权限（users.*、oauths.*）继承同路径的个人权限（user.*、oauth.*）。
-        INSERT INTO permission_implies (permission_id, implied_permission_id)
-        SELECT def.id, implied_def.id
-        FROM (
-            -- list → read
-            SELECT pd.value AS permission,
-                   regexp_replace(pd.value, '\.list$', '.read') AS implied
-            FROM permission_defs pd
-            WHERE pd.app_id = core_app_id
-              AND pd.value ~ '\.list$'
+        INSERT INTO apps (namespace, owner_user_id, name, description, homepage_url,
+                          client_type, redirect_uris, requested_perms, status)
+        VALUES ('student_id', admin_user_id, '统一身份认证', 'FDFZ 学生身份与统一认证平台', '',
+                'confidential', '{}', '{}', 'active')
+        RETURNING id INTO core_app_id;
 
-            UNION
-
-            -- 写操作 → list
-            SELECT pd.value,
-                   regexp_replace(pd.value, '\.(write|update|delete|review|suspend|revoke)(\..+)?$', '.list\2')
-            FROM permission_defs pd
-            WHERE pd.app_id = core_app_id
-              AND pd.value ~ '\.(write|update|delete|review|suspend|revoke)(\..+)?$'
-
-            UNION
-
-            -- 写操作 → read
-            SELECT pd.value,
-                   regexp_replace(pd.value, '\.(write|update|delete|review|suspend|revoke)(\..+)?$', '.read\2')
-            FROM permission_defs pd
-            WHERE pd.app_id = core_app_id
-              AND pd.value ~ '\.(write|update|delete|review|suspend|revoke)(\..+)?$'
-
-            UNION
-
-            -- 他人 → 个人
-            SELECT pd.value,
-                   CASE
-                       WHEN pd.value LIKE 'users.%'
-                           THEN 'user.' || substring(pd.value FROM 7)
-                       ELSE 'oauth.' || substring(pd.value FROM 8)
-                   END
-            FROM permission_defs pd
-            WHERE pd.app_id = core_app_id
-              AND (pd.value LIKE 'users.%' OR pd.value LIKE 'oauths.%')
-        ) AS pairs
-        JOIN permission_defs def
-          ON def.app_id = core_app_id AND def.value = pairs.permission
-        JOIN permission_defs implied_def
-          ON implied_def.app_id = core_app_id AND implied_def.value = pairs.implied
-        ON CONFLICT (permission_id, implied_permission_id) DO NOTHING;
+        RAISE NOTICE '已创建内置管理员（id=%）与核心应用（id=%, namespace=student_id）', admin_user_id, core_app_id;
     END
 $$;
 

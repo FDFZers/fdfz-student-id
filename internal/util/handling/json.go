@@ -7,7 +7,6 @@ import (
 
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	appsvc "fdfz-student-id/internal/service/app"
 	permsvc "fdfz-student-id/internal/service/perm"
 	usersvc "fdfz-student-id/internal/service/user"
 	userpermsvc "fdfz-student-id/internal/service/userperm"
@@ -205,22 +204,27 @@ func DefsJSON(defs []*model.PermissionDef, namespace string) []gin.H {
 	return data
 }
 
-// DefsJSONMultiApp 通过全量应用列表补全命名空间，仅适合管理端小批量结果。
-func DefsJSONMultiApp(ctx context.Context, defs []*model.PermissionDef) ([]gin.H, *errs.Error) {
-	apps, err := appsvc.ListAllApps(ctx)
-	if err != nil {
-		return nil, err
+// ImplicationJSON 渲染一条权限继承边及其授权记录。
+func ImplicationJSON(implication *userpermsvc.PermissionImplication, namespace string) gin.H {
+	return gin.H{
+		"permission": DefJSON(implication.Permission, namespace),
+		"grant": gin.H{
+			"granted_by_user_id": implication.Grant.GrantedByUserID,
+			"valid_from":         implication.Grant.ValidFrom,
+			"valid_until":        implication.Grant.ValidUntil,
+			"note":               implication.Grant.Note,
+			"created_at":         implication.Grant.CreatedAt,
+			"updated_at":         implication.Grant.UpdatedAt,
+		},
 	}
-	namespaces := make(map[int64]string, len(apps))
-	for _, app := range apps {
-		namespaces[app.ID] = app.Namespace
-	}
+}
 
-	data := make([]gin.H, 0, len(defs))
-	for _, def := range defs {
-		data = append(data, DefJSON(def, namespaces[def.AppID]))
+func ImplicationsJSON(implications []*userpermsvc.PermissionImplication, namespace string) []gin.H {
+	data := make([]gin.H, 0, len(implications))
+	for _, implication := range implications {
+		data = append(data, ImplicationJSON(implication, namespace))
 	}
-	return data, nil
+	return data
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +238,7 @@ func GroupJSON(role *model.Role) gin.H {
 		"name":       role.Name,
 		"note":       role.Note,
 		"public":     role.Public,
+		"system":     role.System,
 		"created_at": role.CreatedAt,
 		"updated_at": role.UpdatedAt,
 	}
@@ -243,6 +248,18 @@ func GroupSearchJSON(role *model.Role, namespace string) gin.H {
 	data := GroupJSON(role)
 	data["app_namespace"] = namespace
 	return data
+}
+
+func RolePermissionJSON(grant *model.RolePermission) gin.H {
+	return gin.H{
+		"permission":         grant.Permission,
+		"granted_by_user_id": grant.GrantedByUserID,
+		"valid_from":         grant.ValidFrom,
+		"valid_until":        grant.ValidUntil,
+		"note":               grant.Note,
+		"created_at":         grant.CreatedAt,
+		"updated_at":         grant.UpdatedAt,
+	}
 }
 
 func GroupUserJSON(member *userpermsvc.RoleUser) gin.H {

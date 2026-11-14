@@ -48,7 +48,7 @@ var userGroupSearchCfg = searchsvc.SearchConfig{
 	Item:  "用户组",
 	Columns: []string{
 		"r.id", "r.app_id", "a.namespace AS app_namespace", "r.name", "r.note",
-		"r.is_public", "r.created_at", "r.updated_at",
+		"r.is_public", "r.is_system", "r.created_at", "r.updated_at",
 	},
 	Fields: []searchsvc.Field{
 		{ID: "id", Column: "r.id", Numeric: true},
@@ -65,6 +65,7 @@ var userGroupSearchCfg = searchsvc.SearchConfig{
 	},
 	Tags: []searchsvc.Tag{
 		{ID: "public", Column: "r.is_public", ValueMap: searchsvc.ValueMapOf([]string{"true", "false"})},
+		{ID: "system", Column: "r.is_system", ValueMap: searchsvc.ValueMapOf([]string{"true", "false"})},
 	},
 	DefaultSortColumn: "r.id",
 }
@@ -90,6 +91,7 @@ type userGroupSearchRow struct {
 	Name         string    `db:"name"`
 	Note         string    `db:"note"`
 	Public       bool      `db:"is_public"`
+	System       bool      `db:"is_system"`
 	CreatedAt    time.Time `db:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at"`
 }
@@ -226,6 +228,7 @@ func runUserGroupSearch(c *gin.Context, where []sq.Sqlizer) *errs.Error {
 			Name:      row.Name,
 			Note:      row.Note,
 			Public:    row.Public,
+			System:    row.System,
 			CreatedAt: row.CreatedAt,
 			UpdatedAt: row.UpdatedAt,
 		}

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -27,7 +27,7 @@ const (
 )
 
 func loginUserFailureCacheKey(username string) string {
-	return fmt.Sprintf("student_id:auth:rate_limit:login:user:%s", strings.ToLower(strings.TrimSpace(username)))
+	return fmt.Sprintf("student_id:auth:rate_limit:login:user:%s", usersvc.NormalizeUsername(username))
 }
 
 func loginIPFailureCacheKey(ip string) string {

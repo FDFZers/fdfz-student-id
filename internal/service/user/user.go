@@ -7,6 +7,7 @@ import (
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	userpermsvc "fdfz-student-id/internal/service/userperm"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -23,6 +24,11 @@ const (
 	UsernameExistsCacheDuration = 1 * time.Minute
 )
 
+// NormalizeUsername 返回小写用户名；数据库、查询与缓存均大小写不敏感。
+func NormalizeUsername(username string) string {
+	return strings.ToLower(username)
+}
+
 // UserCacheKey 返回用户信息缓存的 Redis key（按用户 ID）。
 func UserCacheKey(id int64) string {
 	return fmt.Sprintf("student_id:user:info:id:%d", id)
@@ -30,12 +36,12 @@ func UserCacheKey(id int64) string {
 
 // UserIDCacheKey 返回「用户名 → 用户 ID」缓存的 Redis key（用户名统一转小写）。
 func UserIDCacheKey(username string) string {
-	return fmt.Sprintf("student_id:user:id_by_username:%s", strings.ToLower(username))
+	return fmt.Sprintf("student_id:user:id_by_username:%s", NormalizeUsername(username))
 }
 
 // UsernameExistsCacheKey 返回用户名占用检查缓存的 Redis key（用户名统一转小写）。
 func UsernameExistsCacheKey(username string) string {
-	return fmt.Sprintf("student_id:user:username_exists:%s", strings.ToLower(username))
+	return fmt.Sprintf("student_id:user:username_exists:%s", NormalizeUsername(username))
 }
 
 // ---------------------------------------------------------------------------
@@ -110,17 +116,28 @@ func createUserWithPasswordAt(
 	if e != nil {
 		return errs.CreatePGError(e, "用户", "Failed to create user").AppendDetails("用户创建失败")
 	}
+
+	if err := userpermsvc.AssignDefaultRoles(ctx, dh, u.ID, u.Type); err != nil {
+		return err
+	}
 	return nil
 }
 
-// CreateUser 创建用户及其密码：先校验用户名/学号占用，再原子写入两张表并刷新缓存。
+// CreateUser 创建用户及其密码：先校验用户名/学号占用，再原子写入用户、密码与默认用户组并刷新缓存。
 // 注意：pwd.Password 必须已由调用方完成哈希；学号占用检查同时覆盖待审核的注册申请。
 func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *errs.Error {
-	if err := createUserWithPasswordAt(ctx, db.R, u, pwd, nil); err != nil {
+	tx, e := db.R.Begin(ctx)
+	if e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to begin transaction for creating user").AppendDetails("用户创建失败")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := createUserWithPasswordAt(ctx, tx, u, pwd, nil); err != nil {
 		return err
 	}
-
-	// TODO: 增加权限
+	if e := tx.Commit(ctx); e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to commit transaction for creating user").AppendDetails("用户创建失败")
+	}
 
 	// 写入用户缓存与用户名映射，并清除用户名占用缓存使新用户名立即生效
 
@@ -160,7 +177,7 @@ SELECT id FROM users
 WHERE lower(username) = lower($1) AND deleted_at IS NULL
 `
 
-// 同名记录可能并存：注销后可重新注册同名账号；优先返回活跃用户，其次最近注销的记录。
+// 用户名比较大小写不敏感；同名记录可能并存：注销后可重新注册同名账号，优先返回活跃用户，其次最近注销的记录。
 const getUsernameIncludingDeletedSQL = `
 SELECT id FROM users
 WHERE lower(username) = lower($1)

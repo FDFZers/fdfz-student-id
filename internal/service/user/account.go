@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	filestoresvc "fdfz-student-id/internal/service/filestore"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,9 +18,6 @@ import (
 
 // AccountDeletionDelay 是账号注销的冷静期：申请后 7 天内重新登录可取消，到期由定时任务完成清理。
 const AccountDeletionDelay = 7 * 24 * time.Hour
-
-// systemAdminUserID 是用户被删除后其 OAuth 应用的接收者（系统管理员）用户 ID，默认 1。
-const systemAdminUserID int64 = 1
 
 // followPair 是一条关注关系的两端用户 ID。
 type followPair struct {
@@ -180,6 +178,96 @@ func CancelPendingAccountDeletion(ctx context.Context, userID int64) (bool, *err
 // 完成到期的注销（单用户）
 // ---------------------------------------------------------------------------
 
+// accountDeletionCleanupCTEs 是账号注销时清理关联数据的公共 CTE，依赖名为 due 的 CTE（含 id、username）。
+// 名下 OAuth 应用按「删除应用」的语义软删除：
+// 撤销其全部授权与刷新令牌，并清理直接授权以及其它应用中指向该应用命名空间的权限串。
+const accountDeletionCleanupCTEs = `
+follows AS (
+    DELETE FROM user_follows
+    WHERE follower_id IN (SELECT id FROM due) OR following_id IN (SELECT id FROM due)
+),
+emails AS (
+    UPDATE user_emails
+    SET deleted_at = now()
+    WHERE user_id IN (SELECT id FROM due) AND deleted_at IS NULL
+),
+qqs AS (
+    UPDATE user_qqs
+    SET deleted_at = now()
+    WHERE user_id IN (SELECT id FROM due) AND deleted_at IS NULL
+),
+passwords AS (
+    DELETE FROM user_passwords WHERE user_id IN (SELECT id FROM due)
+),
+totps AS (
+    DELETE FROM user_totp WHERE user_id IN (SELECT id FROM due)
+),
+roles AS (
+    DELETE FROM user_roles WHERE user_id IN (SELECT id FROM due)
+),
+sessions AS (
+    UPDATE user_sessions
+    SET revoked_at = now()
+    WHERE user_id IN (SELECT id FROM due) AND revoked_at IS NULL
+),
+-- 用户名下未删除的应用统一软删除并停用；命名空间用于后续清理授权与直接授权。
+deleted_apps AS (
+    UPDATE apps
+    SET deleted_at = now(), status = 'suspended'
+    WHERE owner_user_id IN (SELECT id FROM due) AND deleted_at IS NULL
+    RETURNING id, namespace
+),
+-- 用户直接授权：用户自己的授权 + 由已删除应用授予的授权 + 指向已删除应用命名空间的授权。
+grants AS (
+    DELETE FROM user_permission_grants
+    WHERE user_id IN (SELECT id FROM due)
+       OR granted_by_app_id IN (SELECT id FROM deleted_apps)
+       OR split_part(permission, ':', 1) IN (SELECT namespace FROM deleted_apps)
+),
+-- 用户自己的 OAuth 授权 + 已删除应用的 OAuth 授权；刷新令牌随授权记录级联删除。
+auths AS (
+    DELETE FROM oauth_authorizations
+    WHERE user_id IN (SELECT id FROM due)
+       OR app_id IN (SELECT id FROM deleted_apps)
+),
+-- 其它应用仍保留的授权中如引用了已删除应用的权限，剔除这些权限串。
+scrub_authorizations AS (
+    UPDATE oauth_authorizations
+    SET permissions = COALESCE(
+        (
+            SELECT array_agg(p)
+            FROM unnest(permissions) AS t(p)
+            WHERE split_part(p, ':', 1) NOT IN (SELECT namespace FROM deleted_apps)
+        ),
+        '{}'
+    )
+    WHERE app_id NOT IN (SELECT id FROM deleted_apps)
+      AND user_id NOT IN (SELECT id FROM due)
+      AND EXISTS (
+          SELECT 1
+          FROM unnest(permissions) AS t(p)
+          WHERE split_part(p, ':', 1) IN (SELECT namespace FROM deleted_apps)
+      )
+),
+-- 其它应用申请权限中如引用了已删除应用的权限，同样剔除。
+scrub_requested_perms AS (
+    UPDATE apps
+    SET requested_perms = COALESCE(
+        (
+            SELECT array_agg(p)
+            FROM unnest(requested_perms) AS t(p)
+            WHERE split_part(p, ':', 1) NOT IN (SELECT namespace FROM deleted_apps)
+        ),
+        '{}'
+    )
+    WHERE id NOT IN (SELECT id FROM deleted_apps)
+      AND EXISTS (
+          SELECT 1
+          FROM unnest(requested_perms) AS t(p)
+          WHERE split_part(p, ':', 1) IN (SELECT namespace FROM deleted_apps)
+      )
+)`
+
 // finalizeOverdueAccountDeletionSQL 在单条语句中原子完成到期注销及关联数据清理。
 // student_num 需符合 CHECK：学生留空串、教师置 NULL。
 const finalizeOverdueAccountDeletionSQL = `
@@ -195,51 +283,12 @@ WITH due AS (
         visibilities = '{"real_name":"private","followers":"private","following":"private"}'::jsonb
     WHERE id = $1 AND deletion_scheduled_at <= now() AND deleted_at IS NULL
     RETURNING id, username
-),
-follows AS (
-    DELETE FROM user_follows
-    WHERE follower_id IN (SELECT id FROM due) OR following_id IN (SELECT id FROM due)
-),
-emails AS (
-    UPDATE user_emails
-    SET deleted_at = now()
-    WHERE user_id IN (SELECT id FROM due) AND deleted_at IS NULL
-),
-qqs AS (
-    UPDATE user_qqs
-    SET deleted_at = now()
-    WHERE user_id IN (SELECT id FROM due) AND deleted_at IS NULL
-),
-passwords AS (
-    DELETE FROM user_passwords WHERE user_id IN (SELECT id FROM due)
-),
-totps AS (
-    DELETE FROM user_totp WHERE user_id IN (SELECT id FROM due)
-),
-roles AS (
-    DELETE FROM user_roles WHERE user_id IN (SELECT id FROM due)
-),
-grants AS (
-    DELETE FROM user_permission_grants WHERE user_id IN (SELECT id FROM due)
-),
-sessions AS (
-    UPDATE user_sessions
-    SET revoked_at = now()
-    WHERE user_id IN (SELECT id FROM due) AND revoked_at IS NULL
-),
-auths AS (
-    DELETE FROM oauth_authorizations WHERE user_id IN (SELECT id FROM due)
-),
-apps AS (
-    UPDATE apps
-    SET owner_user_id = $2
-    WHERE owner_user_id IN (SELECT id FROM due) AND deleted_at IS NULL
-)
+),` + accountDeletionCleanupCTEs + `
 SELECT id, username FROM due
 `
 
 // FinalizeOverdueAccountDeletion 完成指定用户已到期的注销（登录时调用），返回是否执行了清理。
-// 清理后仅保留账号标识，不可再登录。
+// 名下 OAuth 应用一并软删除并撤销授权；清理后仅保留账号标识，不可再登录。
 func FinalizeOverdueAccountDeletion(ctx context.Context, userID int64) (bool, *errs.Error) {
 	pairs, err := queryFollowPairs(ctx, getSingleUserFollowPairsSQL, userID)
 	if err != nil {
@@ -252,7 +301,6 @@ func FinalizeOverdueAccountDeletion(ctx context.Context, userID int64) (bool, *e
 		ctx,
 		finalizeOverdueAccountDeletionSQL,
 		userID,
-		systemAdminUserID,
 	).Scan(&id, &username)
 	if e != nil {
 		if errors.Is(e, pgx.ErrNoRows) {
@@ -265,6 +313,7 @@ func FinalizeOverdueAccountDeletion(ctx context.Context, userID int64) (bool, *e
 	db.R.Del(ctx, UsernameExistsCacheKey(username))
 	invalidateDeletedUserFollowCaches(ctx, pairs)
 	deleteUserProfileImages(ctx, id)
+	permsvc.NotifyReload()
 	return true, nil
 }
 
@@ -272,7 +321,7 @@ func FinalizeOverdueAccountDeletion(ctx context.Context, userID int64) (bool, *e
 // 完成到期的注销（批量）
 // ---------------------------------------------------------------------------
 
-// finalizeDueAccountDeletionsSQL 批量完成所有到期注销，逻辑与单用户版本相同，应用归属改为参数 $1。
+// finalizeDueAccountDeletionsSQL 批量完成所有到期注销，逻辑与单用户版本相同。
 const finalizeDueAccountDeletionsSQL = `
 WITH due AS (
     UPDATE users
@@ -288,46 +337,7 @@ WITH due AS (
       AND deletion_scheduled_at <= now()
       AND deleted_at IS NULL
     RETURNING id, username
-),
-follows AS (
-    DELETE FROM user_follows
-    WHERE follower_id IN (SELECT id FROM due) OR following_id IN (SELECT id FROM due)
-),
-emails AS (
-    UPDATE user_emails
-    SET deleted_at = now()
-    WHERE user_id IN (SELECT id FROM due) AND deleted_at IS NULL
-),
-qqs AS (
-    UPDATE user_qqs
-    SET deleted_at = now()
-    WHERE user_id IN (SELECT id FROM due) AND deleted_at IS NULL
-),
-passwords AS (
-    DELETE FROM user_passwords WHERE user_id IN (SELECT id FROM due)
-),
-totps AS (
-    DELETE FROM user_totp WHERE user_id IN (SELECT id FROM due)
-),
-roles AS (
-    DELETE FROM user_roles WHERE user_id IN (SELECT id FROM due)
-),
-grants AS (
-    DELETE FROM user_permission_grants WHERE user_id IN (SELECT id FROM due)
-),
-sessions AS (
-    UPDATE user_sessions
-    SET revoked_at = now()
-    WHERE user_id IN (SELECT id FROM due) AND revoked_at IS NULL
-),
-auths AS (
-    DELETE FROM oauth_authorizations WHERE user_id IN (SELECT id FROM due)
-),
-apps AS (
-    UPDATE apps
-    SET owner_user_id = $1
-    WHERE owner_user_id IN (SELECT id FROM due) AND deleted_at IS NULL
-)
+),` + accountDeletionCleanupCTEs + `
 SELECT id, username FROM due
 `
 
@@ -339,7 +349,7 @@ func FinalizeDueAccountDeletions(ctx context.Context) (int64, *errs.Error) {
 		return 0, err
 	}
 
-	rows, e := db.R.Query(ctx, finalizeDueAccountDeletionsSQL, systemAdminUserID)
+	rows, e := db.R.Query(ctx, finalizeDueAccountDeletionsSQL)
 	if e != nil {
 		return 0, errs.CreatePGError(e, "用户", "Failed to finalize account deletions").AppendDetails("账号注销清理失败")
 	}
@@ -368,6 +378,9 @@ func FinalizeDueAccountDeletions(ctx context.Context) (int64, *errs.Error) {
 	for _, userID := range deletedIDs {
 		deleteUserProfileImages(ctx, userID)
 	}
+	if count > 0 {
+		permsvc.NotifyReload()
+	}
 	return count, nil
 }
 
@@ -377,7 +390,7 @@ func FinalizeDueAccountDeletions(ctx context.Context) (int64, *errs.Error) {
 
 // adminDeleteUserSQL 管理员立即删除用户：逻辑与到期注销清理一致，但触发条件是用户 ID 而非注销排期。
 const adminDeleteUserSQL = `
-WITH deleted AS (
+WITH due AS (
     UPDATE users
     SET deleted_at = now(),
         deletion_scheduled_at = NULL,
@@ -389,50 +402,11 @@ WITH deleted AS (
         visibilities = '{"real_name":"private","followers":"private","following":"private"}'::jsonb
     WHERE id = $1 AND deleted_at IS NULL
     RETURNING id, username
-),
-follows AS (
-    DELETE FROM user_follows
-    WHERE follower_id IN (SELECT id FROM deleted) OR following_id IN (SELECT id FROM deleted)
-),
-emails AS (
-    UPDATE user_emails
-    SET deleted_at = now()
-    WHERE user_id IN (SELECT id FROM deleted) AND deleted_at IS NULL
-),
-qqs AS (
-    UPDATE user_qqs
-    SET deleted_at = now()
-    WHERE user_id IN (SELECT id FROM deleted) AND deleted_at IS NULL
-),
-passwords AS (
-    DELETE FROM user_passwords WHERE user_id IN (SELECT id FROM deleted)
-),
-totps AS (
-    DELETE FROM user_totp WHERE user_id IN (SELECT id FROM deleted)
-),
-roles AS (
-    DELETE FROM user_roles WHERE user_id IN (SELECT id FROM deleted)
-),
-grants AS (
-    DELETE FROM user_permission_grants WHERE user_id IN (SELECT id FROM deleted)
-),
-sessions AS (
-    UPDATE user_sessions
-    SET revoked_at = now()
-    WHERE user_id IN (SELECT id FROM deleted) AND revoked_at IS NULL
-),
-auths AS (
-    DELETE FROM oauth_authorizations WHERE user_id IN (SELECT id FROM deleted)
-),
-apps AS (
-    UPDATE apps
-    SET owner_user_id = $2
-    WHERE owner_user_id IN (SELECT id FROM deleted) AND deleted_at IS NULL
-)
-SELECT id, username FROM deleted
+),` + accountDeletionCleanupCTEs + `
+SELECT id, username FROM due
 `
 
-// DeleteUser 管理员立即删除用户，其 OAuth 应用转归系统管理员；用户不存在时返回 404。
+// DeleteUser 管理员立即删除用户，并软删除、撤销其名下全部 OAuth 应用；用户不存在时返回 404。
 func DeleteUser(ctx context.Context, userID int64) *errs.Error {
 	pairs, err := queryFollowPairs(ctx, getSingleUserFollowPairsSQL, userID)
 	if err != nil {
@@ -441,7 +415,7 @@ func DeleteUser(ctx context.Context, userID int64) *errs.Error {
 
 	var id int64
 	var username string
-	e := db.R.QueryRow(ctx, adminDeleteUserSQL, userID, systemAdminUserID).Scan(&id, &username)
+	e := db.R.QueryRow(ctx, adminDeleteUserSQL, userID).Scan(&id, &username)
 	if e != nil {
 		if errors.Is(e, pgx.ErrNoRows) {
 			return errs.NotFoundError().AppendDetails("用户不存在")
@@ -454,6 +428,7 @@ func DeleteUser(ctx context.Context, userID int64) *errs.Error {
 	db.R.Del(ctx, UsernameExistsCacheKey(username))
 	invalidateDeletedUserFollowCaches(ctx, pairs)
 	deleteUserProfileImages(ctx, id)
+	permsvc.NotifyReload()
 
 	return nil
 }

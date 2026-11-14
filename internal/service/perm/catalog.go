@@ -83,10 +83,12 @@ WHERE a.status = 'active'
 ORDER BY p.id
 `
 
-// loadImpliesSQL 加载全部继承边；端点对应的定义若已失效，会在组装目录时被过滤。
+// loadImpliesSQL 加载当前有效的继承边；边到期后需下次重载（默认 ≤30s）才会移出快照。
 const loadImpliesSQL = `
 SELECT permission_id, implied_permission_id
 FROM permission_implies
+WHERE (valid_from  IS NULL OR valid_from  <= now())
+  AND (valid_until IS NULL OR valid_until >  now())
 `
 
 // loadCatalog 从数据库构建新的权限目录快照，包含权限定义去重、继承边过滤与继承环检测。

@@ -161,7 +161,7 @@ func UpdatePermissionDef(ctx context.Context, id int64, description string, requ
 	return nil
 }
 
-// deletePermissionDefSQL 删除权限定义，关联的组权限与继承边由外键级联清理。
+// deletePermissionDefSQL 删除权限定义；继承边由外键级联清理，组权限模式保留（可能匹配重建的同名权限）。
 const deletePermissionDefSQL = `DELETE FROM permission_defs WHERE id = $1`
 
 const getPermissionDefForDeleteSQL = `
@@ -244,17 +244,15 @@ func AddPermissionImply(ctx context.Context, permissionID, impliedID int64) *err
 		return errs.NotFoundError().AppendDetails("权限定义不存在")
 	}
 
-	direct, err := ListDirectImpliedPermissions(ctx, permissionID)
+	direct, err := ListDirectImplications(ctx, permissionID)
 	if err != nil {
 		return err
 	}
-	ids := make([]int64, 0, len(direct)+1)
-	for _, item := range direct {
-		ids = append(ids, item.ID)
-	}
-	ids = append(ids, impliedID)
+	implications := make([]*model.PermissionImply, 0, len(direct)+1)
+	implications = append(implications, direct...)
+	implications = append(implications, &model.PermissionImply{ImpliedPermissionID: impliedID})
 
-	return SetPermissionImplies(ctx, db.R, def.AppID, permissionID, ids)
+	return SetPermissionImplies(ctx, db.R, def.AppID, permissionID, implications)
 }
 
 // RemovePermissionImply 移除一条直接继承边（不存在时幂等成功）。
@@ -267,37 +265,51 @@ func RemovePermissionImply(ctx context.Context, permissionID, impliedID int64) *
 		return errs.NotFoundError().AppendDetails("权限定义不存在")
 	}
 
-	direct, err := ListDirectImpliedPermissions(ctx, permissionID)
+	direct, err := ListDirectImplications(ctx, permissionID)
 	if err != nil {
 		return err
 	}
-	ids := make([]int64, 0, len(direct))
-	for _, item := range direct {
-		if item.ID != impliedID {
-			ids = append(ids, item.ID)
+	implications := make([]*model.PermissionImply, 0, len(direct))
+	for _, implication := range direct {
+		if implication.ImpliedPermissionID != impliedID {
+			implications = append(implications, implication)
 		}
 	}
 
-	return SetPermissionImplies(ctx, db.R, def.AppID, permissionID, ids)
+	return SetPermissionImplies(ctx, db.R, def.AppID, permissionID, implications)
 }
 
-// listDirectImpliesSQL 查询某权限直接继承的权限定义。
-const listDirectImpliesSQL = `
-SELECT pd.id, pd.app_id, pd.value, pd.description, pd.requestable,
-       pd.created_by, pd.created_at, pd.updated_at
-FROM permission_implies pi
-JOIN permission_defs pd ON pd.id = pi.implied_permission_id
-WHERE pi.permission_id = $1
-ORDER BY pd.id
+const listDirectImplicationsSQL = `
+SELECT permission_id, implied_permission_id, granted_by_user_id,
+       valid_from, valid_until, note, created_at, updated_at
+FROM permission_implies
+WHERE permission_id = $1
+ORDER BY implied_permission_id
 `
 
-// ListDirectImpliedPermissions 列出某权限直接继承的权限定义（不含传递闭包）。
-func ListDirectImpliedPermissions(ctx context.Context, permissionID int64) ([]*model.PermissionDef, *errs.Error) {
-	rows, err := db.R.Query(ctx, listDirectImpliesSQL, permissionID)
+func ListDirectImplications(ctx context.Context, permissionID int64) ([]*model.PermissionImply, *errs.Error) {
+	rows, err := db.R.Query(ctx, listDirectImplicationsSQL, permissionID)
 	if err != nil {
 		return nil, errs.CreatePGError(err, "权限继承", "Failed to query permission implies")
 	}
-	return collectPermissionDefs(rows, "权限继承")
+	defer rows.Close()
+
+	implications := make([]*model.PermissionImply, 0)
+	for rows.Next() {
+		var implication model.PermissionImply
+		if err := rows.Scan(
+			&implication.PermissionID, &implication.ImpliedPermissionID, &implication.GrantedByUserID,
+			&implication.ValidFrom, &implication.ValidUntil, &implication.Note,
+			&implication.CreatedAt, &implication.UpdatedAt,
+		); err != nil {
+			return nil, errs.CreatePGError(err, "权限继承", "Failed to scan permission implication")
+		}
+		implications = append(implications, &implication)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errs.CreatePGError(err, "权限继承", "Failed to iterate permission implications")
+	}
+	return implications, nil
 }
 
 // listImpliedPermissionsRecursiveSQL 递归展开全部继承关系，用于审计与调试。
