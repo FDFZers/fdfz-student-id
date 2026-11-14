@@ -17,7 +17,7 @@ import (
 // permissionSearchCfg 是权限定义的搜索配置：可查询字段、排序字段、标签与默认排序。
 // 表别名 pd/a 需与各 handler 追加的 where 条件保持一致。
 var permissionSearchCfg = searchsvc.SearchConfig{
-	Table: "permission_defs pd JOIN oauth_apps a ON a.id = pd.app_id",
+	Table: "permission_defs pd JOIN apps a ON a.id = pd.app_id",
 	Item:  "权限定义",
 	Columns: []string{
 		"pd.id", "pd.app_id", "a.namespace", "pd.value", "pd.description",
@@ -44,7 +44,7 @@ var permissionSearchCfg = searchsvc.SearchConfig{
 
 // userGroupSearchCfg 是用户组的搜索配置；表别名 r/a 需与各 handler 追加的 where 条件保持一致。
 var userGroupSearchCfg = searchsvc.SearchConfig{
-	Table: "roles r JOIN oauth_apps a ON a.id = r.app_id",
+	Table: "roles r JOIN apps a ON a.id = r.app_id",
 	Item:  "用户组",
 	Columns: []string{
 		"r.id", "r.app_id", "a.namespace AS app_namespace", "r.name", "r.note",

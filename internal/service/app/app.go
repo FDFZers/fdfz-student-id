@@ -21,14 +21,14 @@ import (
 // CoreNamespace 是内置 student_id 应用的命名空间，停用、删除或改名都会导致权限目录失效。
 const CoreNamespace = "student_id"
 
-// appColumns 是 oauth_apps 的查询列清单；顺序必须与 scanApp 的 Scan 参数一致。
+// appColumns 是 apps 的查询列清单；顺序必须与 scanApp 的 Scan 参数一致。
 const appColumns = `
 id, namespace, owner_user_id, secret_hash, name, description, homepage_url,
 client_type, redirect_uris, requested_perms, status,
 created_at, updated_at, deleted_at
 `
 
-// scanApp 扫描一行 oauth_apps 数据；记录不存在时返回 (nil, nil)，由调用方决定如何报错。
+// scanApp 扫描一行 apps 数据；记录不存在时返回 (nil, nil)，由调用方决定如何报错。
 func scanApp(row pgx.Row, item string) (*model.OAuthApp, *errs.Error) {
 	var a model.OAuthApp
 	err := row.Scan(
@@ -62,14 +62,14 @@ func collectApps(rows pgx.Rows, item string) ([]*model.OAuthApp, *errs.Error) {
 	return apps, nil
 }
 
-const getAppByIDSQL = `SELECT ` + appColumns + ` FROM oauth_apps WHERE id = $1 AND deleted_at IS NULL`
+const getAppByIDSQL = `SELECT ` + appColumns + ` FROM apps WHERE id = $1 AND deleted_at IS NULL`
 
 // GetAppByID 按 ID 返回未删除的应用（含已停用应用）；不存在时返回 (nil, nil)。
 func GetAppByID(ctx context.Context, id int64) (*model.OAuthApp, *errs.Error) {
 	return scanApp(db.R.QueryRow(ctx, getAppByIDSQL, id), "应用")
 }
 
-const getAppByNamespaceSQL = `SELECT ` + appColumns + ` FROM oauth_apps WHERE lower(namespace) = lower($1) AND deleted_at IS NULL`
+const getAppByNamespaceSQL = `SELECT ` + appColumns + ` FROM apps WHERE lower(namespace) = lower($1) AND deleted_at IS NULL`
 
 // GetAppByNamespace 按命名空间大小写不敏感地返回未删除的应用；不存在时返回 (nil, nil)。
 // 注意：应用可能处于 suspended 状态，调用方如需只接受 active 应用应自行判断 Status。
@@ -78,7 +78,7 @@ func GetAppByNamespace(ctx context.Context, namespace string) (*model.OAuthApp, 
 }
 
 const listOwnedAppIDsSQL = `
-SELECT id FROM oauth_apps
+SELECT id FROM apps
 WHERE owner_user_id = $1 AND deleted_at IS NULL AND status = 'active'
 ORDER BY id
 `
@@ -106,7 +106,7 @@ func ListOwnedAppIDs(ctx context.Context, userID int64) ([]int64, *errs.Error) {
 	return ids, nil
 }
 
-const listAllAppsSQL = `SELECT ` + appColumns + ` FROM oauth_apps WHERE deleted_at IS NULL ORDER BY id`
+const listAllAppsSQL = `SELECT ` + appColumns + ` FROM apps WHERE deleted_at IS NULL ORDER BY id`
 
 // ListAllApps 返回全部未删除的应用（含停用应用，仅建议在管理员语境下使用）。
 func ListAllApps(ctx context.Context) ([]*model.OAuthApp, *errs.Error) {
@@ -118,7 +118,7 @@ func ListAllApps(ctx context.Context) ([]*model.OAuthApp, *errs.Error) {
 }
 
 const createAppSQL = `
-INSERT INTO oauth_apps (
+INSERT INTO apps (
     namespace, owner_user_id, secret_hash, name, description, homepage_url,
     client_type, redirect_uris, requested_perms, status
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -153,7 +153,7 @@ func CreateApp(ctx context.Context, a *model.OAuthApp) *errs.Error {
 }
 
 const updateAppSQL = `
-UPDATE oauth_apps
+UPDATE apps
 SET
     namespace       = $2,
     owner_user_id   = $3,
@@ -167,9 +167,9 @@ SET
 WHERE id = $1 AND deleted_at IS NULL AND updated_at = $11
 RETURNING ` + appColumns
 
-const appExistsSQL = `SELECT EXISTS (SELECT 1 FROM oauth_apps WHERE id = $1 AND deleted_at IS NULL)`
+const appExistsSQL = `SELECT EXISTS (SELECT 1 FROM apps WHERE id = $1 AND deleted_at IS NULL)`
 
-const appRequestedPermsSQL = `SELECT requested_perms FROM oauth_apps WHERE id = $1`
+const appRequestedPermsSQL = `SELECT requested_perms FROM apps WHERE id = $1`
 
 // 命名空间允许下划线，必须按 ":" 精确切分，不能用 LIKE 前缀匹配。
 const updateGrantNamespaceSQL = `
@@ -200,7 +200,7 @@ WHERE EXISTS (
 `
 
 const updateRequestedPermsNamespaceSQL = `
-UPDATE oauth_apps
+UPDATE apps
 SET requested_perms = COALESCE(
     (
         SELECT array_agg(
@@ -320,7 +320,7 @@ func UpdateApp(
 }
 
 const setAppStatusSQL = `
-UPDATE oauth_apps
+UPDATE apps
 SET status = $2
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING ` + appColumns
@@ -363,7 +363,7 @@ func SetAppStatus(ctx context.Context, dh db.Handle, appID int64, status model.A
 }
 
 const deleteAppSQL = `
-UPDATE oauth_apps
+UPDATE apps
 SET deleted_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING ` + appColumns
@@ -396,7 +396,7 @@ WHERE EXISTS (
 `
 
 const scrubRequestedPermsNamespaceSQL = `
-UPDATE oauth_apps
+UPDATE apps
 SET requested_perms = COALESCE(
     (
         SELECT array_agg(p)
@@ -450,7 +450,7 @@ func DeleteApp(ctx context.Context, dh db.Handle, appID int64) (*model.OAuthApp,
 	return a, nil
 }
 
-const rotateAppSecretSQL = `UPDATE oauth_apps SET secret_hash = $2 WHERE id = $1 AND deleted_at IS NULL`
+const rotateAppSecretSQL = `UPDATE apps SET secret_hash = $2 WHERE id = $1 AND deleted_at IS NULL`
 
 // GenerateClientSecret 生成客户端密钥；明文只在创建或重置响应中返回一次，数据库只保存哈希。
 func GenerateClientSecret() (string, string, *errs.Error) {

@@ -176,7 +176,7 @@ WITH RECURSIVE granted AS (
     UNION
     SELECT pd.id
     FROM user_permission_grants g
-    JOIN oauth_apps a ON a.id = g.granted_by_app_id
+    JOIN apps a ON a.id = g.granted_by_app_id
         AND a.status = 'active' AND a.deleted_at IS NULL
     JOIN permission_defs pd ON pd.app_id = a.id
         AND g.permission = a.namespace || ':' || pd.value
@@ -193,7 +193,7 @@ expanded AS (
 )
 SELECT DISTINCT a.namespace || ':' || pd.value AS permission
 FROM permission_defs pd
-JOIN oauth_apps a ON a.id = pd.app_id
+JOIN apps a ON a.id = pd.app_id
 JOIN expanded e ON e.id = pd.id
 WHERE a.status = 'active' AND a.deleted_at IS NULL
 ORDER BY 1

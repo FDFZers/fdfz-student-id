@@ -31,7 +31,7 @@ type AppStatus string
 // ENUM(active, update_suspended)
 type AppAuthStatus string
 
-// OAuthApp OAuth 应用实体，对应 oauth_apps 表；应用同时是权限定义的命名空间所有者。
+// OAuthApp OAuth 应用实体，对应 apps 表；应用同时是权限定义的命名空间所有者。
 type OAuthApp struct {
 	ID          int64       `json:"id" db:"id"`
 	Namespace   string      `json:"namespace" db:"namespace"` // 权限命名空间，权限值形如 <namespace>:<nodes>，全站唯一

@@ -231,7 +231,7 @@ auths AS (
     DELETE FROM oauth_authorizations WHERE user_id IN (SELECT id FROM due)
 ),
 apps AS (
-    UPDATE oauth_apps
+    UPDATE apps
     SET owner_user_id = $2
     WHERE owner_user_id IN (SELECT id FROM due) AND deleted_at IS NULL
 )
@@ -324,7 +324,7 @@ auths AS (
     DELETE FROM oauth_authorizations WHERE user_id IN (SELECT id FROM due)
 ),
 apps AS (
-    UPDATE oauth_apps
+    UPDATE apps
     SET owner_user_id = $1
     WHERE owner_user_id IN (SELECT id FROM due) AND deleted_at IS NULL
 )
@@ -425,7 +425,7 @@ auths AS (
     DELETE FROM oauth_authorizations WHERE user_id IN (SELECT id FROM deleted)
 ),
 apps AS (
-    UPDATE oauth_apps
+    UPDATE apps
     SET owner_user_id = $2
     WHERE owner_user_id IN (SELECT id FROM deleted) AND deleted_at IS NULL
 )

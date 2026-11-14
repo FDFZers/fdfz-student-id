@@ -95,7 +95,7 @@ func upsertAuthorization(
 const loadAuthorizationForTokenSQL = `
 SELECT a.permissions, a.status, app.status, u.deleted_at
 FROM oauth_authorizations a
-JOIN oauth_apps app ON app.id = a.app_id
+JOIN apps app ON app.id = a.app_id
 JOIN users u ON u.id = a.user_id
 WHERE a.id = $1 AND app.id = $2 AND u.id = $3
 `
@@ -169,7 +169,7 @@ SELECT a.id, a.permissions, a.status, a.created_at, a.updated_at, a.last_used_at
        app.homepage_url, app.client_type, app.redirect_uris, app.requested_perms, app.status,
        app.created_at, app.updated_at, app.deleted_at
 FROM oauth_authorizations a
-JOIN oauth_apps app ON app.id = a.app_id AND app.deleted_at IS NULL
+JOIN apps app ON app.id = a.app_id AND app.deleted_at IS NULL
 WHERE a.user_id = $1 AND a.status IN ('active', 'update_suspended')
 ORDER BY (a.status <> 'active'), a.updated_at DESC, a.id DESC
 `
@@ -246,7 +246,7 @@ SELECT rt.id, rt.expires_at,
        app.status, u.deleted_at
 FROM oauth_refresh_tokens rt
 JOIN oauth_authorizations a ON a.id = rt.auth_id
-JOIN oauth_apps app ON app.id = a.app_id
+JOIN apps app ON app.id = a.app_id
 JOIN users u ON u.id = a.user_id
 WHERE rt.token_hash = $1
 FOR UPDATE OF rt

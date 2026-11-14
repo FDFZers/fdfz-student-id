@@ -14,7 +14,7 @@ import (
 
 // appSearchCfg 是应用搜索配置；附加条件由 handler 按调用方范围注入。
 var appSearchCfg = searchsvc.SearchConfig{
-	Table: "oauth_apps",
+	Table: "apps",
 	Item:  "应用",
 	Columns: []string{
 		"id", "namespace", "owner_user_id", "secret_hash", "name", "description",

@@ -167,7 +167,7 @@ const deletePermissionDefSQL = `DELETE FROM permission_defs WHERE id = $1`
 const getPermissionDefForDeleteSQL = `
 SELECT a.namespace, d.value
 FROM permission_defs d
-JOIN oauth_apps a ON a.id = d.app_id
+JOIN apps a ON a.id = d.app_id
 WHERE d.id = $1
 `
 

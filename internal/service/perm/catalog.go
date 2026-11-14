@@ -77,7 +77,7 @@ func Load(ctx context.Context) *errs.Error {
 const loadCatalogSQL = `
 SELECT p.id, p.app_id, a.namespace, p.value, p.description, p.requestable
 FROM permission_defs p
-JOIN oauth_apps a ON a.id = p.app_id
+JOIN apps a ON a.id = p.app_id
 WHERE a.status = 'active'
   AND a.deleted_at IS NULL
 ORDER BY p.id

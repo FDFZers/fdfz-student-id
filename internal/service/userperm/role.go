@@ -79,7 +79,7 @@ LIMIT $2 OFFSET $3
 const countRolesVisibleToAppSQL = `
 SELECT count(*)
 FROM roles r
-JOIN oauth_apps a ON a.id = r.app_id
+JOIN apps a ON a.id = r.app_id
 WHERE r.app_id = $1 OR (r.is_public AND a.status = 'active' AND a.deleted_at IS NULL)
 `
 
@@ -87,7 +87,7 @@ WHERE r.app_id = $1 OR (r.is_public AND a.status = 'active' AND a.deleted_at IS 
 const listRolesVisibleToAppSQL = `
 SELECT r.id, r.app_id, r.name, r.note, r.is_public, r.created_at, r.updated_at
 FROM roles r
-JOIN oauth_apps a ON a.id = r.app_id
+JOIN apps a ON a.id = r.app_id
 WHERE r.app_id = $1 OR (r.is_public AND a.status = 'active' AND a.deleted_at IS NULL)
 ORDER BY (r.app_id <> $1), r.id
 LIMIT $2 OFFSET $3
@@ -118,7 +118,7 @@ func ListRolesVisibleToApp(ctx context.Context, appID int64, limit, offset int32
 const getRoleVisibleToAppSQL = `
 SELECT r.id, r.app_id, r.name, r.note, r.is_public, r.created_at, r.updated_at
 FROM roles r
-JOIN oauth_apps a ON a.id = r.app_id
+JOIN apps a ON a.id = r.app_id
 WHERE r.id = $1 AND (r.app_id = $2 OR (r.is_public AND a.status = 'active' AND a.deleted_at IS NULL))
 `
 

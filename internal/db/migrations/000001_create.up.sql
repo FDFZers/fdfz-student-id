@@ -292,9 +292,9 @@ CREATE UNIQUE INDEX uq_register_requests_username_pending
     WHERE status = 'pending';
 
 -- =============================================
--- 应用 oauth_apps
+-- 应用 apps
 -- =============================================
-CREATE TABLE oauth_apps
+CREATE TABLE apps
 (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     namespace       VARCHAR(32)    NOT NULL,
@@ -316,18 +316,18 @@ CREATE TABLE oauth_apps
     deleted_at      TIMESTAMPTZ             DEFAULT NULL
 );
 
-CREATE UNIQUE INDEX uq_oauth_apps_namespace_lower_active
-    ON oauth_apps (lower(namespace))
+CREATE UNIQUE INDEX uq_apps_namespace_lower_active
+    ON apps (lower(namespace))
     WHERE deleted_at IS NULL;
-CREATE INDEX idx_oauth_apps_owner_user_id
-    ON oauth_apps (owner_user_id);
-CREATE INDEX idx_oauth_apps_status
-    ON oauth_apps (status)
+CREATE INDEX idx_apps_owner_user_id
+    ON apps (owner_user_id);
+CREATE INDEX idx_apps_status
+    ON apps (status)
     WHERE deleted_at IS NULL;
 
-CREATE TRIGGER trg_oauth_apps_updated_at
+CREATE TRIGGER trg_apps_updated_at
     BEFORE UPDATE
-    ON oauth_apps
+    ON apps
     FOR EACH ROW
 EXECUTE FUNCTION fn_update_timestamp();
 
@@ -337,7 +337,7 @@ EXECUTE FUNCTION fn_update_timestamp();
 CREATE TABLE permission_defs
 (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    app_id      BIGINT       NOT NULL REFERENCES oauth_apps (id) ON DELETE RESTRICT,
+    app_id      BIGINT       NOT NULL REFERENCES apps (id) ON DELETE RESTRICT,
     value       VARCHAR(96)  NOT NULL,               -- 路径部分
     description VARCHAR(256) NOT NULL DEFAULT '',
     requestable BOOLEAN      NOT NULL DEFAULT false, -- OAuth 可申请
@@ -379,7 +379,7 @@ CREATE INDEX idx_permission_implies_implied_permission_id
 CREATE TABLE roles
 (
     id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    app_id     BIGINT       NOT NULL REFERENCES oauth_apps (id) ON DELETE CASCADE,
+    app_id     BIGINT       NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
     name       VARCHAR(128) NOT NULL,
     note       VARCHAR(256) NOT NULL DEFAULT '',
     is_public  BOOLEAN      NOT NULL DEFAULT false,
@@ -441,7 +441,7 @@ CREATE TABLE user_permission_grants
     user_id            BIGINT       NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     permission         VARCHAR(128) NOT NULL,
     granted_by_user_id BIGINT                DEFAULT NULL REFERENCES users (id) ON DELETE SET NULL, -- null 表示系统
-    granted_by_app_id  BIGINT       NOT NULL REFERENCES oauth_apps (id) ON DELETE CASCADE,
+    granted_by_app_id  BIGINT       NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
     valid_from         TIMESTAMPTZ           DEFAULT NULL,
     valid_until        TIMESTAMPTZ           DEFAULT NULL,
     note               VARCHAR(256) NOT NULL DEFAULT '',
@@ -475,7 +475,7 @@ CREATE TABLE oauth_authorizations
 (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     user_id      BIGINT          NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    app_id       BIGINT          NOT NULL REFERENCES oauth_apps (id) ON DELETE CASCADE,
+    app_id       BIGINT          NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
     permissions  TEXT[]          NOT NULL DEFAULT '{}',
     status       app_auth_status NOT NULL DEFAULT 'active',
     created_at   TIMESTAMPTZ     NOT NULL DEFAULT now(),
@@ -524,7 +524,7 @@ $$
     BEGIN
         SELECT id
         INTO core_app_id
-        FROM oauth_apps
+        FROM apps
         WHERE id = 1
           AND namespace = 'student_id'
           AND deleted_at IS NULL;
@@ -544,60 +544,111 @@ $$
             (core_app_id, 'users.list', '搜索全部用户', false),
             (core_app_id, 'users.delete', '删除用户', false),
             -- 自己的资料
-            (core_app_id, 'user.profile.read.basic', '读取自己的基础资料', false),
-            (core_app_id, 'user.profile.read.identity', '读取自己的身份信息', false),
-            (core_app_id, 'user.profile.read.real_name', '读取自己的真实姓名', false),
-            (core_app_id, 'user.profile.read.about', '读取自己的简介与签名', false),
-            (core_app_id, 'user.profile.read.visibilities', '读取自己的资料可见性', false),
-            (core_app_id, 'user.profile.update.basic', '修改自己的基础资料', false),
-            (core_app_id, 'user.profile.update.about', '修改自己的简介与签名', false),
-            (core_app_id, 'user.profile.update.visibilities', '修改自己的资料可见性', false),
-            -- 他人的资料
-            (core_app_id, 'users.profile.read.basic', '读取他人的基础资料', false),
-            (core_app_id, 'users.profile.read.identity', '读取他人的身份信息', false),
+            (core_app_id, 'user.profile.read.basic', '读取个人基础资料', true),
+            (core_app_id, 'user.profile.read.identity', '读取个人身份信息', true),
+            (core_app_id, 'user.profile.read.real_name', '读取个人真实姓名', true),
+            (core_app_id, 'user.profile.read.about', '读取个人简介与签名', true),
+            (core_app_id, 'user.profile.read.visibilities', '读取个人资料可见性', true),
+            (core_app_id, 'user.profile.update.basic', '修改个人基础资料', true),
+            (core_app_id, 'user.profile.update.about', '修改个人简介与签名', true),
+            (core_app_id, 'user.profile.update.visibilities', '修改个人资料可见性', true),
+            -- 他人资料
+            (core_app_id, 'users.profile.read.basic', '读取他人基础资料', false),
+            (core_app_id, 'users.profile.read.identity', '读取他人身份信息', false),
             (core_app_id, 'users.profile.read.real_name.allowed', '按可见性读取他人真实姓名', false),
             (core_app_id, 'users.profile.read.real_name', '无视可见性读取他人真实姓名', false),
-            (core_app_id, 'users.profile.read.about', '读取他人的简介与签名', false),
-            (core_app_id, 'users.profile.read.visibilities', '读取他人的资料可见性', false),
-            (core_app_id, 'users.profile.update.basic', '修改他人的基础资料', false),
-            (core_app_id, 'users.profile.update.identity', '修改他人的身份信息', false),
-            (core_app_id, 'users.profile.update.about', '修改他人的简介与签名', false),
-            (core_app_id, 'users.profile.update.visibilities', '修改他人的资料可见性', false),
+            (core_app_id, 'users.profile.read.about', '读取他人简介与签名', false),
+            (core_app_id, 'users.profile.read.visibilities', '读取他人资料可见性', false),
+            (core_app_id, 'users.profile.update.basic', '修改他人基础资料', false),
+            (core_app_id, 'users.profile.update.identity', '修改他人身份信息', false),
+            (core_app_id, 'users.profile.update.about', '修改他人简介与签名', false),
+            (core_app_id, 'users.profile.update.visibilities', '修改他人资料可见性', false),
             -- 用户封禁
-            (core_app_id, 'user.ban.read', '查看自己的封禁信息', false),
-            (core_app_id, 'users.ban.read', '查看他人的封禁信息', false),
+            (core_app_id, 'user.ban.read', '查看个人封禁信息', true),
+            (core_app_id, 'users.ban.read', '查看他人封禁信息', false),
             (core_app_id, 'users.ban.write', '封禁或解封用户', false),
             -- 用户会话
-            (core_app_id, 'user.session.read', '查看自己的登录会话', false),
-            (core_app_id, 'user.session.write', '管理自己的登录会话', false),
-            (core_app_id, 'users.session.read', '查看他人的登录会话', false),
-            (core_app_id, 'users.session.write', '管理他人的登录会话', false),
+            (core_app_id, 'user.session.read', '查看个人登录会话', false),
+            (core_app_id, 'user.session.write', '管理个人登录会话', false),
+            (core_app_id, 'users.session.read', '查看他人登录会话', false),
+            (core_app_id, 'users.session.write', '管理他人登录会话', false),
             -- 用户关注
-            (core_app_id, 'user.relation.read', '查看自己的关注关系', false),
-            (core_app_id, 'user.relation.write', '管理自己的关注关系', false),
-            (core_app_id, 'users.relation.read', '查看他人的关注关系（不受可见性限制）', false),
-            (core_app_id, 'users.relation.read.allowed', '按可见性查看他人的关注关系', false),
-            (core_app_id, 'users.relation.write', '管理他人的关注关系', false),
+            (core_app_id, 'user.relation.read', '查看个人关注关系', true),
+            (core_app_id, 'user.relation.write', '管理个人关注关系', true),
+            (core_app_id, 'users.relation.read', '查看他人关注关系（不受可见性限制）', false),
+            (core_app_id, 'users.relation.read.allowed', '按可见性查看他人关注关系', false),
+            (core_app_id, 'users.relation.write', '管理他人关注关系', false),
             -- 权限管理
-            (core_app_id, 'permission.read', '读取本应用权限定义', false),
-            (core_app_id, 'permission.write', '管理本应用权限定义', false),
+            (core_app_id, 'permission.read', '读取拥有的应用权限定义', false),
+            (core_app_id, 'permission.write', '管理拥有的应用权限定义', false),
             (core_app_id, 'permissions.read', '读取全部权限定义', false),
             (core_app_id, 'permissions.write', '管理全部权限定义', false),
             -- 应用管理
-            (core_app_id, 'app.read', '读取本应用信息', false),
-            (core_app_id, 'app.update', '修改本应用信息', false),
-            (core_app_id, 'app.delete', '删除本应用', false),
+            (core_app_id, 'app.read', '读取拥有的应用信息', false),
+            (core_app_id, 'app.update', '修改拥有的应用信息', false),
+            (core_app_id, 'app.delete', '删除拥有的应用', false),
             (core_app_id, 'apps.list', '查看全部应用', false),
             (core_app_id, 'apps.create', '创建应用', false),
             (core_app_id, 'apps.update', '修改全部应用', false),
             (core_app_id, 'apps.suspend', '停用或启用应用', false),
             (core_app_id, 'apps.delete', '删除全部应用', false),
             -- OAuth 授权管理
-            (core_app_id, 'oauth.read', '查看自己的 OAuth 授权', false),
-            (core_app_id, 'oauth.revoke', '撤销自己的 OAuth 授权', false),
-            (core_app_id, 'oauths.read', '查看他人的 OAuth 授权', false),
-            (core_app_id, 'oauths.revoke', '撤销他人的 OAuth 授权', false)
+            (core_app_id, 'oauth.read', '查看个人 OAuth 授权', false),
+            (core_app_id, 'oauth.revoke', '撤销个人 OAuth 授权', false),
+            (core_app_id, 'oauths.read', '查看他人 OAuth 授权', false),
+            (core_app_id, 'oauths.revoke', '撤销他人 OAuth 授权', false)
         ON CONFLICT (app_id, value) DO NOTHING;
+
+        -- 权限继承：只写入直接边，传递闭包由权限目录在运行时展开。
+        --   list 继承同路径的 read；
+        --   write / update / delete / review / suspend / revoke 等写操作继承同路径的 list 与 read；
+        --   他人权限（users.*、oauths.*）继承同路径的个人权限（user.*、oauth.*）。
+        INSERT INTO permission_implies (permission_id, implied_permission_id)
+        SELECT def.id, implied_def.id
+        FROM (
+            -- list → read
+            SELECT pd.value AS permission,
+                   regexp_replace(pd.value, '\.list$', '.read') AS implied
+            FROM permission_defs pd
+            WHERE pd.app_id = core_app_id
+              AND pd.value ~ '\.list$'
+
+            UNION
+
+            -- 写操作 → list
+            SELECT pd.value,
+                   regexp_replace(pd.value, '\.(write|update|delete|review|suspend|revoke)(\..+)?$', '.list\2')
+            FROM permission_defs pd
+            WHERE pd.app_id = core_app_id
+              AND pd.value ~ '\.(write|update|delete|review|suspend|revoke)(\..+)?$'
+
+            UNION
+
+            -- 写操作 → read
+            SELECT pd.value,
+                   regexp_replace(pd.value, '\.(write|update|delete|review|suspend|revoke)(\..+)?$', '.read\2')
+            FROM permission_defs pd
+            WHERE pd.app_id = core_app_id
+              AND pd.value ~ '\.(write|update|delete|review|suspend|revoke)(\..+)?$'
+
+            UNION
+
+            -- 他人 → 个人
+            SELECT pd.value,
+                   CASE
+                       WHEN pd.value LIKE 'users.%'
+                           THEN 'user.' || substring(pd.value FROM 7)
+                       ELSE 'oauth.' || substring(pd.value FROM 8)
+                   END
+            FROM permission_defs pd
+            WHERE pd.app_id = core_app_id
+              AND (pd.value LIKE 'users.%' OR pd.value LIKE 'oauths.%')
+        ) AS pairs
+        JOIN permission_defs def
+          ON def.app_id = core_app_id AND def.value = pairs.permission
+        JOIN permission_defs implied_def
+          ON implied_def.app_id = core_app_id AND implied_def.value = pairs.implied
+        ON CONFLICT (permission_id, implied_permission_id) DO NOTHING;
     END
 $$;
 

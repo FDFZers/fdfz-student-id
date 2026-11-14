@@ -66,7 +66,7 @@ type Tag struct {
 
 // SearchConfig 是某类资源搜索的静态配置，由各处理器在包级变量中定义。
 type SearchConfig struct {
-	Table             string             // FROM 子句，可包含 JOIN，如 "permission_defs pd JOIN oauth_apps a ON ..."
+	Table             string             // FROM 子句，可包含 JOIN，如 "permission_defs pd JOIN apps a ON ..."
 	Item              string             // 资源中文名，用于 PostgreSQL 错误文案
 	Fields            []Field            // 关键词可匹配字段白名单
 	MatchMethods      []MatchMethod      // 允许的匹配方法白名单

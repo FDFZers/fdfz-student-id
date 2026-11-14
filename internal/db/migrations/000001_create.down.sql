@@ -8,7 +8,7 @@ DROP TABLE IF EXISTS role_permissions;
 DROP TABLE IF EXISTS roles;
 DROP TABLE IF EXISTS permission_implies;
 DROP TABLE IF EXISTS permission_defs;
-DROP TABLE IF EXISTS oauth_apps;
+DROP TABLE IF EXISTS apps;
 DROP TABLE IF EXISTS register_requests;
 DROP TABLE IF EXISTS user_sessions;
 DROP TABLE IF EXISTS user_totp;
