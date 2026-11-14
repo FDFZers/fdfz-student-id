@@ -12,16 +12,13 @@ import (
 	"github.com/guregu/null/v6"
 )
 
-// appIconSlugPrefix 是应用图标在 filestore 中的固定路径前缀，后接应用 ID。
 const appIconSlugPrefix = "/student_id/app_icons/"
 
-// appIconSlug 返回应用图标的 filestore slug；图标是否存在由 filestore 判断。
 func appIconSlug(appID int64) string {
 	return appIconSlugPrefix + strconv.FormatInt(appID, 10)
 }
 
 // setIconHandler 上传应用图标：管理员与应用所有者均可操作。
-// 仅接受 JPEG/PNG/WebP，服务端检测类型并决定扩展名，同一应用只保留一张图标（按 slug 覆盖）。
 func setIconHandler(c *gin.Context) *errs.Error {
 	a, err := managedApp(c, true)
 	if err != nil {
@@ -38,7 +35,6 @@ func setIconHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 路径与应用 ID 绑定，文件名统一由服务端检测结果生成
 	appID := strconv.FormatInt(a.ID, 10)
 	if err := filestoresvc.UploadFile(fileHeader, &filestoresvc.StoreFileReq{
 		Slug:         appIconSlug(a.ID),
@@ -55,8 +51,6 @@ func setIconHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
-// deleteIconHandler 删除应用图标：直接删除 filestore 中的固定 slug 文件。
-// 文件不存在时返回「未设置图标」，与用户头像删除行为一致。
 func deleteIconHandler(c *gin.Context) *errs.Error {
 	a, err := managedApp(c, true)
 	if err != nil {
@@ -74,8 +68,6 @@ func deleteIconHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
-// getIconHandler 公开读取应用图标：校验应用存在后 302 跳转到 filestore 的固定 slug。
-// 该接口不要求登录，供 OAuth 授权页等公开页面展示应用图标；文件不存在时由 filestore 返回 404。
 func getIconHandler(c *gin.Context) *errs.Error {
 	appID, err := handling.ParseID(c, "appID", "应用")
 	if err != nil {

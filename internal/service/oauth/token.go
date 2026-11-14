@@ -18,7 +18,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// TokenResponse 是令牌接口的响应。
 type TokenResponse struct {
 	AccessToken  string   `json:"access_token"`
 	TokenType    string   `json:"token_type"`
@@ -31,8 +30,7 @@ type TokenResponse struct {
 // 签发
 // ---------------------------------------------------------------------------
 
-// issueAccessToken 签发 OAuth 访问令牌（RS512 JWT），返回令牌与有效期秒数。
-// permissions 排序去重后写入 claims。
+// issueAccessToken 签发 RS512 JWT 访问令牌，权限排序去重后写入 claims。
 func issueAccessToken(userID, appID, authID int64, permissions []string) (string, int64, error) {
 	perms := slicex.SortDedupe(permissions)
 
@@ -49,7 +47,6 @@ func issueAccessToken(userID, appID, authID int64, permissions []string) (string
 	return token, int64(cfg.C.OAuthAccessTokenTTL / time.Second), nil
 }
 
-// newRefreshToken 生成刷新令牌明文与 SHA-512 哈希。
 func newRefreshToken() (string, string, error) {
 	raw, err := crypto.GenerateCode(64, crypto.TokenCharset)
 	if err != nil {
@@ -62,13 +59,13 @@ func newRefreshToken() (string, string, error) {
 // 交换
 // ---------------------------------------------------------------------------
 
-// ExchangeAuthorizationCode 用授权码换取访问令牌与刷新令牌。
-// 授权码取出即删除，失败也不会再次可用；permissions 会按当前授权与用户权限重新收窄。
+// ExchangeAuthorizationCode 用授权码换取访问令牌与刷新令牌，授权码取出即删除。
 func ExchangeAuthorizationCode(
 	ctx context.Context,
 	client *model.OAuthApp,
 	code string,
 	codeVerifier string,
+	redirectURI string,
 ) (*TokenResponse, *errs.Error) {
 	if code == "" {
 		return nil, errs.BadRequestError().AppendDetails("缺少授权码")
@@ -86,6 +83,14 @@ func ExchangeAuthorizationCode(
 	}
 	if !time.Now().Before(stored.ExpiresAt) {
 		return nil, errs.BadRequestError().AppendDetails("授权码已过期")
+	}
+	// RFC 6749：授权请求带过 redirect_uri 时，令牌请求必须原样传回并精确匹配。
+	if stored.RedirectURIProvided && redirectURI != stored.RedirectURI {
+		return nil, errs.BadRequestError().AppendDetails("redirect_uri 与授权请求不一致")
+	}
+	// RFC 7636：公开客户端没有密钥，必须用 PKCE 防止授权码被截获。
+	if !client.ClientType.IsConfidential() && stored.CodeChallenge == "" {
+		return nil, errs.BadRequestError().AppendDetails("公开客户端必须使用 PKCE")
 	}
 	if !crypto.VerifyCodeChallenge(stored.CodeChallenge, codeVerifier) {
 		return nil, errs.BadRequestError().AppendDetails("code_verifier 校验失败")
@@ -135,7 +140,6 @@ func ExchangeAuthorizationCode(
 }
 
 // ExchangeRefreshToken 用刷新令牌换发访问令牌并轮换刷新令牌。
-// 旧刷新令牌在事务内删除，重复使用会返回错误。
 func ExchangeRefreshToken(
 	ctx context.Context,
 	dh db.Handle,
@@ -176,7 +180,7 @@ func ExchangeRefreshToken(
 		invalidReason = "授权已失效"
 	}
 	if invalidReason != "" {
-		if err := deleteRefreshTokenByID(ctx, tx, record.ID); err != nil {
+		if _, err := deleteRefreshTokenByID(ctx, tx, record.ID); err != nil {
 			return nil, err
 		}
 		if e := tx.Commit(ctx); e != nil {
@@ -200,8 +204,13 @@ func ExchangeRefreshToken(
 		return nil, errs.CreateAndLogInternalError(e, "Failed to issue oauth access token").AppendDetails("令牌生成失败")
 	}
 
-	if err := deleteRefreshTokenByID(ctx, tx, record.ID); err != nil {
+	deleted, err := deleteRefreshTokenByID(ctx, tx, record.ID)
+	if err != nil {
 		return nil, err
+	}
+	if !deleted {
+		// 行锁下删不到说明令牌已被并发消费，必须回滚，不能签发第二套令牌。
+		return nil, errs.BadRequestError().AppendDetails("刷新令牌无效或已被使用")
 	}
 	if err := touchAuthorization(ctx, tx, record.AuthID); err != nil {
 		return nil, err
@@ -226,8 +235,7 @@ func ExchangeRefreshToken(
 // 吊销
 // ---------------------------------------------------------------------------
 
-// RevokeRefreshToken 吊销客户端自己的刷新令牌。
-// 令牌不存在或不属于该客户端时也返回成功，保证幂等且不泄露令牌信息。
+// RevokeRefreshToken 吊销客户端自己的刷新令牌；令牌不存在或不属于该客户端时也返回成功，避免泄露令牌是否存在。
 func RevokeRefreshToken(
 	ctx context.Context,
 	client *model.OAuthApp,
@@ -244,5 +252,6 @@ func RevokeRefreshToken(
 	if refreshTokenID == 0 || appID != client.ID {
 		return nil
 	}
-	return deleteRefreshTokenByID(ctx, db.R, refreshTokenID)
+	_, err = deleteRefreshTokenByID(ctx, db.R, refreshTokenID)
+	return err
 }

@@ -19,7 +19,6 @@ type profileImageKind struct {
 	Item  string // 面向用户的中文名词
 }
 
-// slug 返回用户资料图片在 filestore 中的固定路径。
 func (k profileImageKind) slug(userID int64) string {
 	return "/student_id/" + k.Slug + "/" + strconv.FormatInt(userID, 10)
 }
@@ -110,6 +109,7 @@ func setProfileImageHandler(c *gin.Context, kind profileImageKind) *errs.Error {
 		return err
 	}
 
+	handling.RespondOK(c)
 	return nil
 }
 

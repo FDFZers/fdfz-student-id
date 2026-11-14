@@ -49,17 +49,27 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// Argon2 校验前先做账号/IP 失败次数限流，防止暴力破解。
+	if err := authsvc.CheckLoginRateLimit(c.Request.Context(), req.Username, c.ClientIP()); err != nil {
+		return err
+	}
+
 	usr, err := usersvc.GetUserByUsername(c.Request.Context(), req.Username)
 	if err != nil {
 		return err
 	} else if usr == nil {
 		crypto.BurnPasswordVerifyCost()
+		authsvc.RecordLoginFailure(c.Request.Context(), req.Username, c.ClientIP())
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 
 	if err := authsvc.ValidateUserPassword(c.Request.Context(), usr.ID, req.Password); err != nil {
+		if err.HTTPCode == http.StatusForbidden {
+			authsvc.RecordLoginFailure(c.Request.Context(), req.Username, c.ClientIP())
+		}
 		return err
 	}
+	authsvc.ResetLoginFailures(c.Request.Context(), req.Username)
 
 	ban, err := usersvc.GetUserBan(c.Request.Context(), usr.ID)
 	if err != nil {
@@ -288,8 +298,8 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 		return errs.CreateAndLogInternalError(e, "Failed to generate access token").AppendDetails("令牌生成失败")
 	}
 
-	// 更新会话客户端信息并重写 Cookie
-	exp, err := authsvc.UpdateSessionClient(c, session.UUID, sessionTokenHash)
+	// 用旧令牌哈希做条件轮换，同一 session_token 并发刷新只有一个请求成功。
+	exp, err := authsvc.RotateSessionClient(c, session.UUID, hash, sessionTokenHash)
 	if err != nil {
 		return err
 	}

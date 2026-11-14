@@ -185,7 +185,20 @@ func ListUserSessions(
 // 更新会话
 // ---------------------------------------------------------------------------
 
-// updateSessionClientSQL 轮换会话令牌哈希并刷新最近使用时间与客户端信息。
+// clientInfo 返回客户端 IP 与按数据库列长度截断（不截断半个 UTF-8 字符）的 User-Agent。
+func clientInfo(c *gin.Context) (lastUserAgent, clientIP string) {
+	lastUserAgent = c.Request.UserAgent()
+	if len(lastUserAgent) > maxLastUserAgentBytes {
+		maxBytes := maxLastUserAgentBytes
+		for maxBytes > 0 && !utf8.RuneStart(lastUserAgent[maxBytes]) {
+			maxBytes--
+		}
+		lastUserAgent = lastUserAgent[:maxBytes]
+	}
+	return lastUserAgent, c.ClientIP()
+}
+
+// updateSessionClientSQL 刷新最近使用时间、客户端信息与过期时间，不轮换会话令牌。
 // 注意：只有非临时会话会把 expires_at 续期到新的过期时间，临时会话保持原过期时间。
 const updateSessionClientSQL = `
 UPDATE user_sessions
@@ -202,25 +215,56 @@ RETURNING expires_at
 `
 
 // UpdateSessionClient 刷新会话的令牌哈希、最近使用时间、IP 与 UA，并返回会话新的过期时间。
-// 注意：会轮换 session_token_hash，旧的会话令牌随即失效。
+// 登录完成时调用：传入的哈希与刚写入值相同，不产生轮换。
 func UpdateSessionClient(
 	c *gin.Context,
 	id uuid.UUID,
 	sessionTokenHash string,
 ) (time.Time, *errs.Error) {
-	lastUserAgent := c.Request.UserAgent()
-	if len(lastUserAgent) > maxLastUserAgentBytes {
-		maxBytes := maxLastUserAgentBytes
-		for maxBytes > 0 && !utf8.RuneStart(lastUserAgent[maxBytes]) {
-			maxBytes--
-		}
-		lastUserAgent = lastUserAgent[:maxBytes]
-	}
+	lastUserAgent, clientIP := clientInfo(c)
 
 	var expiresAt time.Time
-	err := db.R.QueryRow(c.Request.Context(), updateSessionClientSQL, id, sessionTokenHash, c.ClientIP(), lastUserAgent, time.Now().Add(cfg.C.PermSessionTokenTTL)).Scan(&expiresAt)
+	err := db.R.QueryRow(c.Request.Context(), updateSessionClientSQL, id, sessionTokenHash, clientIP, lastUserAgent, time.Now().Add(cfg.C.PermSessionTokenTTL)).Scan(&expiresAt)
 	if err != nil {
 		return expiresAt, errs.CreatePGError(err, "用户会话", "Failed to update session")
+	}
+	return expiresAt, nil
+}
+
+// rotateSessionClientSQL 轮换会话令牌哈希，WHERE 同时匹配旧哈希，并发刷新时只有一个请求成功。
+const rotateSessionClientSQL = `
+UPDATE user_sessions
+SET last_used_at = now(),
+    session_token_hash = $2,
+    last_ip = $3,
+    last_user_agent = $4,
+    expires_at = CASE
+        WHEN is_temporary = false THEN $5
+        ELSE expires_at
+    END
+WHERE id = $1 AND session_token_hash = $6 AND revoked_at IS NULL
+RETURNING expires_at
+`
+
+// RotateSessionClient 用旧令牌哈希做条件轮换；旧哈希已被并发换走时返回 invalid_token。
+func RotateSessionClient(
+	c *gin.Context,
+	id uuid.UUID,
+	oldSessionTokenHash string,
+	newSessionTokenHash string,
+) (time.Time, *errs.Error) {
+	lastUserAgent, clientIP := clientInfo(c)
+
+	var expiresAt time.Time
+	err := db.R.QueryRow(c.Request.Context(), rotateSessionClientSQL,
+		id, newSessionTokenHash, clientIP, lastUserAgent,
+		time.Now().Add(cfg.C.PermSessionTokenTTL), oldSessionTokenHash,
+	).Scan(&expiresAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return expiresAt, errs.InvalidTokenError().AppendDetails("会话令牌已失效，请重新登录")
+		}
+		return expiresAt, errs.CreatePGError(err, "用户会话", "Failed to rotate session")
 	}
 	return expiresAt, nil
 }

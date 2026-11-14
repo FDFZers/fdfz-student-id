@@ -16,14 +16,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// 本文件集中存放各领域对象的 JSON 渲染函数，handler 不再自行组装响应字段。
+// 本文件集中存放各领域对象的 JSON 渲染函数。
 
 // ---------------------------------------------------------------------------
 // 应用
 // ---------------------------------------------------------------------------
 
-// AppInfo 是应用对外的统一表示，管理端、授权确认页与用户授权列表共用。
-// 注意：不包含 secret_hash 等敏感字段；icon_path 相对 API v1 前缀（如 app/12/icon）。
+// AppInfo 是应用对外的统一表示；icon_path 相对 API v1 前缀（如 app/12/icon）。
 type AppInfo struct {
 	ID             int64           `json:"id"`
 	Namespace      string          `json:"namespace"`
@@ -41,7 +40,6 @@ type AppInfo struct {
 	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
-// AppJSON 把应用实体统一渲染为 AppInfo；nil 应用返回 nil。
 func AppJSON(app *model.OAuthApp) *AppInfo {
 	if app == nil {
 		return nil
@@ -74,7 +72,6 @@ func AppJSON(app *model.OAuthApp) *AppInfo {
 	}
 }
 
-// AppsJSON 批量渲染应用实体。
 func AppsJSON(apps []*model.OAuthApp) []*AppInfo {
 	result := make([]*AppInfo, 0, len(apps))
 	for _, app := range apps {
@@ -185,7 +182,6 @@ func UsersJSON(ctx context.Context, claims *model.RegisteredTokenClaims, targetU
 // 权限定义
 // ---------------------------------------------------------------------------
 
-// DefJSON 把权限定义渲染为 API 响应。PermissionDef 本身只有 AppID，命名空间需由调用方按应用提供。
 func DefJSON(def *model.PermissionDef, namespace string) gin.H {
 	return gin.H{
 		"id":          def.ID,
@@ -201,7 +197,6 @@ func DefJSON(def *model.PermissionDef, namespace string) gin.H {
 	}
 }
 
-// DefsJSON 把同一应用内的多个权限定义渲染为数组。
 func DefsJSON(defs []*model.PermissionDef, namespace string) []gin.H {
 	data := make([]gin.H, 0, len(defs))
 	for _, def := range defs {
@@ -210,7 +205,7 @@ func DefsJSON(defs []*model.PermissionDef, namespace string) []gin.H {
 	return data
 }
 
-// DefsJSONMultiApp 为跨应用查询批量补全命名空间；会查询全部未删除应用，仅适合管理端小批量结果。
+// DefsJSONMultiApp 通过全量应用列表补全命名空间，仅适合管理端小批量结果。
 func DefsJSONMultiApp(ctx context.Context, defs []*model.PermissionDef) ([]gin.H, *errs.Error) {
 	apps, err := appsvc.ListAllApps(ctx)
 	if err != nil {
@@ -232,7 +227,6 @@ func DefsJSONMultiApp(ctx context.Context, defs []*model.PermissionDef) ([]gin.H
 // 用户组与直接授权
 // ---------------------------------------------------------------------------
 
-// GroupJSON 把用户组（Role）渲染为 API 响应。
 func GroupJSON(role *model.Role) gin.H {
 	return gin.H{
 		"id":         role.ID,
@@ -245,14 +239,12 @@ func GroupJSON(role *model.Role) gin.H {
 	}
 }
 
-// GroupSearchJSON 在用户组基础上补充所属应用命名空间，供跨应用搜索使用。
 func GroupSearchJSON(role *model.Role, namespace string) gin.H {
 	data := GroupJSON(role)
 	data["app_namespace"] = namespace
 	return data
 }
 
-// GroupUserJSON 把用户组成员渲染为 API 响应。
 func GroupUserJSON(member *userpermsvc.RoleUser) gin.H {
 	return gin.H{
 		"user_id":     member.UserID,
@@ -266,7 +258,6 @@ func GroupUserJSON(member *userpermsvc.RoleUser) gin.H {
 	}
 }
 
-// GroupUsersJSON 把用户组成员列表渲染为数组。
 func GroupUsersJSON(users []*userpermsvc.RoleUser) []gin.H {
 	data := make([]gin.H, 0, len(users))
 	for _, member := range users {
@@ -275,7 +266,6 @@ func GroupUsersJSON(users []*userpermsvc.RoleUser) []gin.H {
 	return data
 }
 
-// GrantJSON 把用户直接授权记录渲染为 API 响应。
 func GrantJSON(grant *model.UserPermissionGrant) gin.H {
 	return gin.H{
 		"id":                 grant.ID,
@@ -291,7 +281,6 @@ func GrantJSON(grant *model.UserPermissionGrant) gin.H {
 	}
 }
 
-// GrantsJSON 把用户直接授权列表渲染为数组。
 func GrantsJSON(grants []*model.UserPermissionGrant) []gin.H {
 	data := make([]gin.H, 0, len(grants))
 	for _, grant := range grants {
@@ -340,7 +329,6 @@ func SessionInfos(sessions []*model.UserSession, currentID *uuid.UUID) []Session
 // 注册申请
 // ---------------------------------------------------------------------------
 
-// RegisterRequestJSON 渲染注册申请详情；不返回密码哈希。
 func RegisterRequestJSON(request *model.RegisterRequest) gin.H {
 	return gin.H{
 		"id":               request.ID,
@@ -359,7 +347,6 @@ func RegisterRequestJSON(request *model.RegisterRequest) gin.H {
 	}
 }
 
-// RegisterRequestStatusJSON 渲染注册申请的审核状态，供未登录查询使用。
 func RegisterRequestStatusJSON(request *model.RegisterRequest) gin.H {
 	return gin.H{
 		"status":         request.Status,
@@ -372,7 +359,6 @@ func RegisterRequestStatusJSON(request *model.RegisterRequest) gin.H {
 // 用户关系
 // ---------------------------------------------------------------------------
 
-// RelationshipJSON 渲染当前用户与目标用户的关注关系。
 func RelationshipJSON(relationship model.Relationship) gin.H {
 	return gin.H{"relationship": relationship}
 }
@@ -381,7 +367,6 @@ func RelationshipJSON(relationship model.Relationship) gin.H {
 // 用户封禁
 // ---------------------------------------------------------------------------
 
-// BanJSON 渲染用户封禁信息；ban 为 nil 表示未封禁。
 func BanJSON(ban *model.UserBan) gin.H {
 	if ban == nil {
 		return gin.H{"banned": false}

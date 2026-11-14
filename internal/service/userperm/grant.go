@@ -165,10 +165,8 @@ func collectUserPermissionGrants(rows pgx.Rows, item string) ([]*model.UserPermi
 // ---------------------------------------------------------------------------
 
 // listUserEffectivePermissionsSQL 汇总用户的有效组权限与有效直接授权，返回完整权限串。
-// 组权限部分先展开 user_roles → role_permissions → 继承边，再拼上应用命名空间；
-// 直接授权部分要求权限值等于「授权应用命名空间:权限定义值」，以保证授权仍指向有效的权限定义。
 const listUserEffectivePermissionsSQL = `
-WITH RECURSIVE role_expanded AS (
+WITH RECURSIVE granted AS (
     SELECT rp.permission_id AS id
     FROM user_roles ur
     JOIN role_permissions rp ON rp.role_id = ur.role_id
@@ -176,25 +174,28 @@ WITH RECURSIVE role_expanded AS (
       AND (ur.valid_from  IS NULL OR ur.valid_from  <= now())
       AND (ur.valid_until IS NULL OR ur.valid_until >  now())
     UNION
+    SELECT pd.id
+    FROM user_permission_grants g
+    JOIN oauth_apps a ON a.id = g.granted_by_app_id
+        AND a.status = 'active' AND a.deleted_at IS NULL
+    JOIN permission_defs pd ON pd.app_id = a.id
+        AND g.permission = a.namespace || ':' || pd.value
+    WHERE g.user_id = $1
+      AND (g.valid_from  IS NULL OR g.valid_from  <= now())
+      AND (g.valid_until IS NULL OR g.valid_until >  now())
+),
+expanded AS (
+    SELECT id FROM granted
+    UNION
     SELECT pi.implied_permission_id
     FROM permission_implies pi
-    JOIN role_expanded r ON pi.permission_id = r.id
+    JOIN expanded e ON pi.permission_id = e.id
 )
 SELECT DISTINCT a.namespace || ':' || pd.value AS permission
 FROM permission_defs pd
 JOIN oauth_apps a ON a.id = pd.app_id
-JOIN role_expanded r ON r.id = pd.id
+JOIN expanded e ON e.id = pd.id
 WHERE a.status = 'active' AND a.deleted_at IS NULL
-UNION
-SELECT g.permission
-FROM user_permission_grants g
-JOIN oauth_apps a ON a.id = g.granted_by_app_id
-    AND a.status = 'active' AND a.deleted_at IS NULL
-JOIN permission_defs pd ON pd.app_id = a.id
-    AND g.permission = a.namespace || ':' || pd.value
-WHERE g.user_id = $1
-  AND (g.valid_from  IS NULL OR g.valid_from  <= now())
-  AND (g.valid_until IS NULL OR g.valid_until >  now())
 ORDER BY 1
 `
 

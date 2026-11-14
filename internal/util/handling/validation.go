@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// 输入校验使用的取值限制。
 const (
 	MaxAppRedirectURIs      = 10   // 单个应用允许配置的回调地址数量
 	MaxAppRequestedPerms    = 100  // 单个应用允许申请的权限数量
@@ -51,7 +50,7 @@ var emailBlockedDomains = map[string]struct{}{
 	"fdfz.top": {},
 }
 
-// imageMIMETypes 是允许上传的图片类型；SVG 等可携带脚本的类型不在白名单内。
+// imageMIMETypes 是允许上传的图片类型，不含可携带脚本的 SVG。
 var imageMIMETypes = map[string]struct{}{
 	"image/jpeg": {},
 	"image/png":  {},
@@ -335,7 +334,7 @@ func ValidateValidRange(validFrom, validUntil *time.Time) *errs.Error {
 	return nil
 }
 
-// ValidateAppNamespace 校验应用命名空间：小写字母开头、2-32 位，并拒绝系统保留命名空间。
+// ValidateAppNamespace 校验应用命名空间：小写字母开头、2-32 位。
 func ValidateAppNamespace(namespace string) *errs.Error {
 	if namespace == "" {
 		return errs.BadRequestError().AppendDetails("未提供命名空间")
@@ -348,7 +347,6 @@ func ValidateAppNamespace(namespace string) *errs.Error {
 	return nil
 }
 
-// ValidateAppName 校验应用名称：不能为空白，最长 128 个字符。
 func ValidateAppName(name string) *errs.Error {
 	if strings.TrimSpace(name) == "" {
 		return errs.BadRequestError().AppendDetails("未提供应用名称")
@@ -362,7 +360,6 @@ func ValidateAppName(name string) *errs.Error {
 	return nil
 }
 
-// ValidateAppDescription 校验应用描述长度（允许为空）。
 func ValidateAppDescription(description string) *errs.Error {
 	if containsNUL(description) {
 		return errs.BadRequestError().AppendDetails("应用描述格式错误")
@@ -373,7 +370,6 @@ func ValidateAppDescription(description string) *errs.Error {
 	return nil
 }
 
-// validateAppHTTPURL 校验一个 http/https 绝对地址：必须有主机、不允许携带用户信息或 fragment。
 func validateAppHTTPURL(raw, item string) *errs.Error {
 	if raw == "" {
 		return errs.BadRequestError().AppendDetails("未提供" + item)
@@ -398,7 +394,6 @@ func validateAppHTTPURL(raw, item string) *errs.Error {
 	return nil
 }
 
-// ValidateAppHomepageURL 校验应用主页地址；空字符串表示未设置。
 func ValidateAppHomepageURL(homepageURL string) *errs.Error {
 	if homepageURL == "" {
 		return nil
@@ -406,7 +401,6 @@ func ValidateAppHomepageURL(homepageURL string) *errs.Error {
 	return validateAppHTTPURL(homepageURL, "主页地址")
 }
 
-// ValidateAppClientType 校验客户端类型枚举取值。
 func ValidateAppClientType(clientType model.AppType) *errs.Error {
 	if !clientType.IsValid() {
 		return errs.BadRequestError().AppendDetails("客户端类型取值错误")
@@ -414,7 +408,6 @@ func ValidateAppClientType(clientType model.AppType) *errs.Error {
 	return nil
 }
 
-// ValidateAppRedirectURIs 校验回调地址列表：数量、长度、协议与格式。
 func ValidateAppRedirectURIs(redirectURIs []string) *errs.Error {
 	if len(redirectURIs) > MaxAppRedirectURIs {
 		return errs.BadRequestError().AppendDetails("回调地址数量过多")
@@ -427,7 +420,6 @@ func ValidateAppRedirectURIs(redirectURIs []string) *errs.Error {
 	return nil
 }
 
-// ValidateAppRequestedPermissions 校验应用申请的可授权权限：必须是完整的权限串且数量受限。
 func ValidateAppRequestedPermissions(permissions []string) *errs.Error {
 	if len(permissions) > MaxAppRequestedPerms {
 		return errs.BadRequestError().AppendDetails("申请权限数量过多")
@@ -443,7 +435,7 @@ func ValidateAppRequestedPermissions(permissions []string) *errs.Error {
 	return nil
 }
 
-// ValidateAppOwnerID 校验应用所有者 ID 为正整数；用户是否存在由调用方另行确认。
+// ValidateAppOwnerID 校验应用所有者 ID；用户是否存在由调用方确认。
 func ValidateAppOwnerID(ownerUserID int64) *errs.Error {
 	if ownerUserID <= 0 {
 		return errs.BadRequestError().AppendDetails("未提供应用所有者")
@@ -451,8 +443,6 @@ func ValidateAppOwnerID(ownerUserID int64) *errs.Error {
 	return nil
 }
 
-// ValidateImageUpload 校验单张图片上传：最多 1 个文件，仅允许 JPEG/PNG/WebP。
-// item 用于错误文案（如「头像」「佐证图片」）；返回文件、检测到的 MIME 类型与固定扩展名。
 func ValidateImageUpload(files []*multipart.FileHeader, item string) (*multipart.FileHeader, string, string, *errs.Error) {
 	switch {
 	case len(files) == 0:
@@ -473,7 +463,7 @@ func ValidateImageUpload(files []*multipart.FileHeader, item string) (*multipart
 	return fileHeader, mimeType, extension, nil
 }
 
-// ValidateUserID 校验用户 ID 为正整数；用户是否存在由调用方另行确认。
+// ValidateUserID 校验用户 ID；用户是否存在由调用方确认。
 func ValidateUserID(userID int64) *errs.Error {
 	if userID <= 0 {
 		return errs.BadRequestError().AppendDetails("用户 ID 格式错误")
@@ -481,7 +471,6 @@ func ValidateUserID(userID int64) *errs.Error {
 	return nil
 }
 
-// ValidateFutureTime 校验时间晚于当前时间；item 用于拼出错误文案。
 func ValidateFutureTime(t time.Time, item string) *errs.Error {
 	if !t.After(time.Now()) {
 		return errs.BadRequestError().AppendDetails(item + "必须晚于当前时间")
@@ -489,7 +478,7 @@ func ValidateFutureTime(t time.Time, item string) *errs.Error {
 	return nil
 }
 
-// ValidateVerificationCode 校验验证码非空；具体格式由各验证流程自行判断。
+// ValidateVerificationCode 只校验验证码非空，格式由各流程自行判断。
 func ValidateVerificationCode(code string) *errs.Error {
 	if code == "" {
 		return errs.BadRequestError().AppendDetails("未提供验证码")
@@ -553,15 +542,16 @@ func ValidateRegisterReviewStatus(status model.RegisterRequestStatus) *errs.Erro
 	return nil
 }
 
-// ValidateRegisterReviewComment 校验注册申请审核意见长度（允许为空）。
 func ValidateRegisterReviewComment(comment string) *errs.Error {
+	if containsNUL(comment) {
+		return errs.BadRequestError().AppendDetails("审核意见格式错误")
+	}
 	if utf8.RuneCountInString(comment) > MaxReviewCommentLength {
 		return errs.BadRequestError().AppendDetails("审核意见过长")
 	}
 	return nil
 }
 
-// ValidateUUID 校验 UUID 非空；item 用于拼出「未提供 xxx」错误文案。
 func ValidateUUID(id uuid.UUID, item string) *errs.Error {
 	if id == uuid.Nil {
 		return errs.BadRequestError().AppendDetails("未提供" + item)
@@ -569,7 +559,6 @@ func ValidateUUID(id uuid.UUID, item string) *errs.Error {
 	return nil
 }
 
-// ParseUUID 解析 UUID 字符串；格式非法时返回 bad_request。
 func ParseUUID(raw, item string) (uuid.UUID, *errs.Error) {
 	id, err := uuid.Parse(raw)
 	if err != nil {

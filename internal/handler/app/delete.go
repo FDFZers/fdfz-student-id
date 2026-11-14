@@ -13,8 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// deleteAppHandler 删除应用：全局 apps.delete 可删除任意应用，应用所有者可凭 app.delete
-// 删除自己的应用。软删除记录并清理用户授权与刷新令牌；图标在事务成功后尽力清理。
+// deleteAppHandler 删除应用：全局 apps.delete 可删除任意应用，应用所有者凭 app.delete 删除自己的应用。
 func deleteAppHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	a, err := handling.ResolveApp(c)
@@ -36,7 +35,6 @@ func deleteAppHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 图标文件按应用 ID 固定存放；删除应用后尽力清理，失败只记录日志
 	if err := filestoresvc.DeleteFile(appIconSlug(deleted.ID)); err != nil && err.HTTPCode != http.StatusNotFound {
 		slog.Warn("Failed to delete app icon file",
 			"app_id", deleted.ID, "slug", appIconSlug(deleted.ID), "error", err.Info.Error)

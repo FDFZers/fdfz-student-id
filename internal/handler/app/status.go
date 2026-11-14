@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// setAppStatus 管理员停用/启用应用：核心应用不允许停用，状态未变化时直接返回当前记录。
+// setAppStatus 停用或启用应用；核心应用不允许停用。
 func setAppStatus(c *gin.Context, status model.AppStatus) *errs.Error {
 	a, err := handling.ResolveApp(c)
 	if err != nil {
@@ -34,12 +34,12 @@ func setAppStatus(c *gin.Context, status model.AppStatus) *errs.Error {
 	return nil
 }
 
-// suspendAppHandler 管理员停用应用；停用后应用立即退出权限目录并删除全部刷新令牌。
+// suspendAppHandler 停用应用；停用后应用退出权限目录并删除全部刷新令牌。
 func suspendAppHandler(c *gin.Context) *errs.Error {
 	return setAppStatus(c, model.AppStatusSuspended)
 }
 
-// activateAppHandler 管理员启用应用，应用重新进入权限目录。
+// activateAppHandler 启用应用，应用重新进入权限目录。
 func activateAppHandler(c *gin.Context) *errs.Error {
 	return setAppStatus(c, model.AppStatusActive)
 }

@@ -16,7 +16,6 @@ const (
 	MaxPermissions = 128
 )
 
-// PermissionInfo 描述一个申请权限的授予情况。
 type PermissionInfo struct {
 	Permission  string `json:"permission"`
 	Description string `json:"description"`
@@ -52,7 +51,6 @@ func ParsePermissionParam(raw string) ([]string, *errs.Error) {
 	return permissions, nil
 }
 
-// ValidatePermissionsAgainstApp 校验权限都在应用登记的可申请范围内（精确匹配）。
 func ValidatePermissionsAgainstApp(app *model.OAuthApp, permissions []string) *errs.Error {
 	if app == nil {
 		return errs.BadRequestError().AppendDetails("应用不存在")
@@ -91,7 +89,7 @@ func ResolveRequestedPermissions(app *model.OAuthApp, raw string) ([]string, *er
 // 授予计算
 // ---------------------------------------------------------------------------
 
-// userEffectivePermissionSet 返回用户有效权限并展开继承，使 OAuth 与登录令牌判定一致。
+// userEffectivePermissionSet 返回展开继承后的权限，与登录令牌的判定保持一致。
 func userEffectivePermissionSet(ctx context.Context, userID int64) (map[string]struct{}, *errs.Error) {
 	effective, err := userpermsvc.ListUserEffectivePermissions(ctx, userID)
 	if err != nil {
@@ -106,7 +104,6 @@ func userEffectivePermissionSet(ctx context.Context, userID int64) (map[string]s
 	return set, nil
 }
 
-// ResolvePermissionInfos 标注每项权限是否可授予：定义存在、requestable、用户当前持有（含继承）。
 func ResolvePermissionInfos(ctx context.Context, userID int64, permissions []string) ([]PermissionInfo, *errs.Error) {
 	effectiveSet, err := userEffectivePermissionSet(ctx, userID)
 	if err != nil {
@@ -137,7 +134,6 @@ func ResolvePermissionInfos(ctx context.Context, userID int64, permissions []str
 	return infos, nil
 }
 
-// GrantedPermissions 提取实际授予的权限，去重并排序。
 func GrantedPermissions(infos []PermissionInfo) []string {
 	permissions := make([]string, 0, len(infos))
 	for _, info := range infos {
@@ -148,7 +144,6 @@ func GrantedPermissions(infos []PermissionInfo) []string {
 	return slicex.SortDedupe(permissions)
 }
 
-// restrictToRequested 从 granted 中筛出 requested 范围内的权限，并保持排序去重。
 func restrictToRequested(granted, requested []string) []string {
 	allowed := make(map[string]struct{}, len(requested))
 	for _, permission := range requested {
@@ -163,8 +158,6 @@ func restrictToRequested(granted, requested []string) []string {
 	return slicex.SortDedupe(result)
 }
 
-// effectiveGrantPermissions 重新计算授权在当前时刻仍可用的权限：
-// 用户仍持有、权限定义存在且 requestable。授权码兑换、刷新与设备码兑换都会重算。
 func effectiveGrantPermissions(ctx context.Context, userID int64, permissions []string) ([]string, *errs.Error) {
 	if len(permissions) == 0 {
 		return []string{}, nil

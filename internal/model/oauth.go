@@ -11,17 +11,15 @@ import (
 // ENUM(confidential, public, confidential_device, public_device)
 type AppType string
 
-// IsConfidential 判断该客户端类型是否需要客户端密钥（普通与设备流的 confidential 类型）。
 func (t AppType) IsConfidential() bool {
 	return t == AppTypeConfidential || t == AppTypeConfidentialDevice
 }
 
-// IsDevice 判断该客户端类型是否为设备流客户端（confidential_device 或 public_device）。
 func (t AppType) IsDevice() bool {
 	return t == AppTypeConfidentialDevice || t == AppTypePublicDevice
 }
 
-// OAuthDeviceCodeStatus 设备授权码状态：pending 等待用户在浏览器确认、approved 已同意、denied 已拒绝。
+// OAuthDeviceCodeStatus 设备授权码状态：待用户确认、已同意、已拒绝。
 // ENUM(pending, approved, denied)
 type OAuthDeviceCodeStatus string
 

@@ -46,12 +46,10 @@ func HasUsersNamespacePerm(claims *model.RegisteredTokenClaims) bool {
 	return false
 }
 
-// IsGlobalAppAdmin 判断调用方是否拥有全局应用管理写权限（可修改命名空间与所有者）。
 func IsGlobalAppAdmin(claims *model.RegisteredTokenClaims) bool {
 	return permsvc.HasPermission(claims, permsvc.PermAppsUpdate)
 }
 
-// IsGlobalAppReader 判断调用方是否拥有全局应用读取权限（可读取全部应用）。
 func IsGlobalAppReader(claims *model.RegisteredTokenClaims) bool {
 	return permsvc.HasPermission(claims, permsvc.PermAppsList)
 }

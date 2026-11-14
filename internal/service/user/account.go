@@ -121,6 +121,7 @@ func ScheduleAccountDeletion(
 	if err != nil {
 		return time.Time{}, errs.CreatePGError(err, "用户", "Failed to schedule account deletion")
 	}
+	db.R.Del(ctx, UserCacheKey(userID))
 	return scheduledAt, nil
 }
 
@@ -167,7 +168,12 @@ func CancelPendingAccountDeletion(ctx context.Context, userID int64) (bool, *err
 	if err != nil {
 		return false, errs.CreatePGError(err, "用户", "Failed to cancel account deletion")
 	}
-	return tag.RowsAffected() > 0, nil
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	// updated_at 已变化，必须让用户缓存失效。
+	db.R.Del(ctx, UserCacheKey(userID))
+	return true, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -31,7 +31,6 @@ func consentRequestCacheKey(id string) string {
 	return "student_id:oauth:consent:" + id
 }
 
-// ttlSeconds 把时长向上取整为秒，保证 Redis EX 至少为 1 秒。
 func ttlSeconds(ttl time.Duration) int64 {
 	seconds := int64((ttl + time.Second - 1) / time.Second)
 	if seconds < 1 {
@@ -44,17 +43,16 @@ func ttlSeconds(ttl time.Duration) int64 {
 // 授权码
 // ---------------------------------------------------------------------------
 
-// authorizationCode 是 Redis 中的授权码记录；键使用授权码明文的 SHA-512 哈希。
 type authorizationCode struct {
-	AppID         int64     `json:"app_id"`
-	AuthID        int64     `json:"auth_id"`
-	UserID        int64     `json:"user_id"`
-	RedirectURI   string    `json:"redirect_uri"`
-	CodeChallenge string    `json:"code_challenge"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	AppID               int64     `json:"app_id"`
+	AuthID              int64     `json:"auth_id"`
+	UserID              int64     `json:"user_id"`
+	RedirectURI         string    `json:"redirect_uri"`
+	RedirectURIProvided bool      `json:"redirect_uri_provided"`
+	CodeChallenge       string    `json:"code_challenge"`
+	ExpiresAt           time.Time `json:"expires_at"`
 }
 
-// getDelScript 原子读取并删除键，用于一次性消费授权码。
 var getDelScript = redis.NewScript(`
 local value = redis.call('GET', KEYS[1])
 if value then
@@ -63,7 +61,6 @@ end
 return value
 `)
 
-// storeAuthorizationCode 生成授权码明文并写入 Redis。
 func storeAuthorizationCode(ctx context.Context, record *authorizationCode) (string, *errs.Error) {
 	code, err := crypto.GenerateCode(64, crypto.TokenCharset)
 	if err != nil {
@@ -80,8 +77,7 @@ func storeAuthorizationCode(ctx context.Context, record *authorizationCode) (str
 	return code, nil
 }
 
-// takeAuthorizationCode 原子取出并删除授权码；不存在或已过期返回 (nil, nil)。
-// 取出后无论后续校验是否通过，授权码都不会再次可用。
+// takeAuthorizationCode 取出授权码后立即删除，即使后续校验失败也不可复用。
 func takeAuthorizationCode(ctx context.Context, code string) (*authorizationCode, *errs.Error) {
 	value, err := getDelScript.Run(ctx, db.R, []string{authCodeCacheKey(crypto.HashSHA512(code))}).Text()
 	if err != nil {
@@ -105,7 +101,6 @@ func takeAuthorizationCode(ctx context.Context, code string) (*authorizationCode
 // 设备码
 // ---------------------------------------------------------------------------
 
-// deviceCodeRecord 是 Redis 中的设备码记录；时间字段统一为 Unix 毫秒。
 type deviceCodeRecord struct {
 	UserCode        string                      `json:"user_code"`
 	AppID           int64                       `json:"app_id"`
@@ -118,7 +113,6 @@ type deviceCodeRecord struct {
 	ExpiresAt       int64                       `json:"expires_at"`     // Unix 毫秒
 }
 
-// storeDeviceCodeScript 原子写入用户短码映射与设备码记录；键冲突返回 0。
 var storeDeviceCodeScript = redis.NewScript(`
 if redis.call('EXISTS', KEYS[1]) == 1 or redis.call('EXISTS', KEYS[2]) == 1 then
     return 0
@@ -128,7 +122,6 @@ redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
 return 1
 `)
 
-// tryStoreDeviceCode 写入设备码；返回 false 表示键冲突。
 func tryStoreDeviceCode(
 	ctx context.Context,
 	deviceCode string,
@@ -151,7 +144,6 @@ func tryStoreDeviceCode(
 	return result == 1, nil
 }
 
-// getDeviceCodeByUserCode 按用户短码查询设备码，同时返回设备码哈希；不存在返回 (nil, "", nil)。
 func getDeviceCodeByUserCode(ctx context.Context, userCode string) (*deviceCodeRecord, string, *errs.Error) {
 	deviceHash, e := db.R.Get(ctx, deviceUserCodeCacheKey(userCode)).Result()
 	if e != nil {
@@ -167,7 +159,6 @@ func getDeviceCodeByUserCode(ctx context.Context, userCode string) (*deviceCodeR
 	return record, deviceHash, nil
 }
 
-// getDeviceCodeByHash 按设备码哈希查询记录；不存在返回 (nil, nil)。
 func getDeviceCodeByHash(ctx context.Context, deviceHash string) (*deviceCodeRecord, *errs.Error) {
 	payload, err := db.R.Get(ctx, deviceCodeCacheKey(deviceHash)).Bytes()
 	if err != nil {
@@ -179,15 +170,13 @@ func getDeviceCodeByHash(ctx context.Context, deviceHash string) (*deviceCodeRec
 
 	var record deviceCodeRecord
 	if err := json.Unmarshal(payload, &record); err != nil {
-		// 数据损坏时删除脏键，避免持续报错。
 		_ = db.R.Del(ctx, deviceCodeCacheKey(deviceHash)).Err()
 		return nil, errs.CreateAndLogInternalError(err, "Failed to unmarshal oauth device code").AppendDetails("设备码解析失败")
 	}
 	return &record, nil
 }
 
-// decideDeviceCodeScript 原子校验并更新设备码，只允许从 pending 迁移。
-// 返回 1 成功、0 不存在或已处理、-1 已过期。
+// 只允许从 pending 迁移；返回 1 成功、0 不存在或已处理、-1 已过期。
 var decideDeviceCodeScript = redis.NewScript(`
 local raw = redis.call('GET', KEYS[1])
 if not raw then
@@ -209,7 +198,6 @@ redis.call('SET', KEYS[1], cjson.encode(data), 'KEEPTTL')
 return 1
 `)
 
-// decideDeviceCode 更新设备码状态；返回 1 成功、0 已处理、-1 已过期。
 func decideDeviceCode(
 	ctx context.Context,
 	deviceHash string,
@@ -225,15 +213,12 @@ func decideDeviceCode(
 	return result, nil
 }
 
-// devicePollEnvelope 是轮询脚本的返回结构。
-// Status 为 missing/invalid/expired/denied/pending/too_fast/approved；approved 时携带 Record。
 type devicePollEnvelope struct {
 	Status string            `json:"status"`
 	Record *deviceCodeRecord `json:"record"`
 }
 
-// pollDeviceCodeScript 原子处理轮询：校验应用/有效期，pending 时限制频率，
-// approved 时删除设备码并返回记录，保证只能换一次令牌；签发失败需重新发起授权。
+// approved 时删除设备码并返回记录，保证令牌只能换一次。
 var pollDeviceCodeScript = redis.NewScript(`
 local raw = redis.call('GET', KEYS[1])
 if not raw then
@@ -269,7 +254,6 @@ end
 return cjson.encode({status='pending'})
 `)
 
-// pollDeviceCode 处理一次轮询，expectedAppID 为当前客户端应用 ID。
 func pollDeviceCode(
 	ctx context.Context,
 	deviceCode string,
@@ -293,7 +277,6 @@ func pollDeviceCode(
 // 授权确认请求
 // ---------------------------------------------------------------------------
 
-// SaveConsentRequest 写入确认请求，TTL 由 OAUTH_CONSENT_REQUEST_TTL 控制。
 func SaveConsentRequest(ctx context.Context, req *ConsentRequest) *errs.Error {
 	if req == nil {
 		return errs.BadRequestError().AppendDetails("未提供授权请求")
@@ -304,8 +287,7 @@ func SaveConsentRequest(ctx context.Context, req *ConsentRequest) *errs.Error {
 	return nil
 }
 
-// TakeConsentRequest 读取并删除确认请求，保证同一 request_id 只能确认一次。
-// 不存在或已过期返回 (nil, nil)。
+// TakeConsentRequest 取出并删除确认请求；同一 request_id 只能确认一次。
 func TakeConsentRequest(ctx context.Context, id string) (*ConsentRequest, *errs.Error) {
 	raw, err := db.R.GetDel(ctx, consentRequestCacheKey(id)).Result()
 	if err != nil {

@@ -18,8 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// CoreNamespace 是内置 student_id 应用的命名空间：该应用承载全站权限定义，
-// 停用、删除或修改其命名空间都会导致权限目录失效。
+// CoreNamespace 是内置 student_id 应用的命名空间，停用、删除或改名都会导致权限目录失效。
 const CoreNamespace = "student_id"
 
 // appColumns 是 oauth_apps 的查询列清单；顺序必须与 scanApp 的 Scan 参数一致。
@@ -46,7 +45,6 @@ func scanApp(row pgx.Row, item string) (*model.OAuthApp, *errs.Error) {
 	return &a, nil
 }
 
-// collectApps 扫描应用列表并关闭 rows，供各列表查询复用。
 func collectApps(rows pgx.Rows, item string) ([]*model.OAuthApp, *errs.Error) {
 	defer rows.Close()
 
@@ -119,7 +117,6 @@ func ListAllApps(ctx context.Context) ([]*model.OAuthApp, *errs.Error) {
 	return collectApps(rows, "应用")
 }
 
-// createAppSQL 新建应用并回填全部字段。
 const createAppSQL = `
 INSERT INTO oauth_apps (
     namespace, owner_user_id, secret_hash, name, description, homepage_url,
@@ -127,7 +124,7 @@ INSERT INTO oauth_apps (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING ` + appColumns
 
-// CreateApp 新建应用；命名空间唯一性由数据库部分唯一索引保证（冲突时返回 conflict）。
+// CreateApp 新建应用；命名空间唯一性由数据库部分唯一索引保证，冲突返回 conflict。
 func CreateApp(ctx context.Context, a *model.OAuthApp) *errs.Error {
 	if a == nil {
 		return errs.BadRequestError().AppendDetails("未提供参数")
@@ -155,7 +152,6 @@ func CreateApp(ctx context.Context, a *model.OAuthApp) *errs.Error {
 	return nil
 }
 
-// updateAppSQL 整体更新应用可管理字段，并使用 updated_at 做乐观锁。
 const updateAppSQL = `
 UPDATE oauth_apps
 SET
@@ -175,15 +171,13 @@ const appExistsSQL = `SELECT EXISTS (SELECT 1 FROM oauth_apps WHERE id = $1 AND 
 
 const appRequestedPermsSQL = `SELECT requested_perms FROM oauth_apps WHERE id = $1`
 
-// updateGrantNamespaceSQL 把以旧命名空间开头的直接授权改写为新命名空间。
-// 注意：必须按 ":" 精确切分，不能用 LIKE，因为命名空间允许下划线（LIKE 通配符）。
+// 命名空间允许下划线，必须按 ":" 精确切分，不能用 LIKE 前缀匹配。
 const updateGrantNamespaceSQL = `
 UPDATE user_permission_grants
 SET permission = $2 || substr(permission, length($1) + 1)
 WHERE split_part(permission, ':', 1) = $1
 `
 
-// updateAuthorizationNamespaceSQL 改写 OAuth 授权记录中的权限数组。
 const updateAuthorizationNamespaceSQL = `
 UPDATE oauth_authorizations
 SET permissions = COALESCE(
@@ -205,7 +199,6 @@ WHERE EXISTS (
 )
 `
 
-// updateRequestedPermsNamespaceSQL 改写全部应用申请权限中的旧命名空间，保持申请意图。
 const updateRequestedPermsNamespaceSQL = `
 UPDATE oauth_apps
 SET requested_perms = COALESCE(
@@ -227,9 +220,8 @@ WHERE EXISTS (
 )
 `
 
-// UpdateApp 整体更新应用字段：oldNamespace 用于在命名空间变化时级联改写授权中的权限串。
-// expectedUpdatedAt 须为调用方读取应用时的 updated_at 原值（乐观锁），不一致时返回 409。
-// 命名空间变化后触发权限目录异步重载。
+// UpdateApp 整体更新应用；expectedUpdatedAt 为读取时的 updated_at 原值，不一致返回 409。
+// 命名空间变化时级联改写授权中的权限串并触发权限目录重载。
 func UpdateApp(
 	ctx context.Context,
 	dh db.Handle,
@@ -258,7 +250,6 @@ func UpdateApp(
 		_ = tx.Rollback(ctx)
 	}()
 
-	// 记录更新前的申请权限，用于判断是否需要强制用户重新授权。
 	var oldRequestedPerms []string
 	if e := tx.QueryRow(ctx, appRequestedPermsSQL, a.ID).Scan(&oldRequestedPerms); e != nil && !errors.Is(e, pgx.ErrNoRows) {
 		return errs.CreatePGError(e, "应用", "Failed to load app requested perms")
@@ -282,7 +273,6 @@ func UpdateApp(
 		return errs.NotFoundError().AppendDetails("应用不存在")
 	}
 
-	// 命名空间变化时级联改写所有以旧命名空间开头的权限串
 	if updated.Namespace != oldNamespace {
 		if _, e := tx.Exec(ctx, updateGrantNamespaceSQL, oldNamespace, updated.Namespace); e != nil {
 			return errs.CreatePGError(e, "应用授权", "Failed to cascade grant namespace")
@@ -294,7 +284,7 @@ func UpdateApp(
 			return errs.CreatePGError(e, "应用", "Failed to cascade requested perms namespace")
 		}
 
-		// 级联可能再次修改当前应用（requested_perms 命中旧命名空间），重新读取以保证返回值最新
+		// 级联可能改写当前应用的 requested_perms，重新读取以保证返回值最新。
 		refetched, err := scanApp(tx.QueryRow(ctx, getAppByIDSQL, a.ID), "应用")
 		if err != nil {
 			return err
@@ -305,7 +295,7 @@ func UpdateApp(
 		updated = refetched
 	}
 
-	// 申请权限发生变化时把该应用的全部授权置为 update_suspended，强制用户重新授权；
+	// 申请权限变化时挂起全部授权并吊销刷新令牌，强制用户重新授权。
 	if !slices.Equal(
 		normalizeRequestedPerms(oldRequestedPerms, oldNamespace, updated.Namespace),
 		normalizeRequestedPerms(updated.RequestedPerms, updated.Namespace, updated.Namespace),
@@ -329,21 +319,18 @@ func UpdateApp(
 	return nil
 }
 
-// setAppStatusSQL 更新应用状态并回填最新记录。
 const setAppStatusSQL = `
 UPDATE oauth_apps
 SET status = $2
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING ` + appColumns
 
-// deleteAppRefreshTokensSQL 删除应用全部授权记录下的刷新令牌。
 const deleteAppRefreshTokensSQL = `
 DELETE FROM oauth_refresh_tokens
 WHERE auth_id IN (SELECT id FROM oauth_authorizations WHERE app_id = $1)
 `
 
-// SetAppStatus 管理员设置应用状态；停用时同时删除刷新令牌，使应用立即失去续期能力。
-// 应用状态影响权限目录，成功后触发异步重载。
+// SetAppStatus 设置应用状态；状态影响权限目录，成功后触发异步重载。
 func SetAppStatus(ctx context.Context, dh db.Handle, appID int64, status model.AppStatus) (*model.OAuthApp, *errs.Error) {
 	tx, e := dh.Begin(ctx)
 	if e != nil {
@@ -375,27 +362,23 @@ func SetAppStatus(ctx context.Context, dh db.Handle, appID int64, status model.A
 	return a, nil
 }
 
-// deleteAppSQL 软删除应用并回填删除前的记录。
 const deleteAppSQL = `
 UPDATE oauth_apps
 SET deleted_at = now()
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING ` + appColumns
 
-// deleteAppAuthorizationsSQL 删除应用的全部用户授权，刷新令牌随外键级联删除。
+// 刷新令牌随授权记录的外键级联删除。
 const deleteAppAuthorizationsSQL = `DELETE FROM oauth_authorizations WHERE app_id = $1`
 
-// suspendAppAuthorizationsSQL 把应用的全部授权置为 update_suspended，用于申请权限变化后强制重新授权。
 const suspendAppAuthorizationsSQL = `UPDATE oauth_authorizations SET status = $2 WHERE app_id = $1`
 
-// deleteAppGrantsSQL 删除由该应用发起的直接授权，以及旧命名空间下的全部授权。
-// 命名空间在应用软删除后可被新应用复用，必须清理旧授权避免新应用继承历史授权。
+// 命名空间在软删除后可被新应用复用，必须清理旧授权以免被继承。
 const deleteAppGrantsSQL = `
 DELETE FROM user_permission_grants
 WHERE granted_by_app_id = $1 OR split_part(permission, ':', 1) = $2
 `
 
-// scrubAuthorizationNamespaceSQL 从其他应用的 OAuth 授权中移除旧命名空间的权限。
 const scrubAuthorizationNamespaceSQL = `
 UPDATE oauth_authorizations
 SET permissions = COALESCE(
@@ -412,7 +395,6 @@ WHERE EXISTS (
 )
 `
 
-// scrubRequestedPermsNamespaceSQL 从全部应用的申请权限中移除旧命名空间的权限。
 const scrubRequestedPermsNamespaceSQL = `
 UPDATE oauth_apps
 SET requested_perms = COALESCE(
@@ -429,8 +411,7 @@ WHERE EXISTS (
 )
 `
 
-// DeleteApp 管理员软删除应用：同时删除用户授权、相关直接授权与刷新令牌，权限目录随后重载。
-// 返回删除前的应用记录，供调用方清理外部资源。
+// DeleteApp 软删除应用并返回删除前记录，供调用方清理外部资源。
 func DeleteApp(ctx context.Context, dh db.Handle, appID int64) (*model.OAuthApp, *errs.Error) {
 	tx, e := dh.Begin(ctx)
 	if e != nil {
@@ -469,11 +450,9 @@ func DeleteApp(ctx context.Context, dh db.Handle, appID int64) (*model.OAuthApp,
 	return a, nil
 }
 
-// rotateAppSecretSQL 覆盖应用密钥哈希。
 const rotateAppSecretSQL = `UPDATE oauth_apps SET secret_hash = $2 WHERE id = $1 AND deleted_at IS NULL`
 
-// GenerateClientSecret 生成 64 位随机客户端密钥，并返回明文与 SHA-512 哈希。
-// 明文只在创建或重置响应中返回一次，数据库只保存哈希。
+// GenerateClientSecret 生成客户端密钥；明文只在创建或重置响应中返回一次，数据库只保存哈希。
 func GenerateClientSecret() (string, string, *errs.Error) {
 	secret, err := crypto.GenerateCode(64, crypto.TokenCharset)
 	if err != nil {
@@ -482,7 +461,6 @@ func GenerateClientSecret() (string, string, *errs.Error) {
 	return secret, crypto.HashSHA512(secret), nil
 }
 
-// RotateAppSecret 生成并写入新客户端密钥，返回明文（仅此一次）。
 func RotateAppSecret(ctx context.Context, appID int64) (string, *errs.Error) {
 	secret, hash, err := GenerateClientSecret()
 	if err != nil {
@@ -499,8 +477,7 @@ func RotateAppSecret(ctx context.Context, appID int64) (string, *errs.Error) {
 	return secret, nil
 }
 
-// normalizeRequestedPerms 把申请权限中的旧命名空间改写为新命名空间，排序去重后用于比较。
-// 这样仅修改命名空间（权限语义不变）时不会被误判为申请权限变化。
+// normalizeRequestedPerms 统一新旧命名空间后排序去重，避免仅改命名空间被误判为申请权限变化。
 func normalizeRequestedPerms(perms []string, fromNamespace, toNamespace string) []string {
 	normalized := make([]string, 0, len(perms))
 	for _, permission := range perms {

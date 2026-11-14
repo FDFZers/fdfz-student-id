@@ -18,13 +18,10 @@ import (
 )
 
 const (
-	// devicePollIntervalSeconds 是客户端允许的最小轮询间隔。
 	devicePollIntervalSeconds = 5
-	// deviceCodeInsertAttempts 是用户短码冲突时的最大重试次数。
-	deviceCodeInsertAttempts = 5
+	deviceCodeInsertAttempts  = 5
 )
 
-// DeviceAuthorization 是创建设备授权的响应。
 type DeviceAuthorization struct {
 	DeviceCode      string `json:"device_code"`
 	UserCode        string `json:"user_code"`
@@ -33,7 +30,6 @@ type DeviceAuthorization struct {
 	Interval        int32  `json:"interval"`
 }
 
-// DevicePreview 是设备确认页展示的请求详情。
 type DevicePreview struct {
 	App         *handling.AppInfo           `json:"app"`
 	UserCode    string                      `json:"user_code"`
@@ -42,8 +38,7 @@ type DevicePreview struct {
 	ExpiresAt   time.Time                   `json:"expires_at"`
 }
 
-// DeviceTokenResponse 是设备轮询的响应。
-// status 为 pending/denied/expired/approved；仅 approved 携带令牌，轮询过快返回 429。
+// DeviceTokenResponse 的 status 为 pending/denied/expired/approved；仅 approved 携带令牌，轮询过快返回 429。
 type DeviceTokenResponse struct {
 	Status       string   `json:"status"`
 	AccessToken  string   `json:"access_token,omitempty"`
@@ -57,8 +52,7 @@ type DeviceTokenResponse struct {
 // 发起
 // ---------------------------------------------------------------------------
 
-// StartDeviceAuthorization 为设备流客户端创建设备码与用户短码。
-// 仅 *_device 类型可用；permission 为空时使用应用登记的全部可申请权限。
+// StartDeviceAuthorization 仅适用于 *_device 类型；permission 为空时使用应用登记的全部可申请权限。
 func StartDeviceAuthorization(
 	ctx context.Context,
 	client *model.OAuthApp,
@@ -126,8 +120,7 @@ func StartDeviceAuthorization(
 // 确认页
 // ---------------------------------------------------------------------------
 
-// GetDeviceAuthorization 按用户短码查询设备授权，供浏览器确认页展示。
-// 不存在、已过期或应用已停用时返回 404；granted 按当前用户权限计算。
+// GetDeviceAuthorization 返回设备授权详情；Granted 按当前用户有效权限计算。
 func GetDeviceAuthorization(
 	ctx context.Context,
 	userID int64,
@@ -171,8 +164,7 @@ func GetDeviceAuthorization(
 	}, nil
 }
 
-// DecideDeviceAuthorization 处理确认页的同意/拒绝。
-// 状态通过 Lua 脚本原子更新，只允许从 pending 迁移；permissions 非 nil 时按子集收窄。
+// DecideDeviceAuthorization 通过 Lua 脚本原子更新状态，只允许从 pending 迁移；permissions 非 nil 时按子集收窄。
 func DecideDeviceAuthorization(
 	ctx context.Context,
 	userID int64,
@@ -248,7 +240,6 @@ func DecideDeviceAuthorization(
 	return deviceDecisionResult(result)
 }
 
-// deviceDecisionResult 映射决策脚本返回值：1 成功、0 已处理、-1 已过期。
 func deviceDecisionResult(result int64) *errs.Error {
 	switch result {
 	case 1:
@@ -264,8 +255,7 @@ func deviceDecisionResult(result int64) *errs.Error {
 // 轮询
 // ---------------------------------------------------------------------------
 
-// ExchangeDeviceCode 处理设备轮询：pending/denied/expired/approved。
-// 已批准的设备码在脚本内即被删除，保证同一设备码只能换一次令牌。
+// ExchangeDeviceCode 轮询设备码；已批准的设备码在脚本内即被删除，保证只能换一次令牌。
 func ExchangeDeviceCode(
 	ctx context.Context,
 	client *model.OAuthApp,
@@ -327,7 +317,7 @@ func ExchangeDeviceCode(
 		return nil, errs.CreateAndLogInternalError(e, "Failed to generate oauth refresh token").AppendDetails("令牌生成失败")
 	}
 
-	// 设备码已被消费，先生成访问令牌再写库。
+	// 设备码已被消费，签发失败只能重新发起授权。
 	accessToken, expiresIn, e := issueAccessToken(record.UserID, record.AppID, record.AuthID, permissions)
 	if e != nil {
 		return nil, errs.CreateAndLogInternalError(e, "Failed to issue oauth access token").AppendDetails("令牌生成失败")
@@ -353,7 +343,6 @@ func ExchangeDeviceCode(
 // 工具
 // ---------------------------------------------------------------------------
 
-// NormalizeUserCode 把用户输入规范化为 XXXX-XXXX；长度不是 8 时返回空串。
 func NormalizeUserCode(raw string) string {
 	var builder strings.Builder
 	for _, r := range strings.ToUpper(strings.TrimSpace(raw)) {
@@ -368,7 +357,6 @@ func NormalizeUserCode(raw string) string {
 	return code[:4] + "-" + code[4:]
 }
 
-// verificationURI 返回设备确认页地址（认证前端 /oauth）。
 func verificationURI() string {
 	return strings.TrimRight(cfg.C.AuthFrontendURL, "/") + "/oauth"
 }

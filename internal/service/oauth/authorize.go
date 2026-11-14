@@ -34,20 +34,19 @@ type AuthorizationParams struct {
 	CodeChallenge string // 可选，提供时按 SHA-512 校验
 }
 
-// ConsentRequest 是暂存在 Redis 的确认请求。
-// 授权页只持有 request_id，回调地址、code_challenge、state 均以服务端记录为准。
+// ConsentRequest 是暂存在 Redis 的确认请求，回调地址、code_challenge 与 state 以服务端记录为准。
 type ConsentRequest struct {
-	ID            string    `json:"id"`
-	UserID        int64     `json:"user_id"`
-	AppID         int64     `json:"app_id"`
-	RedirectURI   string    `json:"redirect_uri"`
-	State         string    `json:"state"`
-	Permissions   []string  `json:"permissions"`
-	CodeChallenge string    `json:"code_challenge"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID                  string    `json:"id"`
+	UserID              int64     `json:"user_id"`
+	AppID               int64     `json:"app_id"`
+	RedirectURI         string    `json:"redirect_uri"`
+	RedirectURIProvided bool      `json:"redirect_uri_provided"`
+	State               string    `json:"state"`
+	Permissions         []string  `json:"permissions"`
+	CodeChallenge       string    `json:"code_challenge"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
-// AuthorizationPreview 是授权确认页展示的请求详情。
 type AuthorizationPreview struct {
 	RequestID         string            `json:"request_id"`
 	ExpiresIn         int64             `json:"expires_in"`
@@ -62,7 +61,7 @@ type AuthorizationPreview struct {
 // 预览
 // ---------------------------------------------------------------------------
 
-// PreviewAuthorization 校验客户端、回调地址、权限与 code_challenge，并写入 Redis 确认请求。
+// PreviewAuthorization 返回授权确认页预览，并把确认请求写入 Redis。
 func PreviewAuthorization(
 	ctx context.Context,
 	userID int64,
@@ -99,6 +98,9 @@ func PreviewAuthorization(
 	if !crypto.ValidCodeChallenge(params.CodeChallenge) {
 		return nil, errs.BadRequestError().AppendDetails("code_challenge 格式错误")
 	}
+	if !app.ClientType.IsConfidential() && params.CodeChallenge == "" {
+		return nil, errs.BadRequestError().AppendDetails("公开客户端必须使用 PKCE（code_challenge）")
+	}
 
 	infos, err := ResolvePermissionInfos(ctx, userID, permissions)
 	if err != nil {
@@ -123,14 +125,15 @@ func PreviewAuthorization(
 	}
 
 	request := &ConsentRequest{
-		ID:            uuid.NewString(),
-		UserID:        userID,
-		AppID:         app.ID,
-		RedirectURI:   redirectURI,
-		State:         params.State,
-		Permissions:   permissions,
-		CodeChallenge: params.CodeChallenge,
-		CreatedAt:     time.Now(),
+		ID:                  uuid.NewString(),
+		UserID:              userID,
+		AppID:               app.ID,
+		RedirectURI:         redirectURI,
+		RedirectURIProvided: params.RedirectURI != "",
+		State:               params.State,
+		Permissions:         permissions,
+		CodeChallenge:       params.CodeChallenge,
+		CreatedAt:           time.Now(),
 	}
 	if err := SaveConsentRequest(ctx, request); err != nil {
 		return nil, err
@@ -151,8 +154,7 @@ func PreviewAuthorization(
 // 确认
 // ---------------------------------------------------------------------------
 
-// ApproveAuthorization 处理同意/拒绝并返回客户端回调地址。
-// 拒绝时不修改授权；permissions 非 nil 时表示只授予其中部分权限。
+// ApproveAuthorization 处理同意/拒绝并返回客户端回调地址；permissions 非 nil 时只授予其中部分权限。
 func ApproveAuthorization(
 	ctx context.Context,
 	userID int64,
@@ -181,9 +183,14 @@ func ApproveAuthorization(
 	if app.Status != model.AppStatusActive {
 		return "", errs.IllegalStateError().AppendDetails("应用已停用")
 	}
-	// 预览后应用可能修改申请权限，旧确认请求必须作废。
 	if err := ValidatePermissionsAgainstApp(app, request.Permissions); err != nil {
 		return "", errs.ConflictError().AppendDetails("应用申请权限已变更，请重新授权")
+	}
+	if !app.ClientType.IsConfidential() && request.CodeChallenge == "" {
+		return "", errs.ConflictError().AppendDetails("应用已改为公开客户端，请使用 PKCE 重新授权")
+	}
+	if resolved, e := resolveRedirectURI(app, request.RedirectURI); e != nil || resolved != request.RedirectURI {
+		return "", errs.ConflictError().AppendDetails("应用回调地址已变更，请重新授权")
 	}
 
 	if !approve {
@@ -200,7 +207,6 @@ func ApproveAuthorization(
 	}
 	granted := GrantedPermissions(infos)
 
-	// 部分授权时按子集收窄；提交未申请过的权限视为非法请求。
 	if permissions != nil {
 		selected := slicex.DedupeStrings(permissions)
 		for _, permission := range selected {
@@ -222,8 +228,7 @@ func ApproveAuthorization(
 	})
 }
 
-// createAuthorizationAndCode 更新授权并写入一次性授权码。
-// 授权码只保存 SHA-512 哈希；若 Redis 写入失败，用户需重新授权，不会留下可用授权码。
+// createAuthorizationAndCode 更新授权并写入一次性授权码，授权码只保存 SHA-512 哈希。
 func createAuthorizationAndCode(
 	ctx context.Context,
 	request *ConsentRequest,
@@ -239,12 +244,13 @@ func createAuthorizationAndCode(
 	}
 
 	code, err := storeAuthorizationCode(ctx, &authorizationCode{
-		AppID:         request.AppID,
-		AuthID:        authID,
-		UserID:        request.UserID,
-		RedirectURI:   request.RedirectURI,
-		CodeChallenge: request.CodeChallenge,
-		ExpiresAt:     time.Now().Add(cfg.C.OAuthCodeTTL),
+		AppID:               request.AppID,
+		AuthID:              authID,
+		UserID:              request.UserID,
+		RedirectURI:         request.RedirectURI,
+		RedirectURIProvided: request.RedirectURIProvided,
+		CodeChallenge:       request.CodeChallenge,
+		ExpiresAt:           time.Now().Add(cfg.C.OAuthCodeTTL),
 	})
 	if err != nil {
 		return "", err
@@ -257,7 +263,6 @@ func createAuthorizationAndCode(
 // ---------------------------------------------------------------------------
 
 // resolveRedirectURI 校验回调地址与应用登记值完全一致。
-// 未提供时，仅在应用只登记一个地址时自动使用。
 func resolveRedirectURI(app *model.OAuthApp, requested string) (string, *errs.Error) {
 	if requested == "" {
 		switch len(app.RedirectURIs) {
@@ -275,8 +280,7 @@ func resolveRedirectURI(app *model.OAuthApp, requested string) (string, *errs.Er
 	return requested, nil
 }
 
-// buildRedirectURL 在回调地址上合并查询参数。
-// 回调地址不允许 fragment（应用管理接口已校验），因此直接覆盖 RawQuery。
+// buildRedirectURL 在回调地址上合并查询参数；回调地址不含 fragment，直接覆盖 RawQuery。
 func buildRedirectURL(base string, values url.Values) (string, *errs.Error) {
 	parsed, err := url.Parse(base)
 	if err != nil {

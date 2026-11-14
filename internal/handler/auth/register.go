@@ -56,7 +56,6 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 校验学号与用户类型的组合（学生必填，其他类型不能填写）
 	if err := handling.ValidateRegisterStudentNum(req.Type, req.StudentNum); err != nil {
 		return err
 	}

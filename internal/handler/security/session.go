@@ -2,6 +2,7 @@ package security
 
 import (
 	"fdfz-student-id/internal/errs"
+	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
 	authsvc "fdfz-student-id/internal/service/auth"
 	permsvc "fdfz-student-id/internal/service/perm"
@@ -23,6 +24,19 @@ func currentSessionUUID(claims *model.RegisteredTokenClaims) *uuid.UUID {
 	}
 	if id, err := uuid.Parse(claims.ID); err == nil {
 		return &id
+	}
+	return nil
+}
+
+// requireSelfStepup 校验「操作自己」所需的提权令牌；不能只判断 claims.TokenType，
+// 否则 Authorization 里的提权 JWT 会绕过 ValidateStepupToken，作废令牌在 TTL 内仍可用。
+func requireSelfStepup(c *gin.Context, userID int64) *errs.Error {
+	if err := middleware.ValidateStepupToken(c); err != nil {
+		return err
+	}
+	stepupClaims := handling.GetClaimsOrNil(c)
+	if stepupClaims == nil || stepupClaims.UserID != userID {
+		return errs.PermissionDeniedError().AppendDetails("提权令牌不属于当前用户").Seal()
 	}
 	return nil
 }
@@ -86,17 +100,12 @@ func revokeSessionsHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 撤销自己的会话需提权令牌（提权令牌不携带权限），撤销他人需 users.session.write。
-	var allowed bool
+	// 撤销自己的会话需要有效的提权令牌；撤销他人需要 users.session.write。
 	if selfID == claims.UserID {
-		allowed = claims.TokenType == model.TokenTypeStepup
-	} else {
-		allowed = permsvc.HasPermission(claims, permsvc.PermUsersSessionWrite)
-	}
-	if !allowed {
-		if selfID == claims.UserID {
-			return errs.PermissionDeniedError().AppendDetails("撤销自己的会话需要提权令牌").Seal()
+		if err := requireSelfStepup(c, selfID); err != nil {
+			return err
 		}
+	} else if !permsvc.HasPermission(claims, permsvc.PermUsersSessionWrite) {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 
@@ -130,17 +139,12 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 撤销自己的会话需提权令牌（提权令牌不携带权限），撤销他人需 users.session.write。
-	var allowed bool
+	// 撤销自己的会话需要有效的提权令牌；撤销他人需要 users.session.write。
 	if selfID == claims.UserID {
-		allowed = claims.TokenType == model.TokenTypeStepup
-	} else {
-		allowed = permsvc.HasPermission(claims, permsvc.PermUsersSessionWrite)
-	}
-	if !allowed {
-		if selfID == claims.UserID {
-			return errs.PermissionDeniedError().AppendDetails("撤销自己的会话需要提权令牌").Seal()
+		if err := requireSelfStepup(c, selfID); err != nil {
+			return err
 		}
+	} else if !permsvc.HasPermission(claims, permsvc.PermUsersSessionWrite) {
 		return errs.PermissionDeniedError().AppendDetails("权限不足").Seal()
 	}
 

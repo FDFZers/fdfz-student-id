@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// appSearchCfg 是应用搜索配置；Table 只含 oauth_apps，附加条件由 handler 按调用方范围注入。
+// appSearchCfg 是应用搜索配置；附加条件由 handler 按调用方范围注入。
 var appSearchCfg = searchsvc.SearchConfig{
 	Table: "oauth_apps",
 	Item:  "应用",
@@ -44,8 +44,7 @@ var appSearchCfg = searchsvc.SearchConfig{
 	DefaultSortColumn: "id",
 }
 
-// appSearchConfigForClaims 按调用方范围生成搜索配置：
-// 全局管理员可搜索全部应用；普通所有者只能搜索自己名下的应用。
+// appSearchConfigForClaims 按调用方范围生成搜索配置：管理员可搜索全部应用，所有者只能搜索自己名下的应用。
 func appSearchConfigForClaims(claims *model.RegisteredTokenClaims) (*searchsvc.SearchConfig, *errs.Error) {
 	cfg := appSearchCfg
 	where := []sq.Sqlizer{sq.Expr("deleted_at IS NULL")}

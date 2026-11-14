@@ -13,6 +13,9 @@ import (
 // DefaultReloadThrottle 是自动重载的默认最小间隔：两次重载尝试之间至少间隔该时长。
 const DefaultReloadThrottle = time.Second
 
+// DefaultAutoReloadInterval 是周期性兜底重载的间隔：Notify 只在进程内有效，多副本部署靠它最终一致。
+const DefaultAutoReloadInterval = 30 * time.Second
+
 // ReloadStatus 是权限目录重载器的状态快照，通过 GET /permissions/reload/status 暴露。
 type ReloadStatus struct {
 	// LastAttemptAt 是最近一次重载尝试的时间（无论成功与否）。
@@ -33,6 +36,7 @@ type Reloader struct {
 	load func(context.Context) *errs.Error
 	// throttle 是两次重载尝试之间的最小间隔。
 	throttle time.Duration
+	interval time.Duration
 
 	// notify 为容量 1 的信号通道，重复 Notify 会合并成一次重载。
 	notify chan struct{}
@@ -56,6 +60,7 @@ func NewReloader(loader func(context.Context) *errs.Error, throttle time.Duratio
 	return &Reloader{
 		load:     loader,
 		throttle: throttle,
+		interval: DefaultAutoReloadInterval,
 		notify:   make(chan struct{}, 1),
 	}
 }
@@ -74,6 +79,11 @@ func (r *Reloader) Notify() {
 	r.status.Pending = true
 	r.mu.Unlock()
 
+	r.wake()
+}
+
+// wake 只投递唤醒信号，不改变 Pending 状态。
+func (r *Reloader) wake() {
 	select {
 	case r.notify <- struct{}{}:
 	default:
@@ -134,6 +144,9 @@ func (r *Reloader) loop(ctx context.Context) {
 		timerC <-chan time.Time
 	)
 
+	ticker := time.NewTicker(r.interval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -141,6 +154,9 @@ func (r *Reloader) loop(ctx context.Context) {
 				timer.Stop()
 			}
 			return
+
+		case <-ticker.C:
+			r.wake()
 
 		case <-r.notify:
 			// 已有待触发的定时器时不再重复安排，信号自然合并

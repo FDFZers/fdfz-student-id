@@ -20,7 +20,6 @@ func Dedupe[T comparable](items []T) []T {
 	return result
 }
 
-// DedupeStrings 是 Dedupe 的字符串版本，便于与既有调用保持一致。
 func DedupeStrings(items []string) []string {
 	return Dedupe(items)
 }

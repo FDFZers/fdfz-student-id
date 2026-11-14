@@ -62,7 +62,7 @@ func searchInfoHandler(c *gin.Context) *errs.Error {
 }
 
 // searchQueryHandler 执行用户搜索并返回总数与过滤后的用户资料；需要 users.list 权限。
-// 注意：搜索会返回已软删除用户（deleted_at 非空），由 usersJSON 输出 deleted 标记。
+// 搜索会返回已软删除用户（deleted_at 非空），由 usersJSON 输出 deleted 标记。
 func searchQueryHandler(c *gin.Context) *errs.Error {
 	var req searchsvc.SearchRequest
 	if err := handling.BindJSON(c, &req); err != nil {

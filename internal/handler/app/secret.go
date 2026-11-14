@@ -8,8 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// rotateSecretHandler 重置 confidential 客户端的密钥：旧密钥立即失效，新密钥明文仅返回一次。
-// 管理员与应用所有者均可操作（所有者需持有 app.update 权限）。
+// rotateSecretHandler 重置 confidential 客户端密钥，新密钥明文仅返回一次。
+// 管理员与应用所有者（需 app.update）均可操作。
 func rotateSecretHandler(c *gin.Context) *errs.Error {
 	a, err := managedApp(c, true)
 	if err != nil {

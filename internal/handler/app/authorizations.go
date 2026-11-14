@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// listAuthorizationsHandler 管理员查看指定用户的授权记录，需要 oauths.read。
+// listAuthorizationsHandler 查看授权记录：查自己需 oauth.read，查他人需 oauths.read。
 func listAuthorizationsHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
@@ -42,8 +42,7 @@ func listAuthorizationsHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
-// revokeAuthorizationHandler 撤销一条授权记录：
-// 撤销自己的授权需要 oauth.revoke，撤销他人的授权需要 oauths.revoke。
+// revokeAuthorizationHandler 撤销授权记录：撤销自己的需 oauth.revoke，撤销他人的需 oauths.revoke。
 func revokeAuthorizationHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 

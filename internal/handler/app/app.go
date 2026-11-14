@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// InitRoutes 注册 OAuth 应用管理路由：/api/internal 下的管理接口，以及对外公开的图标读取接口。
+// InitRoutes 注册 OAuth 应用管理路由。
 func InitRoutes(api, internal *gin.RouterGroup) {
 	group := internal.Group("/app")
 
@@ -31,18 +31,16 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	group.DELETE("/:appID/icon", middleware.RequireToken(), handling.Wrap("OAuth 应用图标删除失败", deleteIconHandler))
 
 	// 用户授权管理：查看/撤销自己授予应用的权限；oauths.* 可管理他人。
-	group.GET("/authorizations", handling.Wrap("授权列表获取失败", listAuthorizationsHandler))
-	group.GET("/authorizations/:id", handling.Wrap("授权列表获取失败", listAuthorizationsHandler))
-	group.DELETE("/authorizations/:authID", middleware.RequireUserToken(), handling.Wrap("授权撤销失败", revokeAuthorizationHandler))
+	// internal 组已拒绝 OAuth 令牌，stepup 令牌由处理器内的权限检查拒绝。
+	group.GET("/authorizations", middleware.RequireToken(), handling.Wrap("授权列表获取失败", listAuthorizationsHandler))
+	group.GET("/authorizations/:id", middleware.RequireToken(), handling.Wrap("授权列表获取失败", listAuthorizationsHandler))
+	group.DELETE("/authorizations/:authID", middleware.RequireToken(), handling.Wrap("授权撤销失败", revokeAuthorizationHandler))
 
 	// 图标需要出现在 OAuth 授权页等公开页面，走无需令牌的对外接口。
 	api.GET("/app/:appID/icon", handling.Wrap("OAuth 应用图标获取失败", getIconHandler))
 }
 
-// managedApp 解析路径参数 appID 并校验应用管理权限：
-// 全局管理员使用 apps.list 读取全部应用、使用 apps.update 修改全部应用；
-// 应用所有者使用 app.read/app.update，且应用必须归属于当前用户。
-// write 为 true 时要求写权限，否则要求读权限。
+// managedApp 解析路径中的 appID 并校验应用管理权限。
 func managedApp(c *gin.Context, write bool) (*model.OAuthApp, *errs.Error) {
 	claims := handling.MustGetClaims(c)
 
@@ -68,7 +66,6 @@ func managedApp(c *gin.Context, write bool) (*model.OAuthApp, *errs.Error) {
 	return a, nil
 }
 
-// respondApp 写出单个应用响应。
 func respondApp(c *gin.Context, a *model.OAuthApp) {
 	c.JSON(http.StatusOK, handling.AppJSON(a))
 }

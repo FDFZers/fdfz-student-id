@@ -164,11 +164,65 @@ func UpdatePermissionDef(ctx context.Context, id int64, description string, requ
 // deletePermissionDefSQL 删除权限定义，关联的组权限与继承边由外键级联清理。
 const deletePermissionDefSQL = `DELETE FROM permission_defs WHERE id = $1`
 
-// DeletePermissionDef 删除权限定义；成功后触发权限目录异步重载。
+const getPermissionDefForDeleteSQL = `
+SELECT a.namespace, d.value
+FROM permission_defs d
+JOIN oauth_apps a ON a.id = d.app_id
+WHERE d.id = $1
+`
+
+// user_permission_grants.permission 是纯文本且无外键，删除定义时须一并清理，否则重建同名权限会复活旧授权。
+const deletePermissionGrantsByValueSQL = `
+DELETE FROM user_permission_grants
+WHERE permission = $1
+`
+
+const scrubAuthorizationPermissionSQL = `
+UPDATE oauth_authorizations
+SET permissions = COALESCE(
+    (
+        SELECT array_agg(p)
+        FROM unnest(permissions) AS t(p)
+        WHERE p <> $1
+    ),
+    '{}'
+)
+WHERE $1 = ANY(permissions)
+`
+
+// DeletePermissionDef 删除权限定义，并在同一事务内清理直接授权与 OAuth 授权数组。
 func DeletePermissionDef(ctx context.Context, id int64) *errs.Error {
-	if _, err := db.R.Exec(ctx, deletePermissionDefSQL, id); err != nil {
+	tx, err := db.R.Begin(ctx)
+	if err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to begin transaction for deleting permission def")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var (
+		namespace string
+		value     string
+	)
+	if err := tx.QueryRow(ctx, getPermissionDefForDeleteSQL, id).Scan(&namespace, &value); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errs.NotFoundError().AppendDetails("权限定义不存在")
+		}
+		return errs.CreatePGError(err, "权限定义", "Failed to load permission def before delete")
+	}
+
+	fullPermission := permsvc.Render(namespace, value)
+	if _, err := tx.Exec(ctx, deletePermissionGrantsByValueSQL, fullPermission); err != nil {
+		return errs.CreatePGError(err, "权限定义", "Failed to delete permission grants")
+	}
+	if _, err := tx.Exec(ctx, scrubAuthorizationPermissionSQL, fullPermission); err != nil {
+		return errs.CreatePGError(err, "权限定义", "Failed to scrub oauth authorizations")
+	}
+	if _, err := tx.Exec(ctx, deletePermissionDefSQL, id); err != nil {
 		return errs.CreatePGError(err, "权限定义", "Failed to delete permission def")
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return errs.CreateAndLogInternalError(err, "Failed to commit permission def deletion")
+	}
+
 	permsvc.NotifyReload()
 	return nil
 }

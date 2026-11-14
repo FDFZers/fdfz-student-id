@@ -19,6 +19,7 @@ import (
 )
 
 // check2FAAttempts 消费一次二次验证尝试机会；必须在校验验证码前调用，且每次请求只调用一次。
+// 除会话级计数外还叠加用户级计数，防止重新登录重置 2FA 尝试次数。
 func check2FAAttempts(ctx context.Context, session *authsvc.AuthSession) *errs.Error {
 	attempts, err := authsvc.ConsumeAuthSessionAttempt(ctx, session.ID)
 	if err != nil {
@@ -26,6 +27,15 @@ func check2FAAttempts(ctx context.Context, session *authsvc.AuthSession) *errs.E
 	}
 	if attempts > authsvc.MaxAuthSessionAttempts {
 		return errs.RateLimitExceededError().AppendDetails("验证失败次数过多，请重新认证")
+	}
+	if session.UserID > 0 {
+		userAttempts, err := authsvc.ConsumeUser2FAAttempts(ctx, session.UserID)
+		if err != nil {
+			return err
+		}
+		if userAttempts > authsvc.MaxUser2FAAttempts {
+			return errs.RateLimitExceededError().AppendDetails("验证失败次数过多，请稍后再试")
+		}
 	}
 	return nil
 }
@@ -38,6 +48,9 @@ func complete2FA(ctx context.Context, session *authsvc.AuthSession) *errs.Error 
 	session.QQCode = null.String{}
 	if err := authsvc.UpdateAuthSession(ctx, session, false); err != nil {
 		return errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证状态更新失败")
+	}
+	if session.UserID > 0 {
+		authsvc.ResetUser2FAAttempts(ctx, session.UserID)
 	}
 	if err := authsvc.ResetAuthSessionAttempts(ctx, session.ID); err != nil {
 		slog.Warn("Failed to reset auth session attempts", "error", err.Info.Error, "session_id", session.ID)
@@ -337,6 +350,10 @@ func verifyTOTPHandler(c *gin.Context) *errs.Error {
 
 	if session.Passed2FA {
 		return errs.IllegalStateError().AppendDetails("二次验证已通过")
+	}
+	// 先校验格式再计数，无效输入不消耗尝试次数。
+	if err := handling.ValidateTOTPCode(req.Code); err != nil {
+		return err
 	}
 	if !session.TOTPSecret.Valid {
 		return errs.IllegalStateError().AppendDetails("不支持 TOTP 验证")

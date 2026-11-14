@@ -13,7 +13,6 @@ import (
 )
 
 // updateAppRequest 是修改应用的请求体；字段为 nil 表示不修改，空数组表示清空列表。
-// namespace、owner_user_id 为管理员专属字段，所有者提交会被拒绝。
 type updateAppRequest struct {
 	Namespace      *string        `json:"namespace"`
 	OwnerUserID    *int64         `json:"owner_user_id"`
@@ -25,7 +24,6 @@ type updateAppRequest struct {
 	RequestedPerms *[]string      `json:"requested_perms"`
 }
 
-// empty 判断请求是否未提供任何可修改字段。
 func (r *updateAppRequest) empty() bool {
 	return r.Namespace == nil &&
 		r.OwnerUserID == nil &&
@@ -38,8 +36,7 @@ func (r *updateAppRequest) empty() bool {
 }
 
 // updateAppHandler 修改应用：管理员可修改全部可管理字段，应用所有者只能修改资料类字段。
-// 命名空间变化会级联改写授权中的权限串；客户端类型在 public 与 confidential 之间转换时自动清理/生成密钥。
-// 写库使用 updated_at 乐观锁，应用并发修改时返回 409。
+// 命名空间变化会级联改写授权中的权限串；写库使用 updated_at 乐观锁，并发修改返回 409。
 func updateAppHandler(c *gin.Context) *errs.Error {
 	var req updateAppRequest
 	if err := handling.BindJSON(c, &req); err != nil {
@@ -57,8 +54,7 @@ func updateAppHandler(c *gin.Context) *errs.Error {
 	expectedUpdatedAt := a.UpdatedAt
 	oldNamespace := a.Namespace
 
-	// 命名空间与所有者仅管理员可改；所有者提交原值（未实际修改）时放行，
-	// 以兼容客户端携带完整对象的 PATCH 请求。状态变化走独立的停用/启用接口。
+	// 所有者原样提交命名空间与所有者字段时放行，兼容携带完整对象的 PATCH 请求。
 	if !handling.IsGlobalAppAdmin(claims) {
 		if req.Namespace != nil && *req.Namespace != a.Namespace {
 			return errs.PermissionDeniedError().AppendDetails("仅管理员可修改命名空间与所有者").Seal()
@@ -68,7 +64,6 @@ func updateAppHandler(c *gin.Context) *errs.Error {
 		}
 	}
 
-	// 逐个字段校验后合并到应用记录
 	if req.Namespace != nil && *req.Namespace != a.Namespace {
 		if a.Namespace == appsvc.CoreNamespace {
 			return errs.IllegalStateError().AppendDetails("核心应用的命名空间不允许修改").Seal()
@@ -133,7 +128,6 @@ func updateAppHandler(c *gin.Context) *errs.Error {
 		a.RequestedPerms = requestedPerms
 	}
 
-	// public 客户端不保留密钥；confidential 是否配置密钥由所有者通过密钥轮换自行决定。
 	if !a.ClientType.IsConfidential() {
 		a.SecretHash = null.String{}
 	}

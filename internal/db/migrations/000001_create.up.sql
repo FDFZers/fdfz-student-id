@@ -514,4 +514,91 @@ CREATE INDEX idx_oauth_refresh_tokens_auth_id
 CREATE INDEX idx_oauth_refresh_tokens_expires_at
     ON oauth_refresh_tokens (expires_at);
 
+-- =============================================
+-- 核心权限定义
+-- =============================================
+DO
+$$
+    DECLARE
+        core_app_id BIGINT;
+    BEGIN
+        SELECT id
+        INTO core_app_id
+        FROM oauth_apps
+        WHERE id = 1
+          AND namespace = 'student_id'
+          AND deleted_at IS NULL;
+
+        IF core_app_id IS NULL THEN
+            RAISE NOTICE '核心应用（id=1, namespace=student_id）不存在，跳过权限定义种子';
+            RETURN;
+        END IF;
+
+        INSERT INTO permission_defs (app_id, value, description, requestable)
+        VALUES
+            -- 注册申请
+            (core_app_id, 'register_requests.list', '查看注册申请列表', false),
+            (core_app_id, 'register_requests.read', '查看注册申请详情', false),
+            (core_app_id, 'register_requests.review', '审核注册申请', false),
+            -- 用户
+            (core_app_id, 'users.list', '搜索全部用户', false),
+            (core_app_id, 'users.delete', '删除用户', false),
+            -- 自己的资料
+            (core_app_id, 'user.profile.read.basic', '读取自己的基础资料', false),
+            (core_app_id, 'user.profile.read.identity', '读取自己的身份信息', false),
+            (core_app_id, 'user.profile.read.real_name', '读取自己的真实姓名', false),
+            (core_app_id, 'user.profile.read.about', '读取自己的简介与签名', false),
+            (core_app_id, 'user.profile.read.visibilities', '读取自己的资料可见性', false),
+            (core_app_id, 'user.profile.update.basic', '修改自己的基础资料', false),
+            (core_app_id, 'user.profile.update.about', '修改自己的简介与签名', false),
+            (core_app_id, 'user.profile.update.visibilities', '修改自己的资料可见性', false),
+            -- 他人的资料
+            (core_app_id, 'users.profile.read.basic', '读取他人的基础资料', false),
+            (core_app_id, 'users.profile.read.identity', '读取他人的身份信息', false),
+            (core_app_id, 'users.profile.read.real_name.allowed', '按可见性读取他人真实姓名', false),
+            (core_app_id, 'users.profile.read.real_name', '无视可见性读取他人真实姓名', false),
+            (core_app_id, 'users.profile.read.about', '读取他人的简介与签名', false),
+            (core_app_id, 'users.profile.read.visibilities', '读取他人的资料可见性', false),
+            (core_app_id, 'users.profile.update.basic', '修改他人的基础资料', false),
+            (core_app_id, 'users.profile.update.identity', '修改他人的身份信息', false),
+            (core_app_id, 'users.profile.update.about', '修改他人的简介与签名', false),
+            (core_app_id, 'users.profile.update.visibilities', '修改他人的资料可见性', false),
+            -- 用户封禁
+            (core_app_id, 'user.ban.read', '查看自己的封禁信息', false),
+            (core_app_id, 'users.ban.read', '查看他人的封禁信息', false),
+            (core_app_id, 'users.ban.write', '封禁或解封用户', false),
+            -- 用户会话
+            (core_app_id, 'user.session.read', '查看自己的登录会话', false),
+            (core_app_id, 'user.session.write', '管理自己的登录会话', false),
+            (core_app_id, 'users.session.read', '查看他人的登录会话', false),
+            (core_app_id, 'users.session.write', '管理他人的登录会话', false),
+            -- 用户关注
+            (core_app_id, 'user.relation.read', '查看自己的关注关系', false),
+            (core_app_id, 'user.relation.write', '管理自己的关注关系', false),
+            (core_app_id, 'users.relation.read', '查看他人的关注关系（不受可见性限制）', false),
+            (core_app_id, 'users.relation.read.allowed', '按可见性查看他人的关注关系', false),
+            (core_app_id, 'users.relation.write', '管理他人的关注关系', false),
+            -- 权限管理
+            (core_app_id, 'permission.read', '读取本应用权限定义', false),
+            (core_app_id, 'permission.write', '管理本应用权限定义', false),
+            (core_app_id, 'permissions.read', '读取全部权限定义', false),
+            (core_app_id, 'permissions.write', '管理全部权限定义', false),
+            -- 应用管理
+            (core_app_id, 'app.read', '读取本应用信息', false),
+            (core_app_id, 'app.update', '修改本应用信息', false),
+            (core_app_id, 'app.delete', '删除本应用', false),
+            (core_app_id, 'apps.list', '查看全部应用', false),
+            (core_app_id, 'apps.create', '创建应用', false),
+            (core_app_id, 'apps.update', '修改全部应用', false),
+            (core_app_id, 'apps.suspend', '停用或启用应用', false),
+            (core_app_id, 'apps.delete', '删除全部应用', false),
+            -- OAuth 授权管理
+            (core_app_id, 'oauth.read', '查看自己的 OAuth 授权', false),
+            (core_app_id, 'oauth.revoke', '撤销自己的 OAuth 授权', false),
+            (core_app_id, 'oauths.read', '查看他人的 OAuth 授权', false),
+            (core_app_id, 'oauths.revoke', '撤销他人的 OAuth 授权', false)
+        ON CONFLICT (app_id, value) DO NOTHING;
+    END
+$$;
+
 COMMIT;

@@ -23,8 +23,6 @@ func containsAny(s []string, targets ...string) bool {
 	return false
 }
 
-// carriesPermissions 判断令牌类型是否参与权限判定：用户访问令牌与 OAuth 应用令牌都携带已解析权限，
-// 提权令牌只用于二次验证，不参与业务权限判定。
 func carriesPermissions(claims *model.RegisteredTokenClaims) bool {
 	if claims == nil {
 		return false
@@ -33,7 +31,7 @@ func carriesPermissions(claims *model.RegisteredTokenClaims) bool {
 }
 
 // HasPermission 判断令牌 claims 是否同时拥有全部指定权限；提权令牌等非业务令牌一律返回 false。
-// 注意：claims.Permissions 需已按字典序排序（由 ResolvePatterns / 签发逻辑保证），否则二分查找会漏判。
+// claims.Permissions 需已按字典序排序（由 ResolvePatterns / 签发逻辑保证），否则二分查找会漏判。
 func HasPermission(claims *model.RegisteredTokenClaims, permissions ...string) bool {
 	if !carriesPermissions(claims) {
 		return false
@@ -47,7 +45,7 @@ func HasPermission(claims *model.RegisteredTokenClaims, permissions ...string) b
 }
 
 // HasAnyPermission 判断令牌 claims 是否至少拥有一个指定权限；提权令牌等非业务令牌一律返回 false。
-// 注意：claims.Permissions 需已按字典序排序，参见 HasPermission。
+// claims.Permissions 需已按字典序排序，参见 HasPermission。
 func HasAnyPermission(claims *model.RegisteredTokenClaims, permissions ...string) bool {
 	if !carriesPermissions(claims) {
 		return false

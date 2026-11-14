@@ -21,8 +21,7 @@ import (
 
 // ParseToken 解析请求中的访问令牌（优先 Authorization: Bearer，其次 access_token Cookie），
 // 校验通过后把 claims 写入 token_claims 供后续处理器使用。
-// 支持用户访问令牌、提权令牌与 OAuth 应用令牌；OAuth 令牌只做 JWT 签名与声明校验，
-// 其权限完全来自签发时写入的 permissions，撤销授权不会追溯已签发的访问令牌。
+// OAuth 令牌的权限来自签发时写入的 permissions，撤销授权不会追溯已签发的访问令牌。
 // 令牌非法或过期时不中止请求，以便公开路由仍可访问。
 func ParseToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -45,7 +44,6 @@ func ParseToken() gin.HandlerFunc {
 			return
 		}
 
-		// 校验令牌类型与必填声明：OAuth 令牌必须携带 app_id，否则无法归属到应用。
 		switch claims.TokenType {
 		case model.TokenTypeUser, model.TokenTypeStepup:
 		case model.TokenTypeOAuth:
@@ -63,7 +61,6 @@ func ParseToken() gin.HandlerFunc {
 }
 
 // RequireToken 要求请求已通过 ParseToken 解析出有效令牌，否则以 invalid_token 中止请求。
-// ParseToken 写入的 *errs.Error 会被原样返回，其余解析错误按过期/格式错误归类。
 func RequireToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.IsAborted() {
@@ -71,7 +68,6 @@ func RequireToken() gin.HandlerFunc {
 		}
 		if _, exists := c.Get("token_claims"); !exists {
 			if value, ok := c.Get("token_error"); ok {
-				// ParseToken 抛出的业务错误（令牌类型错误等）直接原样返回。
 				if err, ok := value.(*errs.Error); ok && err != nil {
 					err.Abort(c)
 					return
@@ -91,8 +87,6 @@ func RequireToken() gin.HandlerFunc {
 	}
 }
 
-// RequireUserToken 要求令牌是用户访问令牌：提权令牌与 OAuth 应用令牌都不能访问这些接口。
-// 用于 OAuth 授权确认、设备码确认与授权管理等必须由用户本人操作的端点。
 func RequireUserToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		RequireToken()(c)

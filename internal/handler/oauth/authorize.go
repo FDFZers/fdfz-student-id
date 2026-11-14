@@ -12,7 +12,6 @@ import (
 )
 
 // authorizePreviewHandler 校验授权请求并返回确认页所需的详情。
-// 前端拿到 request_id 后展示应用信息与权限列表，再调用 POST /oauth/authorize 完成授权。
 func authorizePreviewHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
@@ -31,8 +30,7 @@ func authorizePreviewHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
-// authorizeDecisionRequest 是授权确认页的提交体。
-// permissions 为 nil 表示授予全部可授予权限；为空数组表示一项都不授予。
+// authorizeDecisionRequest 提交授权决策；permissions 为 nil 表示授予全部可授予权限，为空数组表示一项都不授予。
 type authorizeDecisionRequest struct {
 	RequestID   string    `json:"request_id"`
 	Approve     *bool     `json:"approve"`

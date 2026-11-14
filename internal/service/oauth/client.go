@@ -12,9 +12,7 @@ import (
 	"fdfz-student-id/internal/util/crypto"
 )
 
-// AuthenticateClient 校验客户端身份并返回应用。
-// client_id 支持命名空间或数字 ID；confidential 客户端必须提供正确的 client_secret。
-// 所有失败返回同一错误，避免暴露 client_id 是否存在。
+// AuthenticateClient 校验客户端身份；认证失败统一返回同一错误，防止 client_id 枚举。
 func AuthenticateClient(
 	ctx context.Context,
 	clientID string,
@@ -40,8 +38,6 @@ func AuthenticateClient(
 	return app, nil
 }
 
-// FindAppByClientID 按 client_id 查询应用：纯数字按 ID，其余按命名空间。
-// 不存在或已删除时返回 (nil, nil)。
 func FindAppByClientID(ctx context.Context, clientID string) (*model.OAuthApp, *errs.Error) {
 	if id, err := strconv.ParseInt(clientID, 10, 64); err == nil && id > 0 {
 		return appsvc.GetAppByID(ctx, id)
@@ -49,7 +45,6 @@ func FindAppByClientID(ctx context.Context, clientID string) (*model.OAuthApp, *
 	return appsvc.GetAppByNamespace(ctx, strings.TrimSpace(clientID))
 }
 
-// verifyClientSecret 用常量时间比较客户端密钥的 SHA-512 摘要。
 func verifyClientSecret(app *model.OAuthApp, secret string) bool {
 	if !app.SecretHash.Valid || app.SecretHash.String == "" {
 		return false

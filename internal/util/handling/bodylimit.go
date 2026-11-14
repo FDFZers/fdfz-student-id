@@ -67,6 +67,7 @@ func BodyLimitExceeded(c *gin.Context) bool {
 }
 
 // Read 超限时返回 *http.MaxBytesError。
+// 恰好读完 max 字节不算超限，探测到后续数据才判定超限。
 func (r *BodyLimitReader) Read(p []byte) (int, error) {
 	r.mu.Lock()
 	if r.exceeded {
@@ -75,29 +76,34 @@ func (r *BodyLimitReader) Read(p []byte) (int, error) {
 		return 0, &http.MaxBytesError{Limit: limit}
 	}
 	remaining := r.max - r.read
-	if remaining <= 0 {
-		r.exceeded = true
-		limit := r.max
-		r.mu.Unlock()
-		return 0, &http.MaxBytesError{Limit: limit}
-	}
-	// 多读 1 字节以检测超限。
-	if int64(len(p)) > remaining+1 {
-		p = p[:remaining+1]
-	}
 	r.mu.Unlock()
 
+	if remaining <= 0 {
+		var probe [1]byte
+		n, err := r.body.Read(probe[:])
+		if n > 0 {
+			r.mu.Lock()
+			r.exceeded = true
+			limit := r.max
+			r.mu.Unlock()
+			return 0, &http.MaxBytesError{Limit: limit}
+		}
+		return 0, err
+	}
+
+	if int64(len(p)) > remaining {
+		p = p[:remaining]
+	}
 	n, err := r.body.Read(p)
 
 	r.mu.Lock()
 	r.read += int64(n)
-	if r.read > r.max {
-		r.exceeded = true
-		limit := r.max
-		r.mu.Unlock()
+	exceeded := r.read > r.max
+	limit := r.max
+	r.mu.Unlock()
+	if exceeded {
 		return n, &http.MaxBytesError{Limit: limit}
 	}
-	r.mu.Unlock()
 	return n, err
 }
 

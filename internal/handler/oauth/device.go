@@ -10,14 +10,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// deviceCreateRequest 是创建设备授权请求的请求体。
 type deviceCreateRequest struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 	Permission   string `json:"permission"` // 空格或逗号分隔的权限串，省略时使用应用登记的全部权限
 }
 
-// deviceCreateHandler 创建设备码与用户短码，供设备轮询与用户确认。
 func deviceCreateHandler(c *gin.Context) *errs.Error {
 	var req deviceCreateRequest
 	if err := handling.BindJSON(c, &req); err != nil {
@@ -38,7 +36,6 @@ func deviceCreateHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
-// devicePreviewHandler 按 user_code 返回设备授权请求详情，供确认页展示。
 func devicePreviewHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
@@ -51,15 +48,13 @@ func devicePreviewHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
-// deviceApproveRequest 是设备确认页的提交体。
-// permissions 为 nil 表示授予全部可授予权限；为空数组表示一项都不授予。
+// deviceApproveRequest 提交设备授权决策；permissions 为 nil 表示授予全部可授予权限，为空数组表示一项都不授予。
 type deviceApproveRequest struct {
 	UserCode    string    `json:"user_code"`
 	Approve     *bool     `json:"approve"`
 	Permissions *[]string `json:"permissions"`
 }
 
-// deviceApproveHandler 处理设备授权请求的同意/拒绝操作。
 func deviceApproveHandler(c *gin.Context) *errs.Error {
 	var req deviceApproveRequest
 	if err := handling.BindJSON(c, &req); err != nil {

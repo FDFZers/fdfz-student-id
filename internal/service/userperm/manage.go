@@ -530,6 +530,9 @@ func requirePermissionDefInApp(ctx context.Context, appID, permissionID int64) (
 // selectRolesInAppSQL 校验用户组存在且属于指定应用。
 const selectRolesInAppSQL = `SELECT id FROM roles WHERE id = $1 AND app_id = $2`
 
+// selectRolesInAppForUpdateSQL 与 selectRolesInAppSQL 相同，但锁定用户组行以串行化并发替换。
+const selectRolesInAppForUpdateSQL = `SELECT id FROM roles WHERE id = $1 AND app_id = $2 FOR UPDATE`
+
 // deleteRolePermissionsInAppSQL 删除用户组在当前应用内的全部组权限。
 const deleteRolePermissionsInAppSQL = `
 DELETE FROM role_permissions
@@ -591,7 +594,7 @@ func SetRolePermissions(ctx context.Context, dh db.Handle, appID, roleID int64, 
 
 	// 校验用户组属于该应用。
 	var foundRoleID int64
-	err = tx.QueryRow(ctx, selectRolesInAppSQL, roleID, appID).Scan(&foundRoleID)
+	err = tx.QueryRow(ctx, selectRolesInAppForUpdateSQL, roleID, appID).Scan(&foundRoleID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errs.NotFoundError().AppendDetails("用户组不存在")
