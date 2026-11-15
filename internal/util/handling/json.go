@@ -2,7 +2,6 @@ package handling
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"fdfz-student-id/internal/errs"
@@ -21,7 +20,7 @@ import (
 // 应用
 // ---------------------------------------------------------------------------
 
-// AppInfo 是应用对外的统一表示；icon_path 相对 API v1 前缀（如 app/12/icon）。
+// AppInfo 是应用对外的统一表示。
 type AppInfo struct {
 	ID             int64           `json:"id"`
 	Namespace      string          `json:"namespace"`
@@ -34,7 +33,6 @@ type AppInfo struct {
 	RequestedPerms []string        `json:"requested_perms"`
 	Status         model.AppStatus `json:"status"`
 	HasSecret      bool            `json:"has_secret"`
-	IconPath       string          `json:"icon_path"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`
 }
@@ -65,7 +63,6 @@ func AppJSON(app *model.OAuthApp) *AppInfo {
 		RequestedPerms: requestedPerms,
 		Status:         app.Status,
 		HasSecret:      app.ClientType.IsConfidential() && app.SecretHash.Valid,
-		IconPath:       "app/" + strconv.FormatInt(app.ID, 10) + "/icon",
 		CreatedAt:      app.CreatedAt,
 		UpdatedAt:      app.UpdatedAt,
 	}
