@@ -12,12 +12,13 @@ import (
 )
 
 // searchCfg 用户搜索配置：可搜索字段、可排序字段、标签（用户类型/学校）与返回列。
+// 不提供数字用户 ID 的搜索字段，避免通过自增 ID 枚举用户；ID 仅用于结果与默认排序。
 // 查询结果交给 usersJSON 过滤，因此 SQL 返回的完整用户记录不会被直接暴露给前端。
 var searchCfg = searchsvc.SearchConfig{
 	Table:             "users",
 	Item:              "用户",
 	Columns:           []string{"id", "username", "type", "student_num", "real_name", "school", "nickname", "signature", "bio", "visibilities", "created_at", "updated_at", "deleted_at"},
-	Fields:            []searchsvc.Field{{ID: "id", Column: "id", Numeric: true}, {ID: "username", Column: "username"}, {ID: "nickname", Column: "nickname"}, {ID: "student_num", Column: "student_num"}},
+	Fields:            []searchsvc.Field{{ID: "username", Column: "username"}, {ID: "nickname", Column: "nickname"}, {ID: "student_num", Column: "student_num"}},
 	MatchMethods:      searchsvc.MatchMethodValues(),
 	SortableFields:    []searchsvc.Field{{ID: "username", Column: "username"}, {ID: "nickname", Column: "nickname"}, {ID: "student_num", Column: "student_num"}, {ID: "created_at", Column: "created_at"}},
 	Tags:              []searchsvc.Tag{{ID: "type", Column: "type", ValueMap: searchsvc.ValueMapOf(model.UserTypeNames())}, {ID: "school", Column: "school", ValueMap: searchsvc.ValueMapOf(model.SchoolNames())}},

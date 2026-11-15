@@ -41,7 +41,7 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	// 单 IP 每小时注册请求配额：抬高批量探测用户名/学号是否存在的成本。
+	// 单 IP 每小时注册请求配额：限制批量提交注册申请，降低刷接口成本。
 	if err := authsvc.TryAcquireRegisterIPQuota(c.Request.Context(), c.ClientIP()); err != nil {
 		return err
 	}
@@ -90,11 +90,9 @@ func createRegisterHandler(c *gin.Context) *errs.Error {
 		nickname = null.StringFrom(req.Nickname)
 	}
 
-	// 注意：用户名冲突与学号冲突统一使用同一句模糊提示，避免被用来探测用户名/学号是否被占用。
-	if taken, err := usersvc.IsUsernameTaken(c.Request.Context(), req.Username); err != nil {
-		return errs.CreateAndLogInternalError(err, "Failed to check username availability").AppendDetails("用户名占用信息查询失败")
-	} else if taken {
-		return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试")
+	// 用户名与学号冲突直接提示具体字段，不再使用防枚举的模糊文案。
+	if err := usersvc.CheckRegisterConflict(c.Request.Context(), req.Username, req.Type, req.School, studentNum); err != nil {
+		return err
 	}
 
 	// 密码哈希

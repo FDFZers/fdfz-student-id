@@ -7,10 +7,11 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	"log/slog"
-	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/guregu/null/v6"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ---------------------------------------------------------------------------
@@ -26,24 +27,37 @@ RETURNING id, created_at, status,
     created_user_id, reviewer_user_id, review_comment, reviewed_at
 `
 
-// CreateRegisterRequest 要求 r.Password 已哈希。
-// 用户名/学号冲突统一返回模糊文案，防止账号枚举；并发撞唯一索引时同样如此。
-func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.Error {
-	// 校验用户名与学号是否已被占用（含待审核申请）
-
-	if taken, err := IsUsernameTaken(ctx, r.Username); err != nil {
+// CheckRegisterConflict 检查用户名与学号是否已被现存用户或待审核的注册申请占用。
+// 注册流程不再做防枚举处理：冲突时直接返回具体字段的提示。
+func CheckRegisterConflict(
+	ctx context.Context,
+	username string,
+	typ model.UserType,
+	school model.School,
+	studentNum null.String,
+) *errs.Error {
+	if taken, err := IsUsernameTaken(ctx, username); err != nil {
 		return err
 	} else if taken {
-		// 与学号冲突使用同一句模糊文案
-		return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试")
+		return errs.ConflictError().AppendDetails("用户名已被注册或正在审核中，请更换")
 	}
 
-	if r.Type == model.UserTypeStudent {
-		if taken, err := IsStudentNumTaken(ctx, r.School, r.StudentNum, 0); err != nil {
+	if typ == model.UserTypeStudent {
+		if taken, err := IsStudentNumTaken(ctx, school, studentNum, 0); err != nil {
 			return err
 		} else if taken {
-			return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试")
+			return errs.ConflictError().AppendDetails("该学号已被注册或正在审核中，请更换")
 		}
+	}
+	return nil
+}
+
+// CreateRegisterRequest 要求 r.Password 已哈希。
+// 用户名/学号冲突直接返回具体提示；并发撞唯一索引时按约束名映射到对应字段。
+func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.Error {
+	// 校验用户名与学号是否已被占用（含待审核申请）
+	if err := CheckRegisterConflict(ctx, r.Username, r.Type, r.School, r.StudentNum); err != nil {
+		return err
 	}
 
 	e := db.R.QueryRow(ctx, createRegisterRequestSQL,
@@ -64,11 +78,18 @@ func CreateRegisterRequest(ctx context.Context, r *model.RegisterRequest) *errs.
 		&r.ReviewedAt,
 	)
 	if e != nil {
-		err := errs.CreatePGError(e, "注册请求", "Failed to create register request")
-		if err.HTTPCode == http.StatusConflict {
-			return errs.ConflictError().AppendDetails("用户名或学号不可用，请更换后重试")
+		var pgErr *pgconn.PgError
+		if errors.As(e, &pgErr) && pgErr.Code == "23505" {
+			switch pgErr.ConstraintName {
+			case "uq_register_requests_username_pending":
+				return errs.ConflictError().AppendDetails("用户名已被注册或正在审核中，请更换")
+			case "uq_register_requests_school_student_num_pending":
+				return errs.ConflictError().AppendDetails("该学号已被注册或正在审核中，请更换")
+			default:
+				return errs.ConflictError().AppendDetails("用户名或学号已被注册或正在审核中，请更换")
+			}
 		}
-		return err
+		return errs.CreatePGError(e, "注册请求", "Failed to create register request")
 	}
 
 	db.R.Del(ctx, UsernameExistsCacheKey(r.Username))
