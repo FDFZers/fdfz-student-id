@@ -3,6 +3,7 @@ package security
 import (
 	"fdfz-student-id/internal/errs"
 	authsvc "fdfz-student-id/internal/service/auth"
+	notifysvc "fdfz-student-id/internal/service/notify"
 	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
@@ -29,6 +30,13 @@ func deleteAccountHandler(c *gin.Context) *errs.Error {
 	if err != nil {
 		return err
 	}
+
+	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
+		"账号注销申请已提交",
+		"你的账号将在 7 天后注销",
+		"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）提交注销申请，将在 7 天冷静期后删除。",
+		"冷静期内重新登录可取消注销。如非本人操作，请立即联系管理员。",
+	))
 
 	// 清理当前请求的登录 Cookie，返回排定的注销时间
 	handling.ClearSessionCookies(c)

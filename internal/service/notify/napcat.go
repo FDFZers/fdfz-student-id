@@ -1,4 +1,4 @@
-package qq
+package notify
 
 import (
 	"bytes"
@@ -22,8 +22,8 @@ const (
 	maxResponseBody     = 4 << 20         // 响应体读取上限（4 MiB），避免异常响应占满内存
 )
 
-// Message 是从 NapCat 消息历史中提取出的单条私聊消息。
-type Message struct {
+// OBMessage 是从 NapCat 消息历史中提取出的单条私聊消息。
+type OBMessage struct {
 	Time     int64  // 发送时间（Unix 秒）
 	SenderQQ int64  // 发送者 QQ 号
 	Text     string // 文本内容，仅拼接 text 类型的消息段
@@ -91,7 +91,7 @@ func post(ctx context.Context, path string, payload any) (jsontext.Value, error)
 
 // GetFriendMsgHistory 拉取指定 QQ 好友最近 count 条私聊消息（机器人视角）。
 // count 非正数或超过上限时回退为默认条数；单条消息解析失败会被跳过而不是返回错误。
-func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, error) {
+func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]OBMessage, error) {
 	if count <= 0 || count > maxHistoryCount {
 		count = defaultHistoryCount
 	}
@@ -123,7 +123,7 @@ func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, 
 	}
 
 	// 逐条解析，畸形消息跳过
-	messages := make([]Message, 0, len(items))
+	messages := make([]OBMessage, 0, len(items))
 	for _, item := range items {
 		msg, err := parseMessage(item)
 		if err != nil {
@@ -134,12 +134,17 @@ func GetFriendMsgHistory(ctx context.Context, qq string, count int) ([]Message, 
 	return messages, nil
 }
 
-// SendPrivateMessage 向指定 QQ 号发送私聊文本消息。
-// 注意：当前仓库内暂无调用方，2FA 验证码由用户主动发给机器人，保留该能力供后续通知类需求使用。
+// SendPrivateMessage 向指定 QQ 号发送私聊文本消息，用于账号安全通知等主动提醒。
+// 注意：正文以 text 消息段发送，避免邮箱等动态内容被当作 CQ 码解析。
 func SendPrivateMessage(ctx context.Context, qq int64, message string) error {
 	_, err := post(ctx, "/send_private_msg", map[string]any{
 		"user_id": qq,
-		"message": message,
+		"message": []map[string]any{
+			{
+				"type": "text",
+				"data": map[string]string{"text": message},
+			},
+		},
 	})
 	return err
 }
@@ -155,11 +160,11 @@ type oneBotMessage struct {
 	Message jsontext.Value `json:"message"`
 }
 
-// parseMessage 把 OneBot 消息对象转换为 Message，优先取消息段文本与 sender.user_id，缺失时回退。
-func parseMessage(raw jsontext.Value) (Message, error) {
+// parseMessage 把 OneBot 消息对象转换为 OBMessage，优先取消息段文本与 sender.user_id，缺失时回退。
+func parseMessage(raw jsontext.Value) (OBMessage, error) {
 	var m oneBotMessage
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return Message{}, err
+		return OBMessage{}, err
 	}
 	sender := m.Sender.UserID
 	if sender == 0 {
@@ -169,7 +174,7 @@ func parseMessage(raw jsontext.Value) (Message, error) {
 	if text == "" {
 		text = m.RawText
 	}
-	return Message{Time: m.Time, SenderQQ: sender, Text: text}, nil
+	return OBMessage{Time: m.Time, SenderQQ: sender, Text: text}, nil
 }
 
 // extractText 提取纯文本：兼容 OneBot 的纯字符串与消息段数组两种 message 形状，只拼接 text 段。

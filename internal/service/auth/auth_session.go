@@ -207,7 +207,8 @@ end
 return n
 `)
 
-// ConsumeAuthSessionAttempt 每次二次验证都须先调用计数，无论校验成功失败。
+// ConsumeAuthSessionAttempt 每次验证码输入的二次验证都须先调用计数，无论校验成功失败。
+// 注意：QQ 验证为服务端拉取消息的轮询接口，不消耗尝试次数，因此不调用本函数。
 func ConsumeAuthSessionAttempt(ctx context.Context, id uuid.UUID) (int64, *errs.Error) {
 	ttlSeconds := int64(AuthSession2FACacheDuration / time.Second)
 	n, err := consumeAuthSessionAttemptScript.Run(ctx, db.R, []string{AuthSessionAttemptsCacheKey(id)}, ttlSeconds).Int64()

@@ -12,7 +12,6 @@ import (
 const (
 	bindEmailAttemptsKind = "email"
 	bindTOTPAttemptsKind  = "totp"
-	bindQQAttemptsKind    = "qq"
 )
 
 // InitRoutes 注册账号安全相关路由。

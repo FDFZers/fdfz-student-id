@@ -4,6 +4,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	authsvc "fdfz-student-id/internal/service/auth"
+	notifysvc "fdfz-student-id/internal/service/notify"
 	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
@@ -89,6 +90,13 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 			return err
 		}
 	}
+
+	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
+		"密码已修改",
+		"你的账号密码已修改",
+		"你好！你的复旦附中学生 ID 账号密码已于 "+notifysvc.BeijingTime()+"（北京时间）修改。",
+		"如非本人操作，请立即重置密码并联系管理员。",
+	))
 
 	handling.RespondOK(c)
 	return nil

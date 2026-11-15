@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/model"
 	authsvc "fdfz-student-id/internal/service/auth"
 	captchasvc "fdfz-student-id/internal/service/captcha"
+	notifysvc "fdfz-student-id/internal/service/notify"
 	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
@@ -222,6 +223,13 @@ func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 	handling.ClearSessionCookies(c)
+
+	notifysvc.ToUser(c.Request.Context(), session.UserID, notifysvc.NewMessage(
+		"密码已重置",
+		"你的账号密码已重置",
+		"你好！你的复旦附中学生 ID 账号密码已于 "+notifysvc.BeijingTime()+"（北京时间）通过二次验证重置，所有登录会话已退出。",
+		"如非本人操作，请立即联系管理员。",
+	))
 
 	if err := authsvc.DeleteAuthSession(c.Request.Context(), session); err != nil {
 		slog.Warn("Failed to delete password reset auth session", "error", err.Info.Error, "session_id", session.ID)

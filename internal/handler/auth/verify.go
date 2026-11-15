@@ -5,8 +5,7 @@ import (
 	"crypto/subtle"
 	"fdfz-student-id/internal/errs"
 	authsvc "fdfz-student-id/internal/service/auth"
-	emailsvc "fdfz-student-id/internal/service/email"
-	qqsvc "fdfz-student-id/internal/service/qq"
+	notifysvc "fdfz-student-id/internal/service/notify"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
@@ -18,7 +17,8 @@ import (
 	"github.com/guregu/null/v6"
 )
 
-// check2FAAttempts 消费一次二次验证尝试机会；必须在校验验证码前调用，且每次请求只调用一次。
+// check2FAAttempts 消费一次二次验证尝试机会；仅用于需要用户输入验证码的邮箱与 TOTP 验证。
+// 必须在校验验证码前调用，且每次请求只调用一次；QQ 验证是服务端拉取消息的轮询接口，不调用此函数。
 // 除会话级计数外还叠加用户级计数，防止重新登录重置 2FA 尝试次数。
 func check2FAAttempts(ctx context.Context, session *authsvc.AuthSession) *errs.Error {
 	attempts, err := authsvc.ConsumeAuthSessionAttempt(ctx, session.ID)
@@ -108,7 +108,7 @@ func verifyEmailInitHandler(c *gin.Context) *errs.Error {
 		return errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证状态更新失败")
 	}
 
-	if e := emailsvc.SendCode(session.Email.String, code, session.Type); e != nil {
+	if e := notifysvc.SendCode(session.Email.String, code, session.Type); e != nil {
 		session.EmailCode = null.String{}
 		if err := authsvc.UpdateAuthSession(c.Request.Context(), session, false); err != nil {
 			slog.Warn("Failed to rollback email code after send failure", "error", err.Info.Error, "session_id", session.ID)
@@ -265,9 +265,8 @@ func verifyQQHandler(c *gin.Context) *errs.Error {
 	if session.Passed2FA {
 		return errs.IllegalStateError().AppendDetails("二次验证已通过")
 	}
-	if err := check2FAAttempts(c.Request.Context(), session); err != nil {
-		return err
-	}
+	// QQ 验证是轮询接口：验证码由服务端生成，且只接受已绑定 QQ 主动发来的消息，客户端无法逐个尝试，
+	// 因此轮询不消耗二次验证尝试次数；拉取频率由 TryAcquireQQRateLimit 单独限制。
 	if !session.QQ.Valid {
 		if session.Type == authsvc.AuthSessionTypeResetPassword {
 			// 重置密码模糊错误防止账号枚举
@@ -289,7 +288,7 @@ func verifyQQHandler(c *gin.Context) *errs.Error {
 	pullCtx, cancel := context.WithTimeout(c.Request.Context(), authsvc.QQPullTimeout)
 	defer cancel()
 
-	messages, e := qqsvc.GetFriendMsgHistory(pullCtx, session.QQ.String, 20)
+	messages, e := notifysvc.GetFriendMsgHistory(pullCtx, session.QQ.String, 20)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to pull QQ messages from NapCat").AppendDetails("NapCat 错误")
 	}
