@@ -32,7 +32,15 @@ const (
 )
 
 // httpClient 是调用 filestore 的共享 HTTP 客户端。
-var httpClient = &http.Client{Timeout: uploadTimeout}
+// filestore 是内部服务，显式禁用系统 HTTP 代理，避免本地 HTTP_PROXY 把内部请求
+// 转给代理后返回 502。
+var httpClient = newHTTPClient()
+
+func newHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return &http.Client{Timeout: uploadTimeout, Transport: transport}
+}
 
 // StoreFileReq 是上传到 filestore 的请求体。
 // 注意：FilePath 是相对 SHARED_DIR 的路径，SHA512 由本地临时文件计算，供 filestore 校验。
@@ -99,7 +107,7 @@ func BuildInfoUrl(slug string) (string, *errs.Error) {
 	return buildUrl(slug, "info")
 }
 
-// buildUrl 拼接「FILESTORE_PUBLIC_ENDPOINT/internal/v1/{reqType}/{slug}?token=...」。
+// buildUrl 拼接「FILESTORE_PUBLIC_ENDPOINT/api/v1/{reqType}/{slug}?token=...」。
 // reqType 为 file（下载）或 info（元数据）；slug 必须以 / 开头。
 func buildUrl(slug, reqType string) (string, *errs.Error) {
 	if !strings.HasPrefix(slug, "/") {
@@ -111,7 +119,7 @@ func buildUrl(slug, reqType string) (string, *errs.Error) {
 		return "", err
 	}
 
-	endpoint, e := url.JoinPath(cfg.C.FilestorePublicEndpoint, "/internal/v1/"+reqType, slug)
+	endpoint, e := url.JoinPath(cfg.C.FilestorePublicEndpoint, "/api/v1/"+reqType, slug)
 	if e != nil {
 		return "", errs.CreateAndLogInternalError(e, "Failed to build file URL").AppendDetails("URL 路径拼接失败")
 	}
@@ -136,12 +144,6 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 	}
 	if fileHeader == nil {
 		return errs.CreateAndLogInternalError(errors.New("nil file header"), "File header is nil").AppendDetails("未提供文件", "文件上传失败")
-	}
-
-	// 签发上传令牌
-	token, err := CreateUploadToken(request.Slug)
-	if err != nil {
-		return err.AppendDetails("文件上传失败")
 	}
 
 	// 生成本地临时路径并创建临时文件
@@ -182,8 +184,7 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		return errs.CreateAndLogInternalError(e, "Failed to commit temp file").AppendDetails("临时文件保存失败")
 	}
 
-	// 组装上传请求体
-	jsonData, e := json.Marshal(&StoreFileReq{
+	return storeFile(&StoreFileReq{
 		Slug:         request.Slug,
 		FilePath:     rel,
 		FileName:     request.FileName,
@@ -195,6 +196,46 @@ func UploadFile(fileHeader *multipart.FileHeader, request *StoreFileReq) *errs.E
 		UserID:       request.UserID,
 		AppID:        request.AppID,
 	})
+}
+
+// UploadExistingFile 让 filestore 直接读取其 UPLOAD_DIR 下已经存在的文件，不再从本地复制。
+func UploadExistingFile(filePath string, request *StoreFileReq) *errs.Error {
+	if request == nil {
+		return errs.CreateAndLogInternalError(errors.New("nil upload request"), "File upload request is nil").AppendDetails("未提供文件上传请求", "文件上传失败")
+	}
+	if !strings.HasPrefix(request.Slug, "/") {
+		return errs.BadRequestError().AppendDetails("Slug 格式错误", "文件上传失败")
+	}
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return errs.BadRequestError().AppendDetails("未提供服务器文件路径", "文件上传失败")
+	}
+	if strings.HasPrefix(filePath, "/") {
+		return errs.BadRequestError().AppendDetails("服务器文件路径必须是相对路径", "文件上传失败")
+	}
+
+	r := *request
+	r.FilePath = filePath
+	r.SHA512 = null.String{} // 让 filestore 从服务器文件计算
+	return storeFile(&r)
+}
+
+// storeFile 调用 filestore 内部上传接口；SHA512 为空时由 filestore 自行计算。
+func storeFile(request *StoreFileReq) *errs.Error {
+	if request == nil {
+		return errs.CreateAndLogInternalError(errors.New("nil upload request"), "File upload request is nil").AppendDetails("未提供文件上传请求", "文件上传失败")
+	}
+	if !strings.HasPrefix(request.Slug, "/") {
+		return errs.BadRequestError().AppendDetails("Slug 格式错误", "文件上传失败")
+	}
+
+	// 签发上传令牌
+	token, err := CreateUploadToken(request.Slug)
+	if err != nil {
+		return err.AppendDetails("文件上传失败")
+	}
+
+	jsonData, e := json.Marshal(request)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to marshal upload request").AppendDetails("请求序列化失败")
 	}
