@@ -94,7 +94,7 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
 		"密码已修改",
 		"你的账号密码已修改",
-		"你好！你的复旦附中学生 ID 账号密码已于 "+notifysvc.BeijingTime()+"（北京时间）修改。",
+		"你好！你的复旦附中学生 ID 账号密码已于北京时间 "+notifysvc.BeijingTime()+" 修改。",
 		"如非本人操作，请立即重置密码并联系管理员。",
 	))
 

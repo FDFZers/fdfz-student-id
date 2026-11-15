@@ -151,14 +151,14 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
 		"邮箱绑定成功",
 		"你的账号已绑定新邮箱",
-		"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）绑定邮箱："+pending.Email+"。",
+		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 绑定邮箱："+pending.Email+"。",
 		"此后可使用该邮箱接收验证码和重置密码。如非本人操作，请立即修改密码并检查账号安全。",
 	))
 	if previous != nil && !strings.EqualFold(previous.Email, pending.Email) {
 		notifysvc.Send(notifysvc.Recipients{Email: previous.Email}, notifysvc.NewMessage(
 			"邮箱已更换",
 			"你的账号已更换绑定邮箱",
-			"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）更换绑定邮箱，新邮箱为 "+pending.Email+"。",
+			"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 更换绑定邮箱，新邮箱为 "+pending.Email+"。",
 			"如非本人操作，请立即联系管理员。",
 		))
 	}
@@ -184,7 +184,7 @@ func emailUnbindHandler(c *gin.Context) *errs.Error {
 	msg := notifysvc.NewMessage(
 		"邮箱已解绑",
 		"你的账号已解绑邮箱",
-		"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）解绑邮箱："+current.Email+"。",
+		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 解绑邮箱："+current.Email+"。",
 		"解绑后将无法使用该邮箱接收验证码或重置密码。如非本人操作，请立即联系管理员。",
 	)
 	// 邮箱已从账号移除，需显式发给该地址；QQ 渠道由 ToUser 自动补上
@@ -280,7 +280,7 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
 		"TOTP 已绑定",
 		"你的账号已绑定 TOTP 二次验证",
-		"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）绑定 TOTP 二次验证。",
+		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 绑定 TOTP 二次验证。",
 		"如非本人操作，请立即修改密码并检查账号安全。",
 	))
 
@@ -305,7 +305,7 @@ func totpUnbindHandler(c *gin.Context) *errs.Error {
 	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
 		"TOTP 已解绑",
 		"你的账号已解绑 TOTP 二次验证",
-		"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）解绑 TOTP 二次验证。",
+		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 解绑 TOTP 二次验证。",
 		"解绑后账号将失去该验证方式，安全性可能降低。如非本人操作，请立即联系管理员。",
 	))
 
@@ -441,7 +441,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
 		"QQ 已绑定",
 		"你的账号已绑定 QQ",
-		"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）绑定 QQ："+pending.QQ+"。",
+		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 绑定 QQ："+pending.QQ+"。",
 		"该 QQ 可用于登录验证与密码重置。如非本人操作，请立即修改密码并检查账号安全。",
 	))
 
@@ -466,7 +466,7 @@ func qqUnbindHandler(c *gin.Context) *errs.Error {
 	msg := notifysvc.NewMessage(
 		"QQ 已解绑",
 		"你的账号已解绑 QQ",
-		"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）解绑 QQ："+current.QQ+"。",
+		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 解绑 QQ："+current.QQ+"。",
 		"解绑后该 QQ 将无法用于登录验证与密码重置。如非本人操作，请立即联系管理员。",
 	)
 	// QQ 已从账号移除，需显式发给该 QQ；邮箱渠道由 ToUser 自动补上

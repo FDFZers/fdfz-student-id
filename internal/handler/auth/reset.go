@@ -227,7 +227,7 @@ func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 	notifysvc.ToUser(c.Request.Context(), session.UserID, notifysvc.NewMessage(
 		"密码已重置",
 		"你的账号密码已重置",
-		"你好！你的复旦附中学生 ID 账号密码已于 "+notifysvc.BeijingTime()+"（北京时间）通过二次验证重置，所有登录会话已退出。",
+		"你好！你的复旦附中学生 ID 账号密码已于北京时间 "+notifysvc.BeijingTime()+" 通过忘记密码重置，所有登录会话已退出。",
 		"如非本人操作，请立即联系管理员。",
 	))
 

@@ -34,7 +34,7 @@ func deleteAccountHandler(c *gin.Context) *errs.Error {
 	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
 		"账号注销申请已提交",
 		"你的账号将在 7 天后注销",
-		"你好！你的复旦附中学生 ID 账号已于 "+notifysvc.BeijingTime()+"（北京时间）提交注销申请，将在 7 天冷静期后删除。",
+		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 提交注销申请，将在 7 天冷静期后删除。",
 		"冷静期内重新登录可取消注销。如非本人操作，请立即联系管理员。",
 	))
 

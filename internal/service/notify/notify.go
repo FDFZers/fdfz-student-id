@@ -48,9 +48,11 @@ func (m Message) html() string {
 // text 把正文转换为 QQ 纯文本消息。
 func (m Message) text() string {
 	var b strings.Builder
-	b.WriteString("【复旦附中学生 ID】")
-	b.WriteString("=====[ " + m.Title + " ]=====\n")
-	b.WriteString("\n\n")
+	b.WriteString("【复旦附中学生 ID】\n")
+	b.WriteString("=====[ ")
+	b.WriteString(m.Title)
+	b.WriteString(" ]=====\n")
+	b.WriteString("\n")
 	for _, line := range m.Lines {
 		b.WriteString(line)
 		b.WriteString("\n")
