@@ -3,7 +3,6 @@ package oauth
 import (
 	"context"
 	"errors"
-	"slices"
 	"strings"
 	"time"
 
@@ -14,11 +13,10 @@ import (
 	appsvc "fdfz-student-id/internal/service/app"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
-	"fdfz-student-id/internal/util/slicex"
 )
 
 const (
-	devicePollIntervalSeconds = 5
+	devicePollIntervalSeconds = 4
 	deviceCodeInsertAttempts  = 5
 )
 
@@ -52,17 +50,16 @@ type DeviceTokenResponse struct {
 // 发起
 // ---------------------------------------------------------------------------
 
-// StartDeviceAuthorization 仅适用于 *_device 类型；permission 为空时使用应用登记的全部可申请权限。
+// StartDeviceAuthorization 仅适用于 *_device 类型；权限固定取自应用登记的全部可申请权限。
 func StartDeviceAuthorization(
 	ctx context.Context,
 	client *model.OAuthApp,
-	permissionParam string,
 ) (*DeviceAuthorization, *errs.Error) {
 	if !client.ClientType.IsDevice() {
 		return nil, errs.BadRequestError().AppendDetails("该应用不支持设备授权流程")
 	}
 
-	permissions, err := ResolveRequestedPermissions(client, permissionParam)
+	permissions, err := ResolveRequestedPermissions(client)
 	if err != nil {
 		return nil, err
 	}
@@ -164,13 +161,12 @@ func GetDeviceAuthorization(
 	}, nil
 }
 
-// DecideDeviceAuthorization 通过 Lua 脚本原子更新状态，只允许从 pending 迁移；permissions 非 nil 时按子集收窄。
+// DecideDeviceAuthorization 通过 Lua 脚本原子更新状态，只允许从 pending 迁移；授予应用登记的全部可授予权限。
 func DecideDeviceAuthorization(
 	ctx context.Context,
 	userID int64,
 	userCode string,
 	approve bool,
-	permissions []string,
 ) *errs.Error {
 	normalized := NormalizeUserCode(userCode)
 	if normalized == "" {
@@ -216,16 +212,6 @@ func DecideDeviceAuthorization(
 		return err
 	}
 	granted := GrantedPermissions(infos)
-
-	if permissions != nil {
-		selected := slicex.DedupeStrings(permissions)
-		for _, permission := range selected {
-			if !slices.Contains(record.Permissions, permission) {
-				return errs.BadRequestError().AppendDetails("提交的权限不在本次申请范围内")
-			}
-		}
-		granted = restrictToRequested(granted, selected)
-	}
 
 	// 先写授权记录再更新设备码状态；状态更新失败最多留下一条多余授权，不会越权。
 	authID, err := upsertAuthorization(ctx, userID, record.AppID, granted)

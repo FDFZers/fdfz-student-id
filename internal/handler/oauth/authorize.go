@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"net/http"
-	"strings"
 
 	"fdfz-student-id/internal/errs"
 	oauthsvc "fdfz-student-id/internal/service/oauth"
@@ -11,14 +10,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// authorizePreviewHandler 校验授权请求并返回确认页所需的详情。
+// authorizePreviewHandler 校验授权请求并返回确认页所需的详情；权限固定取自应用登记值。
 func authorizePreviewHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
 	preview, err := oauthsvc.PreviewAuthorization(c.Request.Context(), claims.UserID, oauthsvc.AuthorizationParams{
 		ClientID:      c.Query("client_id"),
 		RedirectURI:   c.Query("redirect_uri"),
-		Permission:    strings.Join(c.QueryArray("permission"), " "),
 		State:         c.Query("state"),
 		CodeChallenge: c.Query("code_challenge"),
 	})
@@ -30,11 +28,10 @@ func authorizePreviewHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
-// authorizeDecisionRequest 提交授权决策；permissions 为 nil 表示授予全部可授予权限，为空数组表示一项都不授予。
+// authorizeDecisionRequest 提交授权决策；授予应用登记的全部可授予权限。
 type authorizeDecisionRequest struct {
-	RequestID   string    `json:"request_id"`
-	Approve     *bool     `json:"approve"`
-	Permissions *[]string `json:"permissions"`
+	RequestID string `json:"request_id"`
+	Approve   *bool  `json:"approve"`
 }
 
 // authorizeDecisionHandler 处理用户的同意/拒绝操作，返回客户端回调地址。
@@ -51,13 +48,9 @@ func authorizeDecisionHandler(c *gin.Context) *errs.Error {
 	}
 
 	claims := handling.MustGetClaims(c)
-	var permissions []string
-	if req.Permissions != nil {
-		permissions = *req.Permissions
-	}
 
 	redirectTo, err := oauthsvc.ApproveAuthorization(
-		c.Request.Context(), claims.UserID, req.RequestID, *req.Approve, permissions,
+		c.Request.Context(), claims.UserID, req.RequestID, *req.Approve,
 	)
 	if err != nil {
 		return err

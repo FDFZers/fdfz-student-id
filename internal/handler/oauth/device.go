@@ -13,7 +13,6 @@ import (
 type deviceCreateRequest struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
-	Permission   string `json:"permission"` // 空格或逗号分隔的权限串，省略时使用应用登记的全部权限
 }
 
 func deviceCreateHandler(c *gin.Context) *errs.Error {
@@ -27,7 +26,7 @@ func deviceCreateHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	response, err := oauthsvc.StartDeviceAuthorization(c.Request.Context(), app, req.Permission)
+	response, err := oauthsvc.StartDeviceAuthorization(c.Request.Context(), app)
 	if err != nil {
 		return err
 	}
@@ -48,11 +47,10 @@ func devicePreviewHandler(c *gin.Context) *errs.Error {
 	return nil
 }
 
-// deviceApproveRequest 提交设备授权决策；permissions 为 nil 表示授予全部可授予权限，为空数组表示一项都不授予。
+// deviceApproveRequest 提交设备授权决策；授予应用登记的全部可授予权限。
 type deviceApproveRequest struct {
-	UserCode    string    `json:"user_code"`
-	Approve     *bool     `json:"approve"`
-	Permissions *[]string `json:"permissions"`
+	UserCode string `json:"user_code"`
+	Approve  *bool  `json:"approve"`
 }
 
 func deviceApproveHandler(c *gin.Context) *errs.Error {
@@ -68,13 +66,9 @@ func deviceApproveHandler(c *gin.Context) *errs.Error {
 	}
 
 	claims := handling.MustGetClaims(c)
-	var permissions []string
-	if req.Permissions != nil {
-		permissions = *req.Permissions
-	}
 
 	if err := oauthsvc.DecideDeviceAuthorization(
-		c.Request.Context(), claims.UserID, req.UserCode, *req.Approve, permissions,
+		c.Request.Context(), claims.UserID, req.UserCode, *req.Approve,
 	); err != nil {
 		return err
 	}

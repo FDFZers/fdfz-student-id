@@ -15,6 +15,7 @@ import (
 type PermissionInfo struct {
 	ID          int64
 	AppID       int64
+	AppName     string
 	Namespace   string
 	Value       string
 	String      string
@@ -75,7 +76,7 @@ func Load(ctx context.Context) *errs.Error {
 // loadCatalogSQL 只加载有效应用（active 且未删除）下的权限定义；应用停用后其权限不会进入快照。
 // 字段顺序与下方 pgx.CollectRows 的 Scan 参数一一对应。
 const loadCatalogSQL = `
-SELECT p.id, p.app_id, a.namespace, p.value, p.description, p.requestable
+SELECT p.id, p.app_id, a.name, a.namespace, p.value, p.description, p.requestable
 FROM permission_defs p
 JOIN apps a ON a.id = p.app_id
 WHERE a.status = 'active'
@@ -103,7 +104,7 @@ func loadCatalog(ctx context.Context) (*Catalog, *errs.Error) {
 	defs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*PermissionInfo, error) {
 		var info PermissionInfo
 		if err := row.Scan(
-			&info.ID, &info.AppID, &info.Namespace, &info.Value,
+			&info.ID, &info.AppID, &info.AppName, &info.Namespace, &info.Value,
 			&info.Description, &info.Requestable,
 		); err != nil {
 			return nil, err

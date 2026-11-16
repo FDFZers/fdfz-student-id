@@ -19,6 +19,41 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// getBindingsHandler 返回当前用户已绑定的邮箱、QQ 与 TOTP 状态，供账号安全页展示。
+// 未绑定的邮箱或 QQ 返回 null；TOTP 只返回是否启用，绝不返回密钥。
+func getBindingsHandler(c *gin.Context) *errs.Error {
+	claims := handling.MustGetClaims(c)
+	ctx := c.Request.Context()
+
+	email, err := usersvc.GetUserEmail(ctx, claims.UserID)
+	if err != nil {
+		return err
+	}
+	qq, err := usersvc.GetUserQQ(ctx, claims.UserID)
+	if err != nil {
+		return err
+	}
+	totp, err := usersvc.GetUserTOTP(ctx, claims.UserID)
+	if err != nil {
+		return err
+	}
+
+	var emailValue, qqValue *string
+	if email != nil {
+		emailValue = &email.Email
+	}
+	if qq != nil {
+		qqValue = &qq.QQ
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"email": emailValue,
+		"qq":    qqValue,
+		"totp":  totp != nil,
+	})
+	return nil
+}
+
 // emailBindInitReq 邮箱绑定发起请求体。
 type emailBindInitReq struct {
 	Email string `json:"email"`

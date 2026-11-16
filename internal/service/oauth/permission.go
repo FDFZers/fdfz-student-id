@@ -3,7 +3,6 @@ package oauth
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
@@ -12,13 +11,10 @@ import (
 	"fdfz-student-id/internal/util/slicex"
 )
 
-const (
-	MaxPermissions = 128
-)
-
 type PermissionInfo struct {
 	Permission  string `json:"permission"`
 	Description string `json:"description"`
+	SourceApp   string `json:"source_app,omitempty"`
 	Granted     bool   `json:"granted"`
 	Reason      string `json:"reason,omitempty"`
 }
@@ -26,30 +22,6 @@ type PermissionInfo struct {
 // ---------------------------------------------------------------------------
 // 解析与校验
 // ---------------------------------------------------------------------------
-
-func ParsePermissionParam(raw string) ([]string, *errs.Error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return []string{}, nil
-	}
-
-	seen := make(map[string]struct{})
-	permissions := make([]string, 0, 4)
-	for _, permission := range strings.Fields(strings.ReplaceAll(raw, ",", " ")) {
-		if strings.IndexByte(permission, 0) >= 0 {
-			return nil, errs.BadRequestError().AppendDetails("请求解析失败")
-		}
-		if _, ok := seen[permission]; ok {
-			continue
-		}
-		seen[permission] = struct{}{}
-		permissions = append(permissions, permission)
-	}
-	if len(permissions) > MaxPermissions {
-		return nil, errs.BadRequestError().AppendDetails("申请的权限数量过多")
-	}
-	return permissions, nil
-}
 
 func ValidatePermissionsAgainstApp(app *model.OAuthApp, permissions []string) *errs.Error {
 	if app == nil {
@@ -67,20 +39,11 @@ func ValidatePermissionsAgainstApp(app *model.OAuthApp, permissions []string) *e
 	return nil
 }
 
-// ResolveRequestedPermissions 解析并校验权限；参数为空时使用应用登记的全部可申请权限。
-func ResolveRequestedPermissions(app *model.OAuthApp, raw string) ([]string, *errs.Error) {
-	permissions, err := ParsePermissionParam(raw)
-	if err != nil {
-		return nil, err
-	}
-	if len(permissions) == 0 {
-		permissions = slicex.DedupeStrings(app.RequestedPerms)
-	}
+// ResolveRequestedPermissions 返回应用登记的全部可申请权限；OAuth 请求不再接受客户端指定权限。
+func ResolveRequestedPermissions(app *model.OAuthApp) ([]string, *errs.Error) {
+	permissions := slicex.DedupeStrings(app.RequestedPerms)
 	if len(permissions) == 0 {
 		return nil, errs.BadRequestError().AppendDetails("应用未登记可申请的权限")
-	}
-	if err := ValidatePermissionsAgainstApp(app, permissions); err != nil {
-		return nil, err
 	}
 	return permissions, nil
 }
@@ -124,6 +87,10 @@ func ResolvePermissionInfos(ctx context.Context, userID int64, permissions []str
 			info.Reason = "该权限不允许应用申请"
 		default:
 			info.Description = def.Description
+			info.SourceApp = def.AppName
+			if info.SourceApp == "" {
+				info.SourceApp = def.Namespace
+			}
 			if _, has := effectiveSet[permission]; !has {
 				info.Granted = false
 				info.Reason = "当前账户不具备该权限"
@@ -142,20 +109,6 @@ func GrantedPermissions(infos []PermissionInfo) []string {
 		}
 	}
 	return slicex.SortDedupe(permissions)
-}
-
-func restrictToRequested(granted, requested []string) []string {
-	allowed := make(map[string]struct{}, len(requested))
-	for _, permission := range requested {
-		allowed[permission] = struct{}{}
-	}
-	result := make([]string, 0, len(granted))
-	for _, permission := range granted {
-		if _, ok := allowed[permission]; ok {
-			result = append(result, permission)
-		}
-	}
-	return slicex.SortDedupe(result)
 }
 
 func effectiveGrantPermissions(ctx context.Context, userID int64, permissions []string) ([]string, *errs.Error) {

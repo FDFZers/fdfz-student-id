@@ -12,7 +12,6 @@ import (
 	appsvc "fdfz-student-id/internal/service/app"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
-	"fdfz-student-id/internal/util/slicex"
 
 	"github.com/google/uuid"
 )
@@ -25,11 +24,10 @@ const (
 // 授权请求
 // ---------------------------------------------------------------------------
 
-// AuthorizationParams 是授权请求参数，不要求 response_type 等协议字段。
+// AuthorizationParams 是授权请求参数，不要求 response_type 等协议字段；权限固定取自应用登记值。
 type AuthorizationParams struct {
 	ClientID      string
 	RedirectURI   string
-	Permission    string
 	State         string
 	CodeChallenge string // 可选，提供时按 SHA-512 校验
 }
@@ -90,7 +88,7 @@ func PreviewAuthorization(
 		return nil, errs.BadRequestError().AppendDetails("state 参数过长")
 	}
 
-	permissions, err := ResolveRequestedPermissions(app, params.Permission)
+	permissions, err := ResolveRequestedPermissions(app)
 	if err != nil {
 		return nil, err
 	}
@@ -154,13 +152,12 @@ func PreviewAuthorization(
 // 确认
 // ---------------------------------------------------------------------------
 
-// ApproveAuthorization 处理同意/拒绝并返回客户端回调地址；permissions 非 nil 时只授予其中部分权限。
+// ApproveAuthorization 处理同意/拒绝并返回客户端回调地址；授予应用登记的全部可授予权限。
 func ApproveAuthorization(
 	ctx context.Context,
 	userID int64,
 	requestID string,
 	approve bool,
-	permissions []string,
 ) (string, *errs.Error) {
 	request, err := TakeConsentRequest(ctx, requestID)
 	if err != nil {
@@ -206,16 +203,6 @@ func ApproveAuthorization(
 		return "", err
 	}
 	granted := GrantedPermissions(infos)
-
-	if permissions != nil {
-		selected := slicex.DedupeStrings(permissions)
-		for _, permission := range selected {
-			if !slices.Contains(request.Permissions, permission) {
-				return "", errs.BadRequestError().AppendDetails("提交的权限不在本次申请范围内")
-			}
-		}
-		granted = restrictToRequested(granted, selected)
-	}
 
 	code, err := createAuthorizationAndCode(ctx, request, granted)
 	if err != nil {

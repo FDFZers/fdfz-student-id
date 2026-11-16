@@ -241,7 +241,7 @@ end
 if data.status == 'denied' then
     return cjson.encode({status='denied'})
 end
-local interval = (tonumber(data.interval_seconds) or 5) * 1000
+local interval = (tonumber(data.interval_seconds) or 4) * 1000
 local tooFast = false
 if data.last_polled_at and tonumber(data.last_polled_at) > 0 and now - tonumber(data.last_polled_at) < interval then
     tooFast = true

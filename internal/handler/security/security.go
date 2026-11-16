@@ -19,6 +19,9 @@ const (
 func InitRoutes(internal *gin.RouterGroup) {
 	group := internal.Group("/security")
 
+	// 当前账号已绑定的二次验证方式
+	group.GET("/binding", middleware.RequireToken(), handling.Wrap("绑定信息获取失败", getBindingsHandler))
+
 	// 邮箱、TOTP、QQ 的绑定与解绑
 	group.POST("/email/init", middleware.RequireStepupToken(), handling.Wrap("邮箱绑定失败", emailBindInitHandler))
 	group.POST("/email/verify", middleware.RequireStepupToken(), handling.Wrap("邮箱绑定失败", emailBindVerifyHandler))
