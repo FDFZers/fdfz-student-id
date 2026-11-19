@@ -29,6 +29,7 @@ type PermissionInfo struct {
 // 注意：快照发布后只读，重载时整体替换指针，不要在运行时修改其内容。
 type Catalog struct {
 	Defs        []*PermissionInfo
+	ByID        map[int64]*PermissionInfo
 	ByString    map[string]*PermissionInfo
 	ByNamespace map[string][]*PermissionInfo
 }
@@ -41,6 +42,7 @@ var (
 // EmptyCatalog 返回不含任何权限定义的空目录，用于兜底与测试。
 func EmptyCatalog() *Catalog {
 	return &Catalog{
+		ByID:        map[int64]*PermissionInfo{},
 		ByString:    map[string]*PermissionInfo{},
 		ByNamespace: map[string][]*PermissionInfo{},
 	}
@@ -122,15 +124,14 @@ func loadCatalog(ctx context.Context) (*Catalog, *errs.Error) {
 	}
 
 	// 校验完整性：完整权限串不允许重复（数据库有 (app_id, value) 唯一约束，此处为防御性校验）
-	defByID := make(map[int64]*PermissionInfo, len(defs))
 	for _, def := range defs {
 		if _, ok := cat.ByString[def.String]; ok {
 			return nil, errs.CreateAndLogInternalError(fmt.Errorf("duplicate permission %q", def.String), "Duplicate permission", "permission", def.String).
 				AppendDetails("权限存在重复定义", "权限定义加载失败")
 		}
+		cat.ByID[def.ID] = def
 		cat.ByString[def.String] = def
 		cat.ByNamespace[def.Namespace] = append(cat.ByNamespace[def.Namespace], def)
-		defByID[def.ID] = def
 	}
 
 	// 加载并组装继承边
@@ -155,8 +156,8 @@ func loadCatalog(ctx context.Context) (*Catalog, *errs.Error) {
 	implRows.Close()
 
 	for _, e := range edges {
-		from, ok1 := defByID[e.from]
-		to, ok2 := defByID[e.to]
+		from, ok1 := cat.ByID[e.from]
+		to, ok2 := cat.ByID[e.to]
 		// 任一端被禁用/下线时静默忽略该边
 		if !ok1 || !ok2 {
 			continue

@@ -22,6 +22,7 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/login/init", handling.Wrap("登录失败", loginInitHandler))
 	i.POST("/login/finalize", handling.Wrap("登录失败", loginFinalizeHandler))
 	i.POST("/refresh", handling.Wrap("令牌刷新失败", refreshTokenHandler))
+	i.GET("/claims", middleware.RequireToken(), handling.Wrap("令牌声明获取失败", claimsHandler))
 	i.POST("/logout", middleware.RequireToken(), handling.Wrap("登出失败", logoutHandler))
 
 	i.POST("/password_reset/init/email", handling.Wrap("密码重置初始化失败", resetPasswordEmailInitHandler))
@@ -38,7 +39,10 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	i.POST("/stepup/init", middleware.RequireToken(), handling.Wrap("二次验证初始化失败", stepupInitHandler))
 	i.POST("/stepup/finalize", middleware.RequireToken(), handling.Wrap("二次验证失败", stepupFinalizeHandler))
 
-	// JWKS 供其他服务离线校验本服务签发的 JWT。
+	// 令牌声明：internal 供本站前端（Cookie + Bearer），api 供 OAuth 客户端用访问令牌取权限。
+	i.GET("/claims", middleware.RequireToken(), handling.Wrap("令牌声明获取失败", claimsHandler))
+	// OAuth 客户端用访问令牌（Bearer）取权限声明；JWKS 供其他服务离线校验本服务签发的 JWT。
+	a.GET("/claims", middleware.RequireToken(), handling.Wrap("令牌声明获取失败", claimsHandler))
 	a.GET("/jwks", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
 		c.String(http.StatusOK, crypto.JWKS)

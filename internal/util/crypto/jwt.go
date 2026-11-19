@@ -78,15 +78,14 @@ func LoadJWTKeys() error {
 }
 
 // GenerateJWT 使用 RS512 签发 JWT，jti 取传入的 id，签发者固定为 fdfz-student-id。
-// 注意：签发前会复制并排序权限/所属应用列表，保证相同授权得到稳定的令牌内容，不会修改入参。
+// 注意：签发前会复制并升序去重权限 ID，保证相同授权得到稳定的令牌内容，不会修改入参。
 func GenerateJWT(id uuid.UUID, claims *model.TokenClaims, ttl time.Duration) (string, error) {
 	now := time.Now()
 
 	claimsCopy := *claims
 	claimsCopy.Permissions = slices.Clone(claims.Permissions)
 	slices.Sort(claimsCopy.Permissions)
-	claimsCopy.OwnedApps = slices.Clone(claims.OwnedApps)
-	slices.Sort(claimsCopy.OwnedApps)
+	claimsCopy.Permissions = slices.Compact(claimsCopy.Permissions)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS512, &model.RegisteredTokenClaims{
 		TokenClaims: claimsCopy,

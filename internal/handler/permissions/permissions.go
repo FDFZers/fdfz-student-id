@@ -9,7 +9,7 @@ import (
 )
 
 // InitRoutes 在 /permissions 下注册权限管理相关路由。
-// 应用维度接口用 RequireAppAccess 鉴权：拥有全局权限，或拥有 owned_apps 系列权限且是该应用所有者；
+// 应用维度接口用 RequireAppAccess 鉴权：拥有全局权限，或拥有应用所有者权限且是该应用所有者；
 // 全局维度接口用 RequirePermission 鉴权。
 func InitRoutes(internal *gin.RouterGroup) {
 	group := internal.Group("/permissions")

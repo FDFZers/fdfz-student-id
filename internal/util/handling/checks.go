@@ -37,13 +37,9 @@ func UserHasWritePerm(ctx context.Context, userID int64) (bool, *errs.Error) {
 	return false, nil
 }
 
+// HasUsersNamespacePerm 判断令牌是否拥有 student_id:users.* 下的任意权限。
 func HasUsersNamespacePerm(claims *model.RegisteredTokenClaims) bool {
-	for _, permission := range claims.Permissions {
-		if strings.HasPrefix(permission, "student_id:users.") {
-			return true
-		}
-	}
-	return false
+	return permsvc.HasPermissionPrefix(claims, "student_id:users.")
 }
 
 func IsGlobalAppAdmin(claims *model.RegisteredTokenClaims) bool {

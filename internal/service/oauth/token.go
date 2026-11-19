@@ -10,6 +10,7 @@ import (
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/slicex"
 
@@ -30,16 +31,15 @@ type TokenResponse struct {
 // 签发
 // ---------------------------------------------------------------------------
 
-// issueAccessToken 签发 RS512 JWT 访问令牌，权限排序去重后写入 claims。
+// issueAccessToken 签发 RS512 JWT 访问令牌，权限 ID 排序去重后写入 claims。
+// OAuth 令牌同样只携带权限 ID，客户端可通过 /api/internal/auth/claims 换取具体权限串。
 func issueAccessToken(userID, appID, authID int64, permissions []string) (string, int64, error) {
-	perms := slicex.SortDedupe(permissions)
-
 	token, err := crypto.GenerateJWT(uuid.New(), &model.TokenClaims{
 		UserID:      userID,
 		TokenType:   model.TokenTypeOAuth,
 		AppID:       null.StringFrom(strconv.FormatInt(appID, 10)),
 		AuthID:      null.IntFrom(authID),
-		Permissions: perms,
+		Permissions: permsvc.ToIDs(slicex.DedupeStrings(permissions)),
 	}, cfg.C.OAuthAccessTokenTTL)
 	if err != nil {
 		return "", 0, err

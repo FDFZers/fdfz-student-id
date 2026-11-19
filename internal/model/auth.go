@@ -71,14 +71,15 @@ type UserSession struct {
 }
 
 // TokenClaims JWT 自定义声明，用户访问令牌、提权令牌与 OAuth 应用令牌共用。
+// 注意：为避免 JWT（进而 Set-Cookie）体积随权限数量膨胀，令牌内只保存权限 ID，
+// 具体权限串与应用所有者信息由 /api/internal/auth/claims 接口另行提供。
 type TokenClaims struct {
 	UserID      int64       `json:"user_id"`
 	TokenType   TokenType   `json:"token_type"`            // 令牌类型，决定其可访问的接口
-	Permissions []string    `json:"permissions"`           // 已解析的权限，如 student_id:users.list
+	Permissions []int64     `json:"permissions"`           // 已解析权限的 ID，升序去重，如 [3,7]
 	AppID       null.String `json:"app_id,omitzero"`       // 【OAuth 令牌】所属应用 ID
 	AuthID      null.Int    `json:"auth_id,omitzero"`      // 【OAuth 令牌】对应的授权记录 ID
 	SessionID   null.String `json:"session_id,omitzero"`   // 【提权令牌】绑定的登录会话 UUID
-	OwnedApps   []int64     `json:"owned_apps,omitzero"`   // 【用户令牌】用户名下有效应用 ID，用于应用所有者鉴权
 	IsTemporary bool        `json:"is_temporary,omitzero"` // 【用户令牌】是否为临时会话
 }
 

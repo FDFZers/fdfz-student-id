@@ -5,7 +5,6 @@ import (
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
-	appsvc "fdfz-student-id/internal/service/app"
 	authsvc "fdfz-student-id/internal/service/auth"
 	captchasvc "fdfz-student-id/internal/service/captcha"
 	permsvc "fdfz-student-id/internal/service/perm"
@@ -197,12 +196,8 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return cause
 	}
 
-	// 解析权限与所属应用，签发访问令牌
+	// 解析权限并签发访问令牌：令牌内只写权限 ID，具体权限串由 /auth/claims 提供。
 	perms, err := userpermsvc.ListUserEffectivePermissions(c.Request.Context(), authSession.UserID)
-	if err != nil {
-		return rollback(err)
-	}
-	ownedApps, err := appsvc.ListOwnedAppIDs(c.Request.Context(), authSession.UserID)
 	if err != nil {
 		return rollback(err)
 	}
@@ -210,8 +205,7 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	accessToken, e := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      authSession.UserID,
 		TokenType:   model.TokenTypeUser,
-		Permissions: permsvc.ResolvePatterns(perms),
-		OwnedApps:   ownedApps,
+		Permissions: permsvc.ToIDs(perms),
 		IsTemporary: authSession.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
 	if e != nil {
@@ -282,16 +276,11 @@ func refreshTokenHandler(c *gin.Context) *errs.Error {
 	if err != nil {
 		return err
 	}
-	ownedApps, err := appsvc.ListOwnedAppIDs(c.Request.Context(), session.UserID)
-	if err != nil {
-		return err
-	}
 
 	accessToken, e := crypto.GenerateJWT(session.UUID, &model.TokenClaims{
 		UserID:      session.UserID,
 		TokenType:   model.TokenTypeUser,
-		Permissions: permsvc.ResolvePatterns(perms),
-		OwnedApps:   ownedApps,
+		Permissions: permsvc.ToIDs(perms),
 		IsTemporary: session.IsTemporary,
 	}, cfg.C.AccessTokenTTL)
 	if e != nil {

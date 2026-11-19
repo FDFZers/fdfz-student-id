@@ -83,7 +83,7 @@ WHERE owner_user_id = $1 AND deleted_at IS NULL AND status = 'active'
 ORDER BY id
 `
 
-// ListOwnedAppIDs 返回用户名下有效应用的 ID 列表（用于写入访问令牌的 owned_apps 声明）。
+// ListOwnedAppIDs 返回用户名下有效应用的 ID 列表（供 /auth/claims 下发，以及应用所有者鉴权使用）。
 // 只统计 active 且未删除的应用，停用应用不参与「应用所有者」鉴权。
 func ListOwnedAppIDs(ctx context.Context, userID int64) ([]int64, *errs.Error) {
 	rows, err := db.R.Query(ctx, listOwnedAppIDsSQL, userID)
@@ -104,6 +104,23 @@ func ListOwnedAppIDs(ctx context.Context, userID int64) ([]int64, *errs.Error) {
 		return nil, errs.CreatePGError(err, "应用", "Failed to iterate owned app ids").AppendDetails("应用列表获取失败")
 	}
 	return ids, nil
+}
+
+const isOwnedAppSQL = `
+SELECT EXISTS (
+    SELECT 1 FROM apps
+    WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL AND status = 'active'
+)
+`
+
+// IsOwnedBy 判断应用是否属于指定用户且仍有效（active、未删除）。
+// 访问令牌只保存权限 ID，应用所有者身份不再写入 JWT，改由该查询判定。
+func IsOwnedBy(ctx context.Context, appID, userID int64) (bool, *errs.Error) {
+	var owned bool
+	if err := db.R.QueryRow(ctx, isOwnedAppSQL, appID, userID).Scan(&owned); err != nil {
+		return false, errs.CreatePGError(err, "应用", "Failed to check app ownership").AppendDetails("应用信息获取失败")
+	}
+	return owned, nil
 }
 
 const listAllAppsSQL = `SELECT ` + appColumns + ` FROM apps WHERE deleted_at IS NULL ORDER BY id`

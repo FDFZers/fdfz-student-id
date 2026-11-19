@@ -5,7 +5,7 @@ import "sort"
 // ResolvePatterns 把用户的有效授权（可能含 "*" / "**" 模式）按当前目录快照展开为具体权限串。
 //
 // 展开流程：对每个 pattern 解析出命名空间，在快照中找出同一命名空间下匹配的权限定义，
-// 再沿权限继承图收集被隐含的权限，最终去重并按字典序排序（JWT claims 依赖该顺序做二分查找）。
+// 再沿权限继承图收集被隐含的权限，最终去重并按字典序排序（签发令牌时再经 ToIDs 转为权限 ID）。
 // 无法解析的 pattern 会被静默跳过，避免历史脏数据导致登录失败。
 // 注意：结果依赖当前目录快照；快照尚未加载时返回空列表。
 func ResolvePatterns(patterns []string) []string {
@@ -49,6 +49,42 @@ func ResolvePatterns(patterns []string) []string {
 		result = append(result, v)
 	}
 	sort.Strings(result)
+	return result
+}
+
+// ToIDs 把已展开的具体权限串（如 ResolvePatterns 的结果）映射为权限 ID，供 JWT 精简存储。
+// 结果升序去重；目录中已不存在的权限被静默跳过，避免历史数据导致签发失败。
+func ToIDs(permissions []string) []int64 {
+	cat := Snapshot()
+
+	seen := make(map[int64]struct{}, len(permissions))
+	ids := make([]int64, 0, len(permissions))
+	for _, permission := range permissions {
+		def, ok := cat.ByString[permission]
+		if !ok {
+			continue
+		}
+		if _, dup := seen[def.ID]; dup {
+			continue
+		}
+		seen[def.ID] = struct{}{}
+		ids = append(ids, def.ID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+// Strings 把权限 ID 还原为具体权限串，顺序与入参 ID 一致。
+// 目录中已下线的权限 ID 会被跳过，调用方无需处理空值。
+func Strings(ids []int64) []string {
+	cat := Snapshot()
+
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if def, ok := cat.ByID[id]; ok {
+			result = append(result, def.String)
+		}
+	}
 	return result
 }
 

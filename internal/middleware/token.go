@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	appsvc "fdfz-student-id/internal/service/app"
 	authsvc "fdfz-student-id/internal/service/auth"
 	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -177,7 +177,7 @@ func RequireStepupToken() gin.HandlerFunc {
 
 // RequireAppAccess 校验当前用户对路由参数 appParam 指定应用的访问权限。
 // 持有 globalPermission 时放行并写入 app_access_scope=global；否则要求持有 ownedAppPermission
-// 且应用在令牌的 owned_apps 中，写入 app_access_scope=owner 与 app_access_app_id。
+// 且应用归属该用户（按数据库判定，不再随令牌下发），写入 app_access_scope=owner 与 app_access_app_id。
 func RequireAppAccess(appParam string, globalPermission string, ownedAppPermission string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		RequireToken()(c)
@@ -202,7 +202,17 @@ func RequireAppAccess(appParam string, globalPermission string, ownedAppPermissi
 			return
 		}
 
-		if !permsvc.HasPermission(claims, ownedAppPermission) || !slices.Contains(claims.OwnedApps, appID) {
+		if !permsvc.HasPermission(claims, ownedAppPermission) {
+			errs.PermissionDeniedError().AppendDetails("权限不足").Abort(c)
+			return
+		}
+		// 应用所有者身份不再随令牌下发，按数据库中的应用归属判定。
+		owned, ownedErr := appsvc.IsOwnedBy(c.Request.Context(), appID, claims.UserID)
+		if ownedErr != nil {
+			ownedErr.Abort(c)
+			return
+		}
+		if !owned {
 			errs.PermissionDeniedError().AppendDetails("权限不足").Abort(c)
 			return
 		}
