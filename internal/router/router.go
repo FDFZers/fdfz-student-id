@@ -82,7 +82,7 @@ func InitRouter(r *gin.Engine) {
 	auth.InitRoutes(v1, internal)
 	regreq.InitRoutes(v1, internal)
 	user.InitRoutes(v1, internal)
-	security.InitRoutes(internal)
+	security.InitRoutes(v1, internal)
 	permissions.InitRoutes(internal)
 	app.InitRoutes(v1, internal)
 	oauth.InitRoutes(v1)

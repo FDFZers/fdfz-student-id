@@ -19,38 +19,244 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// getBindingsHandler 返回当前用户已绑定的邮箱、QQ 与 TOTP 状态，供账号安全页展示。
-// 未绑定的邮箱或 QQ 返回 null；TOTP 只返回是否启用，绝不返回密钥。
-func getBindingsHandler(c *gin.Context) *errs.Error {
+// bindingTargetID 解析绑定接口的目标用户：未带 :id 时返回当前用户，带 :id 时校验目标用户存在。
+// 自己与他人的读取权限由路由中间件区分，这里只负责解析 ID 并避免用 404/403 差异探测用户。
+func bindingTargetID(c *gin.Context) (int64, *errs.Error) {
 	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseUserID(c, claims.UserID, "id")
+	if err != nil {
+		return 0, err
+	}
+	if targetID != claims.UserID {
+		if err := handling.EnsureUserExists(c, targetID); err != nil {
+			return 0, err
+		}
+	}
+	return targetID, nil
+}
+
+// getBindingStatusHandler 返回目标用户的邮箱、QQ 与 TOTP 是否已绑定，供账号安全页展示。
+func getBindingStatusHandler(c *gin.Context) *errs.Error {
+	targetID, err := bindingTargetID(c)
+	if err != nil {
+		return err
+	}
 	ctx := c.Request.Context()
 
-	email, err := usersvc.GetUserEmail(ctx, claims.UserID)
+	email, err := usersvc.GetUserEmail(ctx, targetID)
 	if err != nil {
 		return err
 	}
-	qq, err := usersvc.GetUserQQ(ctx, claims.UserID)
+	qq, err := usersvc.GetUserQQ(ctx, targetID)
 	if err != nil {
 		return err
 	}
-	totp, err := usersvc.GetUserTOTP(ctx, claims.UserID)
+	totp, err := usersvc.GetUserTOTP(ctx, targetID)
 	if err != nil {
 		return err
-	}
-
-	var emailValue, qqValue *string
-	if email != nil {
-		emailValue = &email.Email
-	}
-	if qq != nil {
-		qqValue = &qq.QQ
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"email": emailValue,
-		"qq":    qqValue,
+		"email": email != nil,
+		"qq":    qq != nil,
 		"totp":  totp != nil,
 	})
+	return nil
+}
+
+// getBindingEmailHandler 返回目标用户已绑定的邮箱，未绑定时为 null。
+func getBindingEmailHandler(c *gin.Context) *errs.Error {
+	targetID, err := bindingTargetID(c)
+	if err != nil {
+		return err
+	}
+
+	email, err := usersvc.GetUserEmail(c.Request.Context(), targetID)
+	if err != nil {
+		return err
+	}
+
+	var value *string
+	if email != nil {
+		value = &email.Email
+	}
+
+	c.JSON(http.StatusOK, gin.H{"email": value})
+	return nil
+}
+
+// getBindingQQHandler 返回目标用户已绑定的 QQ，未绑定时为 null。
+func getBindingQQHandler(c *gin.Context) *errs.Error {
+	targetID, err := bindingTargetID(c)
+	if err != nil {
+		return err
+	}
+
+	qq, err := usersvc.GetUserQQ(c.Request.Context(), targetID)
+	if err != nil {
+		return err
+	}
+
+	var value *string
+	if qq != nil {
+		value = &qq.QQ
+	}
+
+	c.JSON(http.StatusOK, gin.H{"qq": value})
+	return nil
+}
+
+// setBindingEmailReq 管理员设置邮箱绑定的请求体。
+type setBindingEmailReq struct {
+	Email string `json:"email"`
+}
+
+// setBindingEmailHandler 管理员直接设置目标用户的邮箱绑定，绕过邮箱验证码校验。
+func setBindingEmailHandler(c *gin.Context) *errs.Error {
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseID(c, "id", "用户")
+	if err != nil {
+		return err
+	}
+
+	var req setBindingEmailReq
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
+	}
+	if err := handling.ValidateEmail(req.Email); err != nil {
+		return err
+	}
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
+		return err
+	}
+
+	ctx := c.Request.Context()
+
+	// 已绑定同一邮箱时直接返回，避免重复写入历史记录
+	current, err := usersvc.GetUserEmail(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	if current != nil && strings.EqualFold(current.Email, req.Email) {
+		handling.RespondOK(c)
+		return nil
+	}
+
+	// 邮箱在全局唯一；此时 current 要么为空，要么是另一个待替换的邮箱
+	taken, err := usersvc.IsEmailTaken(ctx, req.Email)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return errs.ConflictError().AppendDetails("该邮箱已被其他用户绑定")
+	}
+
+	if err := usersvc.SetUserEmail(ctx, db.R, &model.UserEmail{
+		UserID: targetID,
+		Email:  req.Email,
+	}); err != nil {
+		return err
+	}
+
+	slog.Info("User email binding set by admin", "user_id", targetID, "operator_id", claims.UserID)
+	handling.RespondOK(c)
+	return nil
+}
+
+// deleteBindingEmailHandler 管理员删除目标用户的邮箱绑定。
+func deleteBindingEmailHandler(c *gin.Context) *errs.Error {
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseID(c, "id", "用户")
+	if err != nil {
+		return err
+	}
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
+		return err
+	}
+
+	if err := usersvc.DeleteUserEmail(c.Request.Context(), targetID); err != nil {
+		return err
+	}
+
+	slog.Info("User email binding deleted by admin", "user_id", targetID, "operator_id", claims.UserID)
+	handling.RespondOK(c)
+	return nil
+}
+
+// setBindingQQReq 管理员设置 QQ 绑定的请求体。
+type setBindingQQReq struct {
+	QQ string `json:"qq"`
+}
+
+// setBindingQQHandler 管理员直接设置目标用户的 QQ 绑定，绕过 QQ 消息验证码校验。
+func setBindingQQHandler(c *gin.Context) *errs.Error {
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseID(c, "id", "用户")
+	if err != nil {
+		return err
+	}
+
+	var req setBindingQQReq
+	if err := handling.BindJSON(c, &req); err != nil {
+		return err
+	}
+	if err := handling.ValidateQQ(req.QQ); err != nil {
+		return err
+	}
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
+		return err
+	}
+
+	ctx := c.Request.Context()
+
+	// 已绑定同一 QQ 时直接返回，避免重复写入历史记录
+	current, err := usersvc.GetUserQQ(ctx, targetID)
+	if err != nil {
+		return err
+	}
+	if current != nil && current.QQ == req.QQ {
+		handling.RespondOK(c)
+		return nil
+	}
+
+	// QQ 号在全局唯一；检查时 current 若存在也只可能是另一个待替换的 QQ
+	taken, err := usersvc.IsQQTaken(ctx, req.QQ)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return errs.ConflictError().AppendDetails("该 QQ 已被其他用户绑定")
+	}
+
+	if err := usersvc.SetUserQQ(ctx, db.R, &model.UserQQ{
+		UserID: targetID,
+		QQ:     req.QQ,
+	}); err != nil {
+		return err
+	}
+
+	slog.Info("User QQ binding set by admin", "user_id", targetID, "operator_id", claims.UserID)
+	handling.RespondOK(c)
+	return nil
+}
+
+// deleteBindingQQHandler 管理员删除目标用户的 QQ 绑定。
+func deleteBindingQQHandler(c *gin.Context) *errs.Error {
+	claims := handling.MustGetClaims(c)
+	targetID, err := handling.ParseID(c, "id", "用户")
+	if err != nil {
+		return err
+	}
+	if err := handling.EnsureUserExists(c, targetID); err != nil {
+		return err
+	}
+
+	if err := usersvc.DeleteUserQQ(c.Request.Context(), targetID); err != nil {
+		return err
+	}
+
+	slog.Info("User QQ binding deleted by admin", "user_id", targetID, "operator_id", claims.UserID)
+	handling.RespondOK(c)
 	return nil
 }
 

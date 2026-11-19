@@ -2,7 +2,6 @@ package cfg
 
 import (
 	"encoding/json/v2"
-	"fdfz-student-id/internal/model"
 	"fmt"
 	"os"
 	"strings"
@@ -41,10 +40,10 @@ type Config struct {
 	AuthFrontendURL           string // 认证前端地址，用于跳转：AUTH_FRONTEND_URL
 	SMTP                      SMTPConfig
 
-	SchoolIPs      map[string]model.School // 校园网 IP -> 学校映射（JSON），必填：SCHOOL_IPS
-	TrustedProxies []string                // 可信反向代理列表（逗号分隔）：TRUSTED_PROXIES
-	SharedDir      string                  // 本地文件共享目录，默认 ./shared：SHARED_DIR
-	BypassCaptcha  bool                    // 仅非生产环境生效，跳过 Altcha 校验：BYPASS_CAPTCHA=true
+	SchoolIPs      SchoolIPMatcher // 校园网 IP/CIDR 网段 -> 前端展示文本（JSON），必填：SCHOOL_IPS
+	TrustedProxies []string        // 可信反向代理列表（逗号分隔）：TRUSTED_PROXIES
+	SharedDir      string          // 本地文件共享目录，默认 ./shared：SHARED_DIR
+	BypassCaptcha  bool            // 仅非生产环境生效，跳过 Altcha 校验：BYPASS_CAPTCHA=true
 }
 
 // SMTPConfig 是发信服务配置，字段分别来自 SMTP_* 环境变量。
@@ -138,14 +137,22 @@ func LoadConfig() error {
 		return fmt.Errorf("JWT kid not set")
 	}
 
-	// SCHOOL_IPS 是 JSON 对象：{ "1.2.3.4": "fdfz" }，用于判断请求是否来自校园网。
+	// SCHOOL_IPS 是 JSON 对象，键为精确 IP 或 CIDR 网段，值为前端直接展示的文本：
+	// { "1.2.3.4": "复旦大学附属中学", "10.0.0.0/8": "复旦附中徐汇分校" }，
+	// 用于判断请求是否来自校园网并给出展示名称。
 	raw, err := requireEnv("SCHOOL_IPS")
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal([]byte(raw), &cfg.SchoolIPs); err != nil {
+	var schoolIPRules map[string]string
+	if err := json.Unmarshal([]byte(raw), &schoolIPRules); err != nil {
 		return fmt.Errorf("load env: invalid json SCHOOL_IPS: %w", err)
 	}
+	schoolIPs, err := parseSchoolIPMatcher(schoolIPRules)
+	if err != nil {
+		return fmt.Errorf("load env: invalid SCHOOL_IPS: %w", err)
+	}
+	cfg.SchoolIPs = schoolIPs
 
 	for p := range strings.SplitSeq(env("TRUSTED_PROXIES", ""), ",") {
 		if p = strings.TrimSpace(p); p != "" {

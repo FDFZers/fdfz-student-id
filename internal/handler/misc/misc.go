@@ -30,20 +30,17 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 		})
 	})
 
-	// 按 SCHOOL_IPS 映射判断客户端 IP 是否属于校园网，匹配不到时返回 other
+	// 按 SCHOOL_IPS 规则（精确 IP 或 CIDR 网段）判断客户端 IP 是否属于校园网：
+	// 命中时 type 为配置的前端展示文本，未命中时 type 为 null（前端据此视为普通网络）。
 	api.GET("/ipinfo", func(c *gin.Context) {
 		ip := c.ClientIP()
-		school, ok := cfg.C.SchoolIPs[ip]
-		if ok {
-			c.JSON(http.StatusOK, gin.H{
-				"ip":   ip,
-				"type": school,
-			})
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"ip":   ip,
-				"type": "other",
-			})
+		var schoolType *string
+		if text, ok := cfg.C.SchoolIPs.Lookup(ip); ok {
+			schoolType = &text
 		}
+		c.JSON(http.StatusOK, gin.H{
+			"ip":   ip,
+			"type": schoolType,
+		})
 	})
 }

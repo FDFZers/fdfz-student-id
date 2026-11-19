@@ -80,7 +80,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 校园 IP 内登录免二次验证，其余场景按已绑定的方式启用验证。
-	_, isSchoolIP := cfg.C.SchoolIPs[c.ClientIP()]
+	_, isSchoolIP := cfg.C.SchoolIPs.Lookup(c.ClientIP())
 	session, err := authsvc.CreateAuthSession(c.Request.Context(), authsvc.AuthSessionTypeLogin, isSchoolIP, usr.ID, req.IsTemporary)
 	if err != nil {
 		return err

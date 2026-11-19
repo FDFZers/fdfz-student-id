@@ -59,6 +59,18 @@ const (
 	PermUsersRelationWrite       = "student_id:users.relation.write"
 )
 
+// 绑定信息
+const (
+	PermBindingReadStatus = "student_id:binding.read.status"
+	PermBindingReadEmail  = "student_id:binding.read.email"
+	PermBindingReadQQ     = "student_id:binding.read.qq"
+
+	PermBindingsReadStatus = "student_id:bindings.read.status"
+	PermBindingsReadEmail  = "student_id:bindings.read.email"
+	PermBindingsReadQQ     = "student_id:bindings.read.qq"
+	PermBindingsWrite      = "student_id:bindings.write"
+)
+
 // 权限管理
 const (
 	PermPermissionRead   = "student_id:permission.read"
