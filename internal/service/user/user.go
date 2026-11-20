@@ -53,13 +53,13 @@ const createUserWithPasswordSQL = `
 WITH new_user AS (
     INSERT INTO users (
         username, type, student_num, real_name, school,
-        nickname, signature, bio, visibilities
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        nickname, signature, bio, visibilities, password_reset_required
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING id, created_at, updated_at
 ),
 new_password AS (
     INSERT INTO user_passwords (user_id, password)
-    SELECT id, $10
+    SELECT id, $11
     FROM new_user
     RETURNING user_id, updated_at
 )
@@ -106,6 +106,7 @@ func createUserWithPasswordAt(
 		u.Signature,
 		u.Bio,
 		vis,
+		u.PasswordResetRequired,
 		pwd.Password,
 	).Scan(
 		&u.ID,
@@ -157,7 +158,7 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 // getUserSQL 按 ID 查询用户，软删除的用户不返回。
 const getUserSQL = `
 SELECT id, username, type, student_num, real_name, school,
-    nickname, signature, bio, visibilities,
+    nickname, signature, bio, visibilities, password_reset_required,
     created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1 AND deleted_at IS NULL
@@ -165,7 +166,7 @@ WHERE id = $1 AND deleted_at IS NULL
 
 const getUserIncludingDeletedSQL = `
 SELECT id, username, type, student_num, real_name, school,
-    nickname, signature, bio, visibilities,
+    nickname, signature, bio, visibilities, password_reset_required,
     created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1
@@ -200,6 +201,7 @@ func scanUser(row pgx.Row) (*model.User, error) {
 		&u.Signature,
 		&u.Bio,
 		&vis,
+		&u.PasswordResetRequired,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 		&u.DeletedAt,

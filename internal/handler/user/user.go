@@ -42,6 +42,9 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	a.GET("/search/info", middleware.RequirePermission(permsvc.PermUsersList), handling.Wrap("用户搜索失败", searchInfoHandler))
 	a.POST("/search/query", middleware.RequirePermission(permsvc.PermUsersList), handling.Wrap("用户搜索失败", searchQueryHandler))
 
+	// 管理员直接创建账号，不经过注册申请审核流程
+	i.POST("", middleware.RequirePermission(permsvc.PermUsersCreate), handling.Wrap("用户创建失败", createUserHandler))
+
 	i.GET("/ban/:id", middleware.RequireToken(), handling.Wrap("用户封禁信息获取失败", getUserBanHandler))
 	i.POST("/ban/:id", middleware.RequirePermission(permsvc.PermUsersBanWrite), handling.Wrap("用户封禁失败", banUserHandler))
 	i.DELETE("/ban/:id", middleware.RequirePermission(permsvc.PermUsersBanWrite), handling.Wrap("用户解封失败", unbanUserHandler))

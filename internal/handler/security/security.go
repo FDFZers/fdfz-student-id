@@ -51,6 +51,7 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 
 	// 修改密码、注销账号与管理员删除用户
 	group.POST("/password/change", middleware.RequireStepupToken(), handling.Wrap("修改密码失败", changePasswordHandler))
+	group.PUT("/password/reset/:id", middleware.RequirePermission(permsvc.PermUsersPasswordWrite), handling.Wrap("密码重置失败", resetUserPasswordHandler))
 	group.DELETE("/account", middleware.RequireStepupToken(), handling.Wrap("账号注销失败", deleteAccountHandler))
 	group.DELETE("/profile/:id", middleware.RequirePermission(permsvc.PermUsersDelete), handling.Wrap("用户删除失败", deleteUserHandler))
 

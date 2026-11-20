@@ -6,6 +6,7 @@ import (
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -54,6 +55,70 @@ func UpsertUserPassword(ctx context.Context, pwd *model.UserPassword) *errs.Erro
 	if err != nil {
 		return errs.CreatePGError(err, "密码", "Failed to upsert user password").AppendDetails("密码设置失败")
 	}
+	return nil
+}
+
+// adminResetUserPasswordSQL 在单条语句中写入新密码并更新重设标记，避免两段写入之间出现不一致。
+// target 为空（用户不存在或已注销）时不会写入密码，主 UPDATE 也不会命中，最终返回无行。
+const adminResetUserPasswordSQL = `
+WITH target AS (
+    SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL
+),
+updated_password AS (
+    INSERT INTO user_passwords (user_id, password)
+    SELECT id, $2 FROM target
+    ON CONFLICT (user_id)
+    DO UPDATE SET password = EXCLUDED.password
+    RETURNING updated_at
+)
+UPDATE users
+SET password_reset_required = $3
+WHERE id IN (SELECT id FROM target)
+RETURNING (SELECT updated_at FROM updated_password)
+`
+
+// AdminResetUserPassword 管理员重置他人密码：pwdHash 必须已哈希，requireReset 决定用户下次登录是否被提示重设。
+// 注意：本函数只改密码与标记，不撤销登录会话；调用方需自行撤销目标用户全部会话与提权令牌。
+func AdminResetUserPassword(
+	ctx context.Context,
+	userID int64,
+	pwdHash string,
+	requireReset bool,
+) *errs.Error {
+	var updatedAt time.Time
+	err := db.R.QueryRow(ctx, adminResetUserPasswordSQL, userID, pwdHash, requireReset).
+		Scan(&updatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errs.NotFoundError().AppendDetails("用户不存在")
+		}
+		return errs.CreatePGError(err, "密码", "Failed to reset user password").AppendDetails("密码重置失败")
+	}
+
+	// 用户行上的 updated_at 已变化，必须让用户信息缓存失效。
+	db.R.Del(ctx, UserCacheKey(userID))
+	return nil
+}
+
+// setPasswordResetRequiredSQL 更新用户的重设密码标记。
+const setPasswordResetRequiredSQL = `
+UPDATE users
+SET password_reset_required = $2
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+// SetPasswordResetRequired 更新用户的重设密码标记，用于用户改密或自助重置后清除提示。
+// 用户不存在或已注销时返回 404。
+func SetPasswordResetRequired(ctx context.Context, userID int64, required bool) *errs.Error {
+	tag, err := db.R.Exec(ctx, setPasswordResetRequiredSQL, userID, required)
+	if err != nil {
+		return errs.CreatePGError(err, "用户", "Failed to update password reset required").AppendDetails("密码重设标记更新失败")
+	}
+	if tag.RowsAffected() == 0 {
+		return errs.NotFoundError().AppendDetails("用户不存在")
+	}
+
+	db.R.Del(ctx, UserCacheKey(userID))
 	return nil
 }
 

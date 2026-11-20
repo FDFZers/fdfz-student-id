@@ -9,8 +9,10 @@ const (
 
 // 用户
 const (
-	PermUsersList   = "student_id:users.list"
-	PermUsersDelete = "student_id:users.delete"
+	PermUsersList          = "student_id:users.list"
+	PermUsersCreate        = "student_id:users.create"
+	PermUsersDelete        = "student_id:users.delete"
+	PermUsersPasswordWrite = "student_id:users.password.write"
 
 	PermUserProfileReadBasic          = "student_id:user.profile.read.basic"
 	PermUserProfileReadIdentity       = "student_id:user.profile.read.identity"

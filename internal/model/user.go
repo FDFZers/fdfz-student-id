@@ -56,6 +56,9 @@ type User struct {
 
 	Visibilities Visibilities `json:"visibilities" db:"visibilities"` // 资料可见性，JSONB 列
 
+	// PasswordResetRequired 表示管理员创建账号或重置密码后，用户下次登录应重设密码。
+	PasswordResetRequired bool `json:"password_reset_required" db:"password_reset_required"`
+
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 	DeletedAt null.Time `json:"deleted_at" db:"deleted_at"` // 软删除时间，非空表示已注销

@@ -17,7 +17,7 @@ import (
 var searchCfg = searchsvc.SearchConfig{
 	Table:             "users",
 	Item:              "用户",
-	Columns:           []string{"id", "username", "type", "student_num", "real_name", "school", "nickname", "signature", "bio", "visibilities", "created_at", "updated_at", "deleted_at"},
+	Columns:           []string{"id", "username", "type", "student_num", "real_name", "school", "nickname", "signature", "bio", "visibilities", "password_reset_required", "created_at", "updated_at", "deleted_at"},
 	Fields:            []searchsvc.Field{{ID: "username", Column: "username"}, {ID: "nickname", Column: "nickname"}, {ID: "student_num", Column: "student_num"}},
 	MatchMethods:      searchsvc.MatchMethodValues(),
 	SortableFields:    []searchsvc.Field{{ID: "username", Column: "username"}, {ID: "nickname", Column: "nickname"}, {ID: "student_num", Column: "student_num"}, {ID: "created_at", Column: "created_at"}},

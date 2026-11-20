@@ -79,6 +79,11 @@ func changePasswordHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 用户自行改密后不再需要重设提示
+	if err := usersvc.SetPasswordResetRequired(c.Request.Context(), claims.UserID, false); err != nil {
+		return err
+	}
+
 	// 使全部提权令牌失效，并按需撤销其他会话
 	if err := authsvc.RevokeUserStepups(c.Request.Context(), claims.UserID); err != nil {
 		return err

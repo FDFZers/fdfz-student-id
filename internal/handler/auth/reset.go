@@ -215,6 +215,11 @@ func resetPasswordFinalizeHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 自助重置密码后不再需要重设提示
+	if err := usersvc.SetPasswordResetRequired(c.Request.Context(), session.UserID, false); err != nil {
+		return err
+	}
+
 	// 重置密码后强制撤销全部会话与提权令牌
 	if err := authsvc.RevokeAllUserSessions(c.Request.Context(), session.UserID); err != nil {
 		return err

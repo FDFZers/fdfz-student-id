@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TABLE users
+    DROP COLUMN password_reset_required;
+
+COMMIT;
