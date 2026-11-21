@@ -75,7 +75,7 @@ func listSessionsHandler(c *gin.Context) *errs.Error {
 	// 自己与他人的会话读取使用不同权限
 	var allowed bool
 	if selfID == claims.UserID {
-		allowed = permsvc.HasPermission(claims, permsvc.PermUserSessionRead)
+		allowed = claims.TokenType == model.TokenTypeUser
 	} else {
 		allowed = permsvc.HasPermission(claims, permsvc.PermUsersSessionRead)
 	}

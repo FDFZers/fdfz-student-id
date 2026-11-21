@@ -29,7 +29,7 @@ type loginInitRequestReq struct {
 }
 
 // loginInitHandler 校验用户名密码、封禁状态与 Altcha，创建登录用鉴权会话并返回可用的二次验证方式。
-// 注意：不需要二次验证（校园 IP 或未绑定任何方式）时直接返回 passed=true，由 finalize 建会话；
+// 注意：不需要二次验证（校园 IP、用户关闭登录二次验证或未绑定任何方式）时直接返回 passed=true，由 finalize 建会话；
 // 用户不存在时也执行一次密码哈希，避免通过响应耗时枚举账号。
 func loginInitHandler(c *gin.Context) *errs.Error {
 	var req loginInitRequestReq
@@ -78,9 +78,9 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 		return handling.BannedError(ban)
 	}
 
-	// 校园 IP 内登录免二次验证，其余场景按已绑定的方式启用验证。
+	// 校园 IP 内登录免二次验证；其余场景按已绑定的方式启用验证，用户主动关闭登录二次验证时同样跳过。
 	_, isSchoolIP := cfg.C.SchoolIPs.Lookup(c.ClientIP())
-	session, err := authsvc.CreateAuthSession(c.Request.Context(), authsvc.AuthSessionTypeLogin, isSchoolIP, usr.ID, req.IsTemporary)
+	session, err := authsvc.CreateAuthSession(c.Request.Context(), authsvc.AuthSessionTypeLogin, isSchoolIP, usr.ID, req.IsTemporary, usr.TwoFactorEnabled)
 	if err != nil {
 		return err
 	}

@@ -38,6 +38,10 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	group.PUT("/binding/:id/qq", middleware.RequirePermission(permsvc.PermBindingsWrite), handling.Wrap("绑定 QQ 设置失败", setBindingQQHandler))
 	group.DELETE("/binding/:id/qq", middleware.RequirePermission(permsvc.PermBindingsWrite), handling.Wrap("绑定 QQ 删除失败", deleteBindingQQHandler))
 
+	// 登录二次验证开关：查询只要求访问令牌，修改要求提权令牌；仅影响登录流程，提权仍强制校验
+	group.GET("/2fa", middleware.RequireUserToken(), handling.Wrap("二次验证设置获取失败", getTwoFactorSettingHandler))
+	group.PUT("/2fa", middleware.RequireStepupToken(), handling.Wrap("二次验证设置修改失败", updateTwoFactorSettingHandler))
+
 	// 邮箱、TOTP、QQ 的绑定与解绑
 	group.POST("/email/init", middleware.RequireStepupToken(), handling.Wrap("邮箱绑定失败", emailBindInitHandler))
 	group.POST("/email/verify", middleware.RequireStepupToken(), handling.Wrap("邮箱绑定失败", emailBindVerifyHandler))

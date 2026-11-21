@@ -17,7 +17,7 @@ import (
 )
 
 // stepupInitHandler 为当前登录用户创建提权用鉴权会话，强制启用全部已绑定的二次验证方式。
-// 注意：临时会话不允许提权。
+// 注意：关闭「登录二次验证」只影响登录，提权仍按已绑定的方式校验；临时会话不允许提权。
 func stepupInitHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
@@ -33,7 +33,8 @@ func stepupInitHandler(c *gin.Context) *errs.Error {
 		return handling.BannedError(ban)
 	}
 
-	session, err := authsvc.CreateAuthSession(c.Request.Context(), authsvc.AuthSessionTypeStepup, false, claims.UserID, false)
+	// 提权始终按已绑定的方式校验，不受「登录二次验证」开关影响
+	session, err := authsvc.CreateAuthSession(c.Request.Context(), authsvc.AuthSessionTypeStepup, false, claims.UserID, false, true)
 	if err != nil {
 		return err
 	}

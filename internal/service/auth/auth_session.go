@@ -112,15 +112,17 @@ func TryAcquireQQRateLimit(ctx context.Context, qq string) *errs.Error {
 }
 
 // CreateAuthSession 按登录上下文创建鉴权会话并写入 Redis，返回会话与可用的二次验证方式。
-// 登录类型在校园 IP 内免二次验证；提权类型强制启用全部已绑定方式；密码重置类型只用邮箱与 QQ。
-// 注意：没有任何可用验证方式时 Passed2FA 直接为 true。
-func CreateAuthSession(ctx context.Context, typ AuthSessionType, isSchoolIp bool, userID int64, isTemporary bool) (*AuthSession, *errs.Error) {
+// 登录类型在校园 IP 内或用户关闭「登录二次验证」时免二次验证；提权类型强制启用全部已绑定方式；
+// 密码重置类型只用邮箱与 QQ。注意：没有任何可用验证方式时 Passed2FA 直接为 true。
+// twoFactorEnabled 为用户设置中的登录二次验证开关，仅在 login 类型生效。
+func CreateAuthSession(ctx context.Context, typ AuthSessionType, isSchoolIp bool, userID int64, isTemporary bool, twoFactorEnabled bool) (*AuthSession, *errs.Error) {
 	id := uuid.New()
 
 	var useQQ, useEmail, useTOTP bool
 	switch typ {
 	case AuthSessionTypeLogin:
-		useQQ, useEmail, useTOTP = !isSchoolIp, !isSchoolIp, !isSchoolIp
+		use2FA := !isSchoolIp && twoFactorEnabled
+		useQQ, useEmail, useTOTP = use2FA, use2FA, use2FA
 	case AuthSessionTypeStepup:
 		useQQ, useEmail, useTOTP = true, true, true
 	case AuthSessionTypeResetPassword:

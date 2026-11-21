@@ -186,3 +186,32 @@ func DeleteUserTotp(ctx context.Context, userID int64) *errs.Error {
 	}
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// 登录二次验证开关
+// ---------------------------------------------------------------------------
+
+// setUserTwoFactorEnabledSQL 更新用户的登录二次验证开关；已注销用户不会被命中。
+const setUserTwoFactorEnabledSQL = `
+UPDATE users
+SET two_factor_enabled = $2
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING two_factor_enabled
+`
+
+// SetUserTwoFactorEnabled 更新用户的登录二次验证开关，并失效用户信息缓存。
+// 注意：重复写入同一值也视为成功；用户不存在或已注销时返回 404。
+func SetUserTwoFactorEnabled(ctx context.Context, userID int64, enabled bool) *errs.Error {
+	var current bool
+	err := db.R.QueryRow(ctx, setUserTwoFactorEnabledSQL, userID, enabled).Scan(&current)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errs.NotFoundError().AppendDetails("用户不存在")
+		}
+		return errs.CreatePGError(err, "用户", "Failed to update user two factor setting").
+			AppendDetails("二次验证设置失败")
+	}
+
+	db.R.Del(ctx, UserCacheKey(userID))
+	return nil
+}

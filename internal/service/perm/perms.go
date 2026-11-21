@@ -44,9 +44,6 @@ const (
 
 // 用户会话
 const (
-	PermUserSessionRead  = "student_id:user.session.read"
-	PermUserSessionWrite = "student_id:user.session.write"
-
 	PermUsersSessionRead  = "student_id:users.session.read"
 	PermUsersSessionWrite = "student_id:users.session.write"
 )

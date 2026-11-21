@@ -30,8 +30,10 @@ func NormalizeUsername(username string) string {
 }
 
 // UserCacheKey 返回用户信息缓存的 Redis key（按用户 ID）。
+// 注意：key 中的 v2 用于隔离新增 two_factor_enabled 字段前的旧缓存，
+// 避免旧条目反序列化时把该开关误判为关闭。
 func UserCacheKey(id int64) string {
-	return fmt.Sprintf("student_id:user:info:id:%d", id)
+	return fmt.Sprintf("student_id:user:info:v2:id:%d", id)
 }
 
 // UserIDCacheKey 返回「用户名 → 用户 ID」缓存的 Redis key（用户名统一转小写）。
@@ -55,7 +57,7 @@ WITH new_user AS (
         username, type, student_num, real_name, school,
         nickname, signature, bio, visibilities, password_reset_required
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    RETURNING id, created_at, updated_at
+    RETURNING id, created_at, updated_at, two_factor_enabled
 ),
 new_password AS (
     INSERT INTO user_passwords (user_id, password)
@@ -63,7 +65,7 @@ new_password AS (
     FROM new_user
     RETURNING user_id, updated_at
 )
-SELECT u.id, u.created_at, u.updated_at, p.updated_at
+SELECT u.id, u.created_at, u.updated_at, p.updated_at, u.two_factor_enabled
 FROM new_user u
 JOIN new_password p ON p.user_id = u.id
 `
@@ -113,6 +115,7 @@ func createUserWithPasswordAt(
 		&u.CreatedAt,
 		&u.UpdatedAt,
 		&pwd.UpdatedAt,
+		&u.TwoFactorEnabled,
 	)
 	if e != nil {
 		return errs.CreatePGError(e, "用户", "Failed to create user").AppendDetails("用户创建失败")
@@ -158,7 +161,7 @@ func CreateUser(ctx context.Context, u *model.User, pwd *model.UserPassword) *er
 // getUserSQL 按 ID 查询用户，软删除的用户不返回。
 const getUserSQL = `
 SELECT id, username, type, student_num, real_name, school,
-    nickname, signature, bio, visibilities, password_reset_required,
+    nickname, signature, bio, visibilities, password_reset_required, two_factor_enabled,
     created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1 AND deleted_at IS NULL
@@ -166,7 +169,7 @@ WHERE id = $1 AND deleted_at IS NULL
 
 const getUserIncludingDeletedSQL = `
 SELECT id, username, type, student_num, real_name, school,
-    nickname, signature, bio, visibilities, password_reset_required,
+    nickname, signature, bio, visibilities, password_reset_required, two_factor_enabled,
     created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1
@@ -202,6 +205,7 @@ func scanUser(row pgx.Row) (*model.User, error) {
 		&u.Bio,
 		&vis,
 		&u.PasswordResetRequired,
+		&u.TwoFactorEnabled,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 		&u.DeletedAt,
