@@ -19,7 +19,7 @@ import (
 //go:embed templates/*.html
 var fs embed.FS
 
-// SMTP 的 MAIL FROM 只接受裸地址，SMTP_FROM 的显示名需先解析，否则会被服务器拒绝。
+// SMTP 的 MAIL FROM 只接受裸地址，发件人显示名需先解析，否则会被服务器拒绝。
 func envelopeFrom(from string) string {
 	if addr, err := mail.ParseAddress(from); err == nil {
 		return addr.Address
@@ -27,15 +27,47 @@ func envelopeFrom(from string) string {
 	return from
 }
 
-// send 组装 MIME 邮件并通过 SMTP_* 配置发送。
-// 主题按 RFC 2047 编码，正文为 HTML；发送失败时返回底层错误。
+// isBackupSMTPRecipient 判断收件人域名是否在 SMTP_BACKUP_DOMAINS 配置中。
+func isBackupSMTPRecipient(address string) bool {
+	parsed, err := mail.ParseAddress(address)
+	if err != nil {
+		return false
+	}
+	at := strings.LastIndexByte(parsed.Address, '@')
+	if at < 0 {
+		return false
+	}
+	domain := strings.ToLower(parsed.Address[at+1:])
+	for _, backupDomain := range cfg.C.SMTPBackupDomains {
+		if strings.EqualFold(domain, backupDomain) {
+			return true
+		}
+	}
+	return false
+}
+
+// smtpConfigForRecipient 选择收件人对应的 SMTP 配置；未配置备用服务时回退主服务。
+func smtpConfigForRecipient(to string) (cfg.SMTPConfig, bool) {
+	if cfg.C.SMTPBackup.Host != "" && isBackupSMTPRecipient(to) {
+		return cfg.C.SMTPBackup, true
+	}
+	return cfg.C.SMTP, false
+}
+
+// send 组装 MIME 邮件并通过主/备用 SMTP 配置发送。
+// 收件人域名在 SMTP_BACKUP_DOMAINS 中时优先使用备用 SMTP（若已配置）；主题按 RFC 2047 编码。
 func send(to, subject, htmlBody string) error {
-	a := smtp.PlainAuth("", cfg.C.SMTP.Username, cfg.C.SMTP.Password, cfg.C.SMTP.Host)
+	smtpCfg, usingBackup := smtpConfigForRecipient(to)
+	if usingBackup {
+		slog.Info("Using backup SMTP", "to", to, "host", smtpCfg.Host)
+	}
+
+	a := smtp.PlainAuth("", smtpCfg.Username, smtpCfg.Password, smtpCfg.Host)
 
 	encodedSubject := mime.BEncoding.Encode("UTF-8", subject)
 
 	msg := strings.Builder{}
-	msg.WriteString("From: " + cfg.C.SMTP.From + "\r\n")
+	msg.WriteString("From: " + smtpCfg.From + "\r\n")
 	msg.WriteString("To: " + to + "\r\n")
 	msg.WriteString("Subject: " + encodedSubject + "\r\n")
 	msg.WriteString("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n")
@@ -44,7 +76,7 @@ func send(to, subject, htmlBody string) error {
 	msg.WriteString("\r\n")
 	msg.WriteString(htmlBody)
 
-	return smtp.SendMail(cfg.C.SMTP.Host+":"+cfg.C.SMTP.Port, a, envelopeFrom(cfg.C.SMTP.From), []string{to}, []byte(msg.String()))
+	return smtp.SendMail(smtpCfg.Host+":"+smtpCfg.Port, a, envelopeFrom(smtpCfg.From), []string{to}, []byte(msg.String()))
 }
 
 // SendCode 按鉴权会话类型选择文案，渲染验证码模板并发送。

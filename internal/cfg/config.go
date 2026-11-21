@@ -39,6 +39,8 @@ type Config struct {
 	NapCatToken               string // NapCat 访问令牌，必填：NAPCAT_TOKEN
 	AuthFrontendURL           string // 认证前端地址，用于跳转：AUTH_FRONTEND_URL
 	SMTP                      SMTPConfig
+	SMTPBackup                SMTPConfig // 备用发信服务，用于 SMTPBackupDomains 中的域名；Host 为空时禁用
+	SMTPBackupDomains         []string   // 使用备用 SMTP 的收件人域名（精确匹配），默认 icloud.com,outlook.com：SMTP_BACKUP_DOMAINS
 
 	SchoolIPs      SchoolIPMatcher // 校园网 IP/CIDR 网段 -> 前端展示文本（JSON），必填：SCHOOL_IPS
 	TrustedProxies []string        // 可信反向代理列表（逗号分隔）：TRUSTED_PROXIES
@@ -46,13 +48,37 @@ type Config struct {
 	BypassCaptcha  bool            // 仅非生产环境生效，跳过 Altcha 校验：BYPASS_CAPTCHA=true
 }
 
-// SMTPConfig 是发信服务配置，字段分别来自 SMTP_* 环境变量。
+// SMTPConfig 是发信服务配置；主服务来自 SMTP_*，备用服务来自 SMTP_BACKUP_*。
 type SMTPConfig struct {
 	Host     string
 	Port     string
 	From     string
 	Username string
-	Password string // 必填：SMTP_PASSWORD
+	Password string // 主服务必填 SMTP_PASSWORD；备用服务启用时必填 SMTP_BACKUP_PASSWORD
+}
+
+// parseSMTPBackupDomains 解析逗号分隔的备用 SMTP 收件人域名列表。
+// 支持前导 @、大小写和重复项；空项忽略，非法项返回错误。
+func parseSMTPBackupDomains(raw string) ([]string, error) {
+	domains := make([]string, 0)
+	seen := make(map[string]struct{})
+	for part := range strings.SplitSeq(raw, ",") {
+		domain := strings.ToLower(strings.TrimSpace(part))
+		domain = strings.TrimPrefix(domain, "@")
+		domain = strings.TrimSuffix(domain, ".")
+		if domain == "" {
+			continue
+		}
+		if strings.ContainsAny(domain, " \t\r\n/@") {
+			return nil, fmt.Errorf("load env: invalid SMTP_BACKUP_DOMAINS entry %q", part)
+		}
+		if _, ok := seen[domain]; ok {
+			continue
+		}
+		seen[domain] = struct{}{}
+		domains = append(domains, domain)
+	}
+	return domains, nil
 }
 
 // LoadConfig 从环境变量加载配置并写入全局 cfg.C。
@@ -80,6 +106,15 @@ func LoadConfig() error {
 	cfg.SMTP.Port = env("SMTP_PORT", "587")
 	cfg.SMTP.From = env("SMTP_FROM", "FDFZ Bot <noreply@fdfz.top>")
 	cfg.SMTP.Username = env("SMTP_USERNAME", "noreply@fdfz.top")
+	// 备用 SMTP 默认沿用主服务的端口、发件人和用户名；Host 为空时不启用。
+	cfg.SMTPBackup.Host = env("SMTP_BACKUP_HOST", "smtp.qq.com")
+	cfg.SMTPBackup.Port = env("SMTP_BACKUP_PORT", "587")
+	cfg.SMTPBackup.From = env("SMTP_BACKUP_FROM", "FDFZ Bot <tigercrl@qq.com>")
+	cfg.SMTPBackup.Username = env("SMTP_BACKUP_USERNAME", "tigercrl@qq.com")
+	cfg.SMTPBackupDomains, err = parseSMTPBackupDomains(env("SMTP_BACKUP_DOMAINS", ""))
+	if err != nil {
+		return err
+	}
 	cfg.BypassCaptcha = !IsProd && env("BYPASS_CAPTCHA", "false") == "true"
 	cfg.SharedDir = env("SHARED_DIR", "./shared")
 	cfg.AuthFrontendURL = env("AUTH_FRONTEND_URL", "https://auth.fdfz.top")
@@ -113,6 +148,18 @@ func LoadConfig() error {
 	// 必填的敏感配置：密钥缺失时直接启动失败，避免以不安全默认值运行。
 	if cfg.SMTP.Password, err = requireEnv("SMTP_PASSWORD"); err != nil {
 		return err
+	}
+
+	if cfg.SMTPBackup.Host != "" {
+		if len(cfg.SMTPBackupDomains) == 0 {
+			return fmt.Errorf("SMTP_BACKUP_DOMAINS must not be empty when SMTP_BACKUP_HOST is set")
+		}
+		if cfg.SMTPBackup.Password, err = requireEnv("SMTP_BACKUP_PASSWORD"); err != nil {
+			return err
+		}
+		if cfg.SMTPBackup.Password == "" {
+			return fmt.Errorf("SMTP_BACKUP_PASSWORD must not be empty when SMTP_BACKUP_HOST is set")
+		}
 	}
 
 	if cfg.NapCatToken, err = requireEnv("NAPCAT_TOKEN"); err != nil {
