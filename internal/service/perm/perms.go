@@ -98,3 +98,11 @@ const (
 	PermOAuthsRead   = "student_id:oauths.read"
 	PermOAuthsRevoke = "student_id:oauths.revoke"
 )
+
+const (
+	PermNotificationRead  = "student_id:notification.read"
+	PermNotificationWrite = "student_id:notification.write"
+
+	PermNotificationsSend = "student_id:notifications.send"
+	PermNotificationsRead = "student_id:notifications.read"
+)

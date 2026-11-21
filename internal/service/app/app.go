@@ -152,7 +152,7 @@ func CreateApp(ctx context.Context, a *model.OAuthApp) *errs.Error {
 	if a.RequestedPerms == nil {
 		a.RequestedPerms = []string{}
 	}
-	if !a.ClientType.IsConfidential() {
+	if !a.ClientType.SupportsSecret() {
 		a.SecretHash = null.String{}
 	}
 	created, err := scanApp(db.R.QueryRow(ctx, createAppSQL,
@@ -255,7 +255,7 @@ func UpdateApp(
 	if a.RequestedPerms == nil {
 		a.RequestedPerms = []string{}
 	}
-	if !a.ClientType.IsConfidential() {
+	if !a.ClientType.SupportsSecret() {
 		a.SecretHash = null.String{}
 	}
 
@@ -492,6 +492,21 @@ func RotateAppSecret(ctx context.Context, appID int64) (string, *errs.Error) {
 		return "", errs.NotFoundError().AppendDetails("应用不存在")
 	}
 	return secret, nil
+}
+
+const deleteAppSecretSQL = `UPDATE apps SET secret_hash = NULL WHERE id = $1 AND deleted_at IS NULL`
+
+// DeleteAppSecret 删除应用的客户端密钥；删除后应用无法再通过客户端密钥认证（包括发送通知）。
+// 删除密钥不会撤销已签发的访问令牌，需立即断开时应同时撤销授权。
+func DeleteAppSecret(ctx context.Context, appID int64) *errs.Error {
+	tag, err := db.R.Exec(ctx, deleteAppSecretSQL, appID)
+	if err != nil {
+		return errs.CreatePGError(err, "应用", "Failed to delete app secret")
+	}
+	if tag.RowsAffected() == 0 {
+		return errs.NotFoundError().AppendDetails("应用不存在")
+	}
+	return nil
 }
 
 // normalizeRequestedPerms 统一新旧命名空间后排序去重，避免仅改命名空间被误判为申请权限变化。

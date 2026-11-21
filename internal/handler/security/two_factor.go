@@ -2,7 +2,7 @@ package security
 
 import (
 	"fdfz-student-id/internal/errs"
-	notifysvc "fdfz-student-id/internal/service/notify"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
@@ -60,19 +60,9 @@ func updateTwoFactorSettingHandler(c *gin.Context) *errs.Error {
 		}
 
 		if *req.Enabled {
-			notifysvc.ToUser(ctx, claims.UserID, notifysvc.NewMessage(
-				"登录二次验证已开启",
-				"你的账号已开启登录二次验证",
-				"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 开启登录二次验证。",
-				"之后登录时需要使用已绑定的邮箱、QQ 或 TOTP 完成二次验证。如非本人操作，请立即修改密码并检查账号安全。",
-			))
+			notificationsvc.ToUser(ctx, claims.UserID, notificationsvc.NewTwoFactorEnabledMessage())
 		} else {
-			notifysvc.ToUser(ctx, claims.UserID, notifysvc.NewMessage(
-				"登录二次验证已关闭",
-				"你的账号已关闭登录二次验证",
-				"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 关闭登录二次验证。",
-				"关闭后登录只需密码；修改密码、绑定方式与会话管理等敏感操作仍要求二次验证。如非本人操作，请立即修改密码并检查账号安全。",
-			))
+			notificationsvc.ToUser(ctx, claims.UserID, notificationsvc.NewTwoFactorDisabledMessage())
 		}
 	}
 

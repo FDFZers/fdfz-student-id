@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 	"fdfz-student-id/internal/errs"
 	authsvc "fdfz-student-id/internal/service/auth"
-	notifysvc "fdfz-student-id/internal/service/notify"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 	"log/slog"
@@ -108,7 +108,7 @@ func verifyEmailInitHandler(c *gin.Context) *errs.Error {
 		return errs.CreateAndLogInternalError(err, "Failed to update auth session").AppendDetails("二次验证状态更新失败")
 	}
 
-	if e := notifysvc.SendCode(session.Email.String, code, session.Type); e != nil {
+	if e := notificationsvc.SendCode(session.Email.String, code, session.Type); e != nil {
 		session.EmailCode = null.String{}
 		if err := authsvc.UpdateAuthSession(c.Request.Context(), session, false); err != nil {
 			slog.Warn("Failed to rollback email code after send failure", "error", err.Info.Error, "session_id", session.ID)
@@ -288,7 +288,7 @@ func verifyQQHandler(c *gin.Context) *errs.Error {
 	pullCtx, cancel := context.WithTimeout(c.Request.Context(), authsvc.QQPullTimeout)
 	defer cancel()
 
-	messages, e := notifysvc.GetFriendMsgHistory(pullCtx, session.QQ.String, 20)
+	messages, e := notificationsvc.GetFriendMsgHistory(pullCtx, session.QQ.String, 20)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to pull QQ messages from NapCat").AppendDetails("NapCat 错误")
 	}
@@ -307,7 +307,7 @@ func verifyQQHandler(c *gin.Context) *errs.Error {
 	}
 
 	if !success {
-		return errs.ForbiddenError().AppendDetails("未识别到验证码")
+		return errs.CodeNotDetectedError().AppendDetails("未识别到验证码")
 	}
 
 	// 重新读取会话，避免匹配消息期间会话已被其他请求更新或删除

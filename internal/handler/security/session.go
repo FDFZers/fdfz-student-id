@@ -5,6 +5,7 @@ import (
 	"fdfz-student-id/internal/middleware"
 	"fdfz-student-id/internal/model"
 	authsvc "fdfz-student-id/internal/service/auth"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
 	"net/http"
@@ -121,6 +122,8 @@ func revokeSessionsHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	notificationsvc.ToUser(c.Request.Context(), selfID, notificationsvc.NewSessionsRevokedMessage())
+
 	if selfID == claims.UserID {
 		handling.ClearSessionCookies(c)
 	}
@@ -175,6 +178,8 @@ func revokeSessionHandler(c *gin.Context) *errs.Error {
 	if err := authsvc.RevokeSession(c.Request.Context(), sessionID); err != nil {
 		return err
 	}
+
+	notificationsvc.ToUser(c.Request.Context(), selfID, notificationsvc.NewSessionRevokedMessage(session))
 
 	// 撤销的是当前会话时清理 Cookie，避免客户端继续携带失效会话
 	if currentID := currentSessionUUID(claims); currentID != nil && sessionID == *currentID {

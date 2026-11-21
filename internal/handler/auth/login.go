@@ -8,7 +8,7 @@ import (
 	"fdfz-student-id/internal/model"
 	authsvc "fdfz-student-id/internal/service/auth"
 	captchasvc "fdfz-student-id/internal/service/captcha"
-	notifysvc "fdfz-student-id/internal/service/notify"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	permsvc "fdfz-student-id/internal/service/perm"
 	usersvc "fdfz-student-id/internal/service/user"
 	userpermsvc "fdfz-student-id/internal/service/userperm"
@@ -248,6 +248,13 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 
 	handling.SetTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
 
+	notificationsvc.ToUser(c.Request.Context(), authSession.UserID, notificationsvc.NewLoginMessage(
+		c.ClientIP(), c.Request.UserAgent(), authSession.IsTemporary,
+	))
+	if cancelled {
+		notificationsvc.ToUser(c.Request.Context(), authSession.UserID, notificationsvc.NewAccountDeletionCancelledMessage())
+	}
+
 	handling.RespondOK(c)
 	return nil
 }
@@ -279,12 +286,7 @@ func resetPasswordAtLogin(ctx context.Context, userID int64, newPassword string)
 		return err
 	}
 
-	notifysvc.ToUser(ctx, userID, notifysvc.NewMessage(
-		"密码已重设",
-		"你的账号密码已在登录时重设",
-		"你好！你的复旦附中学生 ID 账号密码已于北京时间 "+notifysvc.BeijingTime()+" 在登录时重设。",
-		"如非本人操作，请立即联系管理员。",
-	))
+	notificationsvc.ToUser(ctx, userID, notificationsvc.NewPasswordResetAtLoginMessage())
 	return nil
 }
 

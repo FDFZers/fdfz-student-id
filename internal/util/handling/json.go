@@ -62,7 +62,7 @@ func AppJSON(app *model.OAuthApp) *AppInfo {
 		RedirectURIs:   redirectURIs,
 		RequestedPerms: requestedPerms,
 		Status:         app.Status,
-		HasSecret:      app.ClientType.IsConfidential() && app.SecretHash.Valid,
+		HasSecret:      app.SecretHash.Valid && app.SecretHash.String != "",
 		CreatedAt:      app.CreatedAt,
 		UpdatedAt:      app.UpdatedAt,
 	}

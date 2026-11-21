@@ -1,4 +1,4 @@
-package notify
+package notifications
 
 import (
 	"embed"
@@ -111,18 +111,26 @@ func SendBindEmailCode(to, code string) error {
 	return send(to, "邮箱绑定 - 复旦附中学生 ID", r.Replace(string(data)))
 }
 
-// SendNotification 渲染通知模板并发送账号安全通知邮件。
-// 注意：title 与 body 会原样写入 HTML，调用方需保证 title 为静态文案、body 为可信 HTML。
-func SendNotification(to, title, desc, body string) error {
+func renderNotificationEmail(title, desc, sourceApp, body string) (string, error) {
 	data, err := fs.ReadFile("templates/notif.html")
+	if err != nil {
+		return "", err
+	}
+	r := strings.NewReplacer(
+		"{{TITLE}}", html.EscapeString(title),
+		"{{DESC}}", html.EscapeString(desc),
+		"{{APP}}", html.EscapeString(sourceApp),
+		"{{BODY}}", body,
+	)
+	return r.Replace(string(data)), nil
+}
+
+// SendNotification 渲染并发送通知邮件；body 直接写入 HTML，调用方需保证其可信（包内由 Markdown 渲染器生成）。
+func SendNotification(to, title, desc, sourceApp, body string) error {
+	htmlBody, err := renderNotificationEmail(title, desc, sourceApp, body)
 	if err != nil {
 		return err
 	}
-	r := strings.NewReplacer(
-		"{{TITLE}}", title,
-		"{{DESC}}", html.EscapeString(desc),
-		"{{BODY}}", body,
-	)
-	slog.Info("Sending notification email", "to", to, "title", title)
-	return send(to, title+" - 复旦附中学生 ID", r.Replace(string(data)))
+	slog.Info("Sending notification email", "to", to, "title", title, "source_app", sourceApp)
+	return send(to, title+" - 复旦附中数字资源站", htmlBody)
 }

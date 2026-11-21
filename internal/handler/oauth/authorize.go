@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"fdfz-student-id/internal/errs"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	oauthsvc "fdfz-student-id/internal/service/oauth"
 	"fdfz-student-id/internal/util/handling"
 
@@ -30,8 +31,9 @@ func authorizePreviewHandler(c *gin.Context) *errs.Error {
 
 // authorizeDecisionRequest 提交授权决策；授予应用登记的全部可授予权限。
 type authorizeDecisionRequest struct {
-	RequestID string `json:"request_id"`
-	Approve   *bool  `json:"approve"`
+	RequestID          string `json:"request_id"`
+	Approve            *bool  `json:"approve"`
+	AllowNotifications *bool  `json:"allow_notifications"` // 可选，缺省沿用预览页的默认值
 }
 
 // authorizeDecisionHandler 处理用户的同意/拒绝操作，返回客户端回调地址。
@@ -49,13 +51,19 @@ func authorizeDecisionHandler(c *gin.Context) *errs.Error {
 
 	claims := handling.MustGetClaims(c)
 
-	redirectTo, err := oauthsvc.ApproveAuthorization(
-		c.Request.Context(), claims.UserID, req.RequestID, *req.Approve,
+	result, err := oauthsvc.ApproveAuthorization(
+		c.Request.Context(), claims.UserID, req.RequestID, *req.Approve, req.AllowNotifications,
 	)
 	if err != nil {
 		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{"redirect_to": redirectTo})
+	if result.Approved && result.App != nil {
+		notificationsvc.ToUser(c.Request.Context(), claims.UserID, notificationsvc.NewOAuthAuthorizedMessage(
+			result.App.Name, result.Permissions, result.AllowNotifications,
+		))
+	}
+
+	c.JSON(http.StatusOK, gin.H{"redirect_to": result.RedirectTo})
 	return nil
 }

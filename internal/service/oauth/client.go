@@ -52,3 +52,32 @@ func verifyClientSecret(app *model.OAuthApp, secret string) bool {
 	sum := crypto.HashSHA512(secret)
 	return subtle.ConstantTimeCompare([]byte(sum), []byte(app.SecretHash.String)) == 1
 }
+
+// AppCanSendNotifications 返回应用是否具备发送通知的能力。
+// 通知发送接口只接受客户端密钥认证，设备流客户端同样可以持有密钥。
+func AppCanSendNotifications(app *model.OAuthApp) bool {
+	return app != nil &&
+		app.Status == model.AppStatusActive &&
+		app.SecretHash.Valid &&
+		app.SecretHash.String != ""
+}
+
+// AuthenticateClientWithSecret 强制校验客户端密钥，用于只接受服务端调用的接口。
+func AuthenticateClientWithSecret(
+	ctx context.Context,
+	clientID string,
+	clientSecret string,
+) (*model.OAuthApp, *errs.Error) {
+	if clientID == "" || clientSecret == "" {
+		return nil, errs.InvalidTokenError().AppendDetails("客户端认证失败").Seal()
+	}
+
+	app, err := FindAppByClientID(ctx, clientID)
+	if err != nil {
+		return nil, err
+	}
+	if !AppCanSendNotifications(app) || !verifyClientSecret(app, clientSecret) {
+		return nil, errs.InvalidTokenError().AppendDetails("客户端认证失败").Seal()
+	}
+	return app, nil
+}

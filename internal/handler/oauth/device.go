@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"fdfz-student-id/internal/errs"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	oauthsvc "fdfz-student-id/internal/service/oauth"
 	"fdfz-student-id/internal/util/handling"
 
@@ -49,8 +50,9 @@ func devicePreviewHandler(c *gin.Context) *errs.Error {
 
 // deviceApproveRequest 提交设备授权决策；授予应用登记的全部可授予权限。
 type deviceApproveRequest struct {
-	UserCode string `json:"user_code"`
-	Approve  *bool  `json:"approve"`
+	UserCode           string `json:"user_code"`
+	Approve            *bool  `json:"approve"`
+	AllowNotifications *bool  `json:"allow_notifications"` // 缺省沿用已有授权的设置
 }
 
 func deviceApproveHandler(c *gin.Context) *errs.Error {
@@ -67,10 +69,17 @@ func deviceApproveHandler(c *gin.Context) *errs.Error {
 
 	claims := handling.MustGetClaims(c)
 
-	if err := oauthsvc.DecideDeviceAuthorization(
-		c.Request.Context(), claims.UserID, req.UserCode, *req.Approve,
-	); err != nil {
+	result, err := oauthsvc.DecideDeviceAuthorization(
+		c.Request.Context(), claims.UserID, req.UserCode, *req.Approve, req.AllowNotifications,
+	)
+	if err != nil {
 		return err
+	}
+
+	if result.Approved && result.App != nil {
+		notificationsvc.ToUser(c.Request.Context(), claims.UserID, notificationsvc.NewOAuthDeviceAuthorizedMessage(
+			result.App.Name, result.Permissions, result.AllowNotifications,
+		))
 	}
 
 	handling.RespondOK(c)

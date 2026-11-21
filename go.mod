@@ -20,7 +20,9 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/samber/slog-gin v1.21.1
+	github.com/yuin/goldmark v1.8.7
 	golang.org/x/crypto v0.58.0
+	golang.org/x/text v0.43.0
 )
 
 require (
@@ -89,7 +91,6 @@ require (
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261016163328-824aa3d1d8dd // indirect
-	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.org/x/tools/cmd/cover v0.1.0-deprecated // indirect
 	google.golang.org/protobuf v1.36.12 // indirect

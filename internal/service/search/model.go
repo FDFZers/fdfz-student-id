@@ -24,15 +24,25 @@ type SearchInfo struct {
 
 // SearchRequest 是搜索查询请求体，各白名单校验失败时返回 bad_request。
 type SearchRequest struct {
-	Query         string                  `json:"query"`          // 搜索关键词，空串表示不带关键词条件
+	Query         string                  `json:"query"`          // 总搜索关键词，空串表示不带总关键词条件
 	Limit         null.Int64              `json:"limit"`          // 分页大小，缺省或非正数回退 DefaultLimit，超过 MaxLimit 时截断
 	Offset        null.Int64              `json:"offset"`         // 偏移量，缺省或负数按 0 处理
-	Fields        []string                `json:"fields"`         // 参与关键词匹配的字段，缺省为全部可搜索字段
-	SortBy        null.String             `json:"sort_by"`        // 排序字段，为空表示按相关度（当前实现不排序）
+	Fields        []string                `json:"fields"`         // 总关键词参与匹配的字段，缺省为全部可搜索字段
+	FieldQueries  []FieldQuery            `json:"field_queries"`  // 按字段指定的查询条件，与总 query 使用 AND 组合
+	SortBy        null.String             `json:"sort_by"`        // 排序字段，为空表示按默认排序
 	SortOrder     *SortOrder              `json:"sort_order"`     // 排序方向，缺省 ascending
-	MatchMethod   *MatchMethod            `json:"match_method"`   // 匹配方法，缺省 contains
-	CaseSensitive *bool                   `json:"case_sensitive"` // 是否区分大小写，缺省 true
+	MatchMethod   *MatchMethod            `json:"match_method"`   // 总关键词匹配方法，缺省 contains
+	CaseSensitive *bool                   `json:"case_sensitive"` // 总关键词是否区分大小写，缺省 true
 	Tags          map[string]TagSelection `json:"tags"`           // 标签过滤，key 为标签 ID
+}
+
+// FieldQuery 是指定单个字段的查询条件；多条之间以及与总 query 之间均为 AND。
+// Field 须在 SearchConfig.Fields 白名单中，MatchMethod、CaseSensitive 缺省沿用顶层设置。
+type FieldQuery struct {
+	Field         string       `json:"field"`
+	Query         string       `json:"query"`
+	MatchMethod   *MatchMethod `json:"match_method"`
+	CaseSensitive *bool        `json:"case_sensitive"`
 }
 
 // SearchResponse 是搜索结果的元信息快照。

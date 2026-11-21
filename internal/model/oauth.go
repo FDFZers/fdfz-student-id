@@ -19,6 +19,11 @@ func (t AppType) IsDevice() bool {
 	return t == AppTypeConfidentialDevice || t == AppTypePublicDevice
 }
 
+// SupportsSecret 判断客户端类型是否可持有客户端密钥；设备流客户端即使使用设备码或 PKCE 也可以持有。
+func (t AppType) SupportsSecret() bool {
+	return t.IsConfidential() || t.IsDevice()
+}
+
 // OAuthDeviceCodeStatus 设备授权码状态：待用户确认、已同意、已拒绝。
 // ENUM(pending, approved, denied)
 type OAuthDeviceCodeStatus string
@@ -54,14 +59,15 @@ type OAuthApp struct {
 
 // OAuthAuthorization 用户对应用的授权记录；一个用户对一个应用至多一条。
 type OAuthAuthorization struct {
-	ID          int64         `json:"id" db:"id"`
-	UserID      int64         `json:"user_id" db:"user_id"`
-	AppID       int64         `json:"app_id" db:"app_id"`
-	Permissions []string      `json:"permissions" db:"permissions"` // 用户授予应用的权限值
-	Status      AppAuthStatus `json:"status" db:"status"`
-	CreatedAt   time.Time     `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at" db:"updated_at"`
-	LastUsedAt  null.Time     `json:"last_used_at" db:"last_used_at"`
+	ID                 int64         `json:"id" db:"id"`
+	UserID             int64         `json:"user_id" db:"user_id"`
+	AppID              int64         `json:"app_id" db:"app_id"`
+	Permissions        []string      `json:"permissions" db:"permissions"`                 // 用户授予应用的权限值
+	AllowNotifications bool          `json:"allow_notifications" db:"allow_notifications"` // 是否允许应用发送通知
+	Status             AppAuthStatus `json:"status" db:"status"`
+	CreatedAt          time.Time     `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time     `json:"updated_at" db:"updated_at"`
+	LastUsedAt         null.Time     `json:"last_used_at" db:"last_used_at"`
 }
 
 // OAuthRefreshToken OAuth 刷新令牌；只存令牌哈希，可轮换。

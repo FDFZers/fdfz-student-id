@@ -10,6 +10,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	appsvc "fdfz-student-id/internal/service/app"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 
@@ -41,18 +42,31 @@ type ConsentRequest struct {
 	RedirectURIProvided bool      `json:"redirect_uri_provided"`
 	State               string    `json:"state"`
 	Permissions         []string  `json:"permissions"`
+	AllowNotifications  bool      `json:"allow_notifications"`
 	CodeChallenge       string    `json:"code_challenge"`
 	CreatedAt           time.Time `json:"created_at"`
 }
 
+// AuthorizationResult 是一次授权决策的结果。
+type AuthorizationResult struct {
+	RedirectTo         string
+	Approved           bool
+	App                *model.OAuthApp
+	Permissions        []string
+	AllowNotifications bool
+}
+
 type AuthorizationPreview struct {
-	RequestID         string            `json:"request_id"`
-	ExpiresIn         int64             `json:"expires_in"`
-	App               *handling.AppInfo `json:"app"`
-	RedirectURI       string            `json:"redirect_uri"`
-	State             string            `json:"state"`
-	Permissions       []PermissionInfo  `json:"permissions"`
-	AlreadyAuthorized bool              `json:"already_authorized"`
+	RequestID                string            `json:"request_id"`
+	ExpiresIn                int64             `json:"expires_in"`
+	App                      *handling.AppInfo `json:"app"`
+	RedirectURI              string            `json:"redirect_uri"`
+	State                    string            `json:"state"`
+	Permissions              []PermissionInfo  `json:"permissions"`
+	NotificationsAvailable   bool              `json:"notifications_available"`
+	AllowNotifications       bool              `json:"allow_notifications"`
+	UserNotificationsEnabled bool              `json:"user_notifications_enabled"`
+	AlreadyAuthorized        bool              `json:"already_authorized"`
 }
 
 // ---------------------------------------------------------------------------
@@ -105,11 +119,23 @@ func PreviewAuthorization(
 		return nil, err
 	}
 
-	// 已有覆盖全部可授予权限的有效授权时，前端可跳过确认页。
+	// 已有覆盖全部可授予权限的有效授权时前端可跳过确认页；应用可发通知但用户尚未允许时仍需确认。
 	existing, err := getAuthorizationByUserApp(ctx, userID, app.ID)
 	if err != nil {
 		return nil, err
 	}
+	notificationsAvailable := AppCanSendNotifications(app)
+	allowNotifications := existing != nil && existing.AllowNotifications
+
+	usr, userErr := usersvc.GetUserByID(ctx, userID)
+	if userErr != nil {
+		return nil, userErr
+	}
+	if usr == nil {
+		return nil, errs.NotFoundError().AppendDetails("用户不存在")
+	}
+	userNotificationsEnabled := usr.AppNotificationsEnabled
+
 	alreadyAuthorized := false
 	if existing != nil && existing.Status == model.AppAuthStatusActive {
 		granted := GrantedPermissions(infos)
@@ -119,6 +145,9 @@ func PreviewAuthorization(
 				alreadyAuthorized = false
 				break
 			}
+		}
+		if alreadyAuthorized && notificationsAvailable && !allowNotifications {
+			alreadyAuthorized = false
 		}
 	}
 
@@ -130,6 +159,7 @@ func PreviewAuthorization(
 		RedirectURIProvided: params.RedirectURI != "",
 		State:               params.State,
 		Permissions:         permissions,
+		AllowNotifications:  allowNotifications,
 		CodeChallenge:       params.CodeChallenge,
 		CreatedAt:           time.Now(),
 	}
@@ -138,13 +168,16 @@ func PreviewAuthorization(
 	}
 
 	return &AuthorizationPreview{
-		RequestID:         request.ID,
-		ExpiresIn:         int64(cfg.C.OAuthConsentRequestTTL / time.Second),
-		App:               handling.AppJSON(app),
-		RedirectURI:       redirectURI,
-		State:             params.State,
-		Permissions:       infos,
-		AlreadyAuthorized: alreadyAuthorized,
+		RequestID:                request.ID,
+		ExpiresIn:                int64(cfg.C.OAuthConsentRequestTTL / time.Second),
+		App:                      handling.AppJSON(app),
+		RedirectURI:              redirectURI,
+		State:                    params.State,
+		Permissions:              infos,
+		NotificationsAvailable:   notificationsAvailable,
+		AllowNotifications:       allowNotifications,
+		UserNotificationsEnabled: userNotificationsEnabled,
+		AlreadyAuthorized:        alreadyAuthorized,
 	}, nil
 }
 
@@ -153,66 +186,89 @@ func PreviewAuthorization(
 // ---------------------------------------------------------------------------
 
 // ApproveAuthorization 处理同意/拒绝并返回客户端回调地址；授予应用登记的全部可授予权限。
+// allowNotifications 为用户本次是否允许应用发送通知；为 nil 时沿用预览时记录的默认值。
 func ApproveAuthorization(
 	ctx context.Context,
 	userID int64,
 	requestID string,
 	approve bool,
-) (string, *errs.Error) {
+	allowNotifications *bool,
+) (*AuthorizationResult, *errs.Error) {
 	request, err := TakeConsentRequest(ctx, requestID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if request == nil {
-		return "", errs.NotFoundError().AppendDetails("授权请求不存在或已过期")
+		return nil, errs.NotFoundError().AppendDetails("授权请求不存在或已过期")
 	}
 	if request.UserID != userID {
-		return "", errs.PermissionDeniedError().AppendDetails("授权请求不属于当前用户").Seal()
+		return nil, errs.PermissionDeniedError().AppendDetails("授权请求不属于当前用户").Seal()
 	}
 
 	app, err := appsvc.GetAppByID(ctx, request.AppID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if app == nil {
-		return "", errs.NotFoundError().AppendDetails("应用不存在")
+		return nil, errs.NotFoundError().AppendDetails("应用不存在")
 	}
 	if app.Status != model.AppStatusActive {
-		return "", errs.IllegalStateError().AppendDetails("应用已停用")
+		return nil, errs.IllegalStateError().AppendDetails("应用已停用")
 	}
 	if err := ValidatePermissionsAgainstApp(app, request.Permissions); err != nil {
-		return "", errs.ConflictError().AppendDetails("应用申请权限已变更，请重新授权")
+		return nil, errs.ConflictError().AppendDetails("应用申请权限已变更，请重新授权")
 	}
 	if !app.ClientType.IsConfidential() && request.CodeChallenge == "" {
-		return "", errs.ConflictError().AppendDetails("应用已改为公开客户端，请使用 PKCE 重新授权")
+		return nil, errs.ConflictError().AppendDetails("应用已改为公开客户端，请使用 PKCE 重新授权")
 	}
 	if resolved, e := resolveRedirectURI(app, request.RedirectURI); e != nil || resolved != request.RedirectURI {
-		return "", errs.ConflictError().AppendDetails("应用回调地址已变更，请重新授权")
+		return nil, errs.ConflictError().AppendDetails("应用回调地址已变更，请重新授权")
 	}
 
 	if !approve {
-		return buildRedirectURL(request.RedirectURI, url.Values{
+		redirectTo, e := buildRedirectURL(request.RedirectURI, url.Values{
 			"error":             {"access_denied"},
 			"error_description": {"用户拒绝了授权"},
 			"state":             {request.State},
 		})
+		if e != nil {
+			return nil, e
+		}
+		return &AuthorizationResult{RedirectTo: redirectTo}, nil
 	}
 
 	infos, err := ResolvePermissionInfos(ctx, userID, request.Permissions)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	granted := GrantedPermissions(infos)
 
-	code, err := createAuthorizationAndCode(ctx, request, granted)
+	// 应用无客户端密钥时即使请求允许也强制关闭。
+	allowed := request.AllowNotifications
+	if allowNotifications != nil {
+		allowed = *allowNotifications
+	}
+	allowed = allowed && AppCanSendNotifications(app)
+
+	code, err := createAuthorizationAndCode(ctx, request, granted, allowed)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return buildRedirectURL(request.RedirectURI, url.Values{
+	redirectTo, e := buildRedirectURL(request.RedirectURI, url.Values{
 		"code":  {code},
 		"state": {request.State},
 	})
+	if e != nil {
+		return nil, e
+	}
+	return &AuthorizationResult{
+		RedirectTo:         redirectTo,
+		Approved:           true,
+		App:                app,
+		Permissions:        granted,
+		AllowNotifications: allowed,
+	}, nil
 }
 
 // createAuthorizationAndCode 更新授权并写入一次性授权码，授权码只保存 SHA-512 哈希。
@@ -220,12 +276,13 @@ func createAuthorizationAndCode(
 	ctx context.Context,
 	request *ConsentRequest,
 	permissions []string,
+	allowNotifications bool,
 ) (string, *errs.Error) {
 	if permissions == nil {
 		permissions = []string{}
 	}
 
-	authID, err := upsertAuthorization(ctx, request.UserID, request.AppID, permissions)
+	authID, err := upsertAuthorization(ctx, request.UserID, request.AppID, permissions, allowNotifications)
 	if err != nil {
 		return "", err
 	}

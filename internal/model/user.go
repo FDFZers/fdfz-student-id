@@ -56,8 +56,9 @@ type User struct {
 
 	Visibilities Visibilities `json:"visibilities" db:"visibilities"` // 资料可见性，JSONB 列
 
-	PasswordResetRequired bool `json:"password_reset_required" db:"password_reset_required"`
-	TwoFactorEnabled      bool `json:"two_factor_enabled" db:"two_factor_enabled"`
+	PasswordResetRequired   bool `json:"password_reset_required" db:"password_reset_required"`
+	TwoFactorEnabled        bool `json:"two_factor_enabled" db:"two_factor_enabled"`
+	AppNotificationsEnabled bool `json:"app_notifications_enabled" db:"app_notifications_enabled"` // 是否允许应用向该用户发送通知
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`

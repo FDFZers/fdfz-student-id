@@ -79,6 +79,11 @@ func IllegalStateError() *Error {
 	return CreateError(http.StatusForbidden, "illegal_state")
 }
 
+// CodeNotDetectedError 返回 403 code_not_detected，表示验证码未检测到。
+func CodeNotDetectedError() *Error {
+	return CreateError(http.StatusForbidden, "code_not_detected")
+}
+
 // PasswordResetRequiredError 返回 403 password_reset_required，表示必须先设置新密码才能继续登录。
 func PasswordResetRequiredError() *Error {
 	return CreateError(http.StatusForbidden, "password_reset_required")

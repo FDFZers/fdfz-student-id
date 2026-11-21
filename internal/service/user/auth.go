@@ -252,3 +252,30 @@ func SetUserTwoFactorEnabled(ctx context.Context, userID int64, enabled bool) *e
 	db.R.Del(ctx, UserCacheKey(userID))
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// 应用通知开关
+// ---------------------------------------------------------------------------
+
+const setUserAppNotificationsEnabledSQL = `
+UPDATE users
+SET app_notifications_enabled = $2
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING app_notifications_enabled
+`
+
+// SetUserAppNotificationsEnabled 更新用户的应用通知总开关，并失效用户信息缓存。
+func SetUserAppNotificationsEnabled(ctx context.Context, userID int64, enabled bool) *errs.Error {
+	var current bool
+	err := db.R.QueryRow(ctx, setUserAppNotificationsEnabledSQL, userID, enabled).Scan(&current)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errs.NotFoundError().AppendDetails("用户不存在")
+		}
+		return errs.CreatePGError(err, "用户", "Failed to update user app notification setting").
+			AppendDetails("应用通知设置失败")
+	}
+
+	db.R.Del(ctx, UserCacheKey(userID))
+	return nil
+}

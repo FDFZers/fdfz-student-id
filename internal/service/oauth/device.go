@@ -11,6 +11,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	appsvc "fdfz-student-id/internal/service/app"
+	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
 )
@@ -29,11 +30,14 @@ type DeviceAuthorization struct {
 }
 
 type DevicePreview struct {
-	App         *handling.AppInfo           `json:"app"`
-	UserCode    string                      `json:"user_code"`
-	Permissions []PermissionInfo            `json:"permissions"`
-	Status      model.OAuthDeviceCodeStatus `json:"status"`
-	ExpiresAt   time.Time                   `json:"expires_at"`
+	App                      *handling.AppInfo           `json:"app"`
+	UserCode                 string                      `json:"user_code"`
+	Permissions              []PermissionInfo            `json:"permissions"`
+	NotificationsAvailable   bool                        `json:"notifications_available"`
+	AllowNotifications       bool                        `json:"allow_notifications"`
+	UserNotificationsEnabled bool                        `json:"user_notifications_enabled"`
+	Status                   model.OAuthDeviceCodeStatus `json:"status"`
+	ExpiresAt                time.Time                   `json:"expires_at"`
 }
 
 // DeviceTokenResponse 的 status 为 pending/denied/expired/approved；仅 approved 携带令牌，轮询过快返回 429。
@@ -152,78 +156,129 @@ func GetDeviceAuthorization(
 		return nil, err
 	}
 
+	existing, err := getAuthorizationByUserApp(ctx, userID, app.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	usr, userErr := usersvc.GetUserByID(ctx, userID)
+	if userErr != nil {
+		return nil, userErr
+	}
+	if usr == nil {
+		return nil, errs.NotFoundError().AppendDetails("用户不存在")
+	}
+
 	return &DevicePreview{
-		App:         handling.AppJSON(app),
-		UserCode:    record.UserCode,
-		Permissions: infos,
-		Status:      record.Status,
-		ExpiresAt:   time.UnixMilli(record.ExpiresAt),
+		App:                      handling.AppJSON(app),
+		UserCode:                 record.UserCode,
+		Permissions:              infos,
+		NotificationsAvailable:   AppCanSendNotifications(app),
+		AllowNotifications:       existing != nil && existing.AllowNotifications,
+		UserNotificationsEnabled: usr.AppNotificationsEnabled,
+		Status:                   record.Status,
+		ExpiresAt:                time.UnixMilli(record.ExpiresAt),
 	}, nil
 }
 
+// DeviceAuthorizationResult 是设备授权确认的结果，供处理器在同意后发送授权提示。
+type DeviceAuthorizationResult struct {
+	Approved           bool
+	App                *model.OAuthApp
+	Permissions        []string
+	AllowNotifications bool
+}
+
 // DecideDeviceAuthorization 通过 Lua 脚本原子更新状态，只允许从 pending 迁移；授予应用登记的全部可授予权限。
+// allowNotifications 为用户本次是否允许应用发送通知；为 nil 时沿用已有授权中的设置。
 func DecideDeviceAuthorization(
 	ctx context.Context,
 	userID int64,
 	userCode string,
 	approve bool,
-) *errs.Error {
+	allowNotifications *bool,
+) (*DeviceAuthorizationResult, *errs.Error) {
 	normalized := NormalizeUserCode(userCode)
 	if normalized == "" {
-		return errs.BadRequestError().AppendDetails("user_code 格式错误")
+		return nil, errs.BadRequestError().AppendDetails("user_code 格式错误")
 	}
 
 	record, deviceHash, err := getDeviceCodeByUserCode(ctx, normalized)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if record == nil || time.Now().UnixMilli() >= record.ExpiresAt {
-		return errs.NotFoundError().AppendDetails("设备授权请求不存在或已过期")
+		return nil, errs.NotFoundError().AppendDetails("设备授权请求不存在或已过期")
 	}
 	if record.Status != model.OAuthDeviceCodeStatusPending {
-		return errs.IllegalStateError().AppendDetails("该设备授权请求已处理")
+		return nil, errs.IllegalStateError().AppendDetails("该设备授权请求已处理")
 	}
 
 	app, err := appsvc.GetAppByID(ctx, record.AppID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if app == nil {
-		return errs.NotFoundError().AppendDetails("应用不存在")
+		return nil, errs.NotFoundError().AppendDetails("应用不存在")
 	}
 	if app.Status != model.AppStatusActive {
-		return errs.IllegalStateError().AppendDetails("应用已停用")
+		return nil, errs.IllegalStateError().AppendDetails("应用已停用")
 	}
 
 	if !approve {
 		result, err := decideDeviceCode(ctx, deviceHash, model.OAuthDeviceCodeStatusDenied, 0, userID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return deviceDecisionResult(result)
+		if err := deviceDecisionResult(result); err != nil {
+			return nil, err
+		}
+		return &DeviceAuthorizationResult{}, nil
 	}
 	// 发起后应用可能修改申请权限，旧确认请求必须作废。
 	if err := ValidatePermissionsAgainstApp(app, record.Permissions); err != nil {
-		return errs.ConflictError().AppendDetails("应用申请权限已变更，请重新发起设备授权")
+		return nil, errs.ConflictError().AppendDetails("应用申请权限已变更，请重新发起设备授权")
 	}
 
 	infos, err := ResolvePermissionInfos(ctx, userID, record.Permissions)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	granted := GrantedPermissions(infos)
 
-	// 先写授权记录再更新设备码状态；状态更新失败最多留下一条多余授权，不会越权。
-	authID, err := upsertAuthorization(ctx, userID, record.AppID, granted)
+	// 允许通知：已有授权设置作为默认值，请求显式给出时以请求为准；应用无密钥时强制关闭。
+	allowed := false
+	existing, err := getAuthorizationByUserApp(ctx, userID, app.ID)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if existing != nil {
+		allowed = existing.AllowNotifications
+	}
+	if allowNotifications != nil {
+		allowed = *allowNotifications
+	}
+	allowed = allowed && AppCanSendNotifications(app)
+
+	// 先写授权记录再更新设备码状态；状态更新失败最多留下一条多余授权，不会越权。
+	authID, err := upsertAuthorization(ctx, userID, record.AppID, granted, allowed)
+	if err != nil {
+		return nil, err
 	}
 
 	result, err := decideDeviceCode(ctx, deviceHash, model.OAuthDeviceCodeStatusApproved, authID, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return deviceDecisionResult(result)
+	if err := deviceDecisionResult(result); err != nil {
+		return nil, err
+	}
+	return &DeviceAuthorizationResult{
+		Approved:           true,
+		App:                app,
+		Permissions:        granted,
+		AllowNotifications: allowed,
+	}, nil
 }
 
 func deviceDecisionResult(result int64) *errs.Error {

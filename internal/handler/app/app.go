@@ -27,6 +27,7 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	group.GET("/:appID", middleware.RequireToken(), handling.Wrap("OAuth 应用获取失败", getAppHandler))
 	group.PATCH("/:appID", middleware.RequireToken(), handling.Wrap("OAuth 应用修改失败", updateAppHandler))
 	group.POST("/:appID/secret/rotate", middleware.RequireToken(), handling.Wrap("OAuth 应用密钥重置失败", rotateSecretHandler))
+	group.DELETE("/:appID/secret", middleware.RequireToken(), handling.Wrap("OAuth 应用密钥删除失败", deleteSecretHandler))
 	group.PUT("/:appID/icon", middleware.RequireToken(), middleware.LimitSize(5<<20), handling.Wrap("OAuth 应用图标设置失败", setIconHandler))
 	group.DELETE("/:appID/icon", middleware.RequireToken(), handling.Wrap("OAuth 应用图标删除失败", deleteIconHandler))
 

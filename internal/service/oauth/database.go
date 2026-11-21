@@ -37,13 +37,14 @@ type refreshTokenRecord struct {
 
 // UserAuthorization 是用户在账户设置中看到的授权记录。
 type UserAuthorization struct {
-	ID          int64               `json:"id"`
-	App         *handling.AppInfo   `json:"app"`
-	Permissions []string            `json:"permissions"`
-	Status      model.AppAuthStatus `json:"status"`
-	CreatedAt   time.Time           `json:"created_at"`
-	UpdatedAt   time.Time           `json:"updated_at"`
-	LastUsedAt  null.Time           `json:"last_used_at"`
+	ID                 int64               `json:"id"`
+	App                *handling.AppInfo   `json:"app"`
+	Permissions        []string            `json:"permissions"`
+	AllowNotifications bool                `json:"allow_notifications"`
+	Status             model.AppAuthStatus `json:"status"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
+	LastUsedAt         null.Time           `json:"last_used_at"`
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@ type UserAuthorization struct {
 // ---------------------------------------------------------------------------
 
 const getAuthorizationByUserAppSQL = `
-SELECT id, user_id, app_id, permissions, status, created_at, updated_at, last_used_at
+SELECT id, user_id, app_id, permissions, allow_notifications, status, created_at, updated_at, last_used_at
 FROM oauth_authorizations
 WHERE user_id = $1 AND app_id = $2
 `
@@ -59,7 +60,7 @@ WHERE user_id = $1 AND app_id = $2
 func getAuthorizationByUserApp(ctx context.Context, userID, appID int64) (*model.OAuthAuthorization, *errs.Error) {
 	var a model.OAuthAuthorization
 	err := db.R.QueryRow(ctx, getAuthorizationByUserAppSQL, userID, appID).Scan(
-		&a.ID, &a.UserID, &a.AppID, &a.Permissions, &a.Status,
+		&a.ID, &a.UserID, &a.AppID, &a.Permissions, &a.AllowNotifications, &a.Status,
 		&a.CreatedAt, &a.UpdatedAt, &a.LastUsedAt,
 	)
 	if err != nil {
@@ -72,11 +73,12 @@ func getAuthorizationByUserApp(ctx context.Context, userID, appID int64) (*model
 }
 
 const upsertAuthorizationSQL = `
-INSERT INTO oauth_authorizations (user_id, app_id, permissions, status)
-VALUES ($1, $2, $3, 'active')
+INSERT INTO oauth_authorizations (user_id, app_id, permissions, allow_notifications, status)
+VALUES ($1, $2, $3, $4, 'active')
 ON CONFLICT (user_id, app_id) DO UPDATE
-SET permissions = EXCLUDED.permissions,
-    status      = 'active'
+SET permissions       = EXCLUDED.permissions,
+    allow_notifications = EXCLUDED.allow_notifications,
+    status            = 'active'
 RETURNING id
 `
 
@@ -84,9 +86,10 @@ func upsertAuthorization(
 	ctx context.Context,
 	userID, appID int64,
 	permissions []string,
+	allowNotifications bool,
 ) (int64, *errs.Error) {
 	var authID int64
-	if err := db.R.QueryRow(ctx, upsertAuthorizationSQL, userID, appID, permissions).Scan(&authID); err != nil {
+	if err := db.R.QueryRow(ctx, upsertAuthorizationSQL, userID, appID, permissions, allowNotifications).Scan(&authID); err != nil {
 		return 0, errs.CreatePGError(err, "OAuth 授权", "Failed to upsert oauth authorization")
 	}
 	return authID, nil
@@ -128,7 +131,7 @@ func touchAuthorization(ctx context.Context, dh db.Handle, authID int64) *errs.E
 }
 
 const getAuthorizationByIDSQL = `
-SELECT id, user_id, app_id, permissions, status, created_at, updated_at, last_used_at
+SELECT id, user_id, app_id, permissions, allow_notifications, status, created_at, updated_at, last_used_at
 FROM oauth_authorizations
 WHERE id = $1
 `
@@ -137,7 +140,7 @@ WHERE id = $1
 func GetAuthorizationByID(ctx context.Context, id int64) (*model.OAuthAuthorization, *errs.Error) {
 	var a model.OAuthAuthorization
 	err := db.R.QueryRow(ctx, getAuthorizationByIDSQL, id).Scan(
-		&a.ID, &a.UserID, &a.AppID, &a.Permissions, &a.Status,
+		&a.ID, &a.UserID, &a.AppID, &a.Permissions, &a.AllowNotifications, &a.Status,
 		&a.CreatedAt, &a.UpdatedAt, &a.LastUsedAt,
 	)
 	if err != nil {
@@ -164,7 +167,7 @@ func DeleteAuthorization(ctx context.Context, id int64) *errs.Error {
 }
 
 const listUserAuthorizationsSQL = `
-SELECT a.id, a.permissions, a.status, a.created_at, a.updated_at, a.last_used_at,
+SELECT a.id, a.permissions, a.allow_notifications, a.status, a.created_at, a.updated_at, a.last_used_at,
        app.id, app.namespace, app.owner_user_id, app.secret_hash, app.name, app.description,
        app.homepage_url, app.client_type, app.redirect_uris, app.requested_perms, app.status,
        app.created_at, app.updated_at, app.deleted_at
@@ -191,7 +194,7 @@ func ListUserAuthorizations(
 			app  model.OAuthApp
 		)
 		if err := rows.Scan(
-			&item.ID, &item.Permissions, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.LastUsedAt,
+			&item.ID, &item.Permissions, &item.AllowNotifications, &item.Status, &item.CreatedAt, &item.UpdatedAt, &item.LastUsedAt,
 			&app.ID, &app.Namespace, &app.OwnerUserID, &app.SecretHash, &app.Name, &app.Description,
 			&app.HomepageURL, &app.ClientType, &app.RedirectURIs, &app.RequestedPerms, &app.Status,
 			&app.CreatedAt, &app.UpdatedAt, &app.DeletedAt,

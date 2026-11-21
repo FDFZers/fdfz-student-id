@@ -7,7 +7,7 @@ import (
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	authsvc "fdfz-student-id/internal/service/auth"
-	notifysvc "fdfz-student-id/internal/service/notify"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/crypto"
 	"fdfz-student-id/internal/util/handling"
@@ -315,7 +315,7 @@ func emailBindInitHandler(c *gin.Context) *errs.Error {
 	}
 
 	// 邮件发送失败时清除待绑定记录，避免用户拿到无法校验的验证码
-	if e := notifysvc.SendBindEmailCode(req.Email, code); e != nil {
+	if e := notificationsvc.SendBindEmailCode(req.Email, code); e != nil {
 		authsvc.DeletePendingEmailBind(c.Request.Context(), claims.UserID)
 		return errs.CreateAndLogInternalError(e, "Failed to send email bind code").
 			AppendDetails("邮件发送失败")
@@ -389,19 +389,14 @@ func emailBindVerifyHandler(c *gin.Context) *errs.Error {
 	authsvc.ResetBindAttempts(c.Request.Context(), bindEmailAttemptsKind, claims.UserID)
 
 	// 通知新邮箱与当前 QQ；换绑时同时提醒旧邮箱
-	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
-		"邮箱绑定成功",
-		"你的账号已绑定新邮箱",
-		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 绑定邮箱："+pending.Email+"。",
-		"此后可使用该邮箱接收验证码和重置密码。如非本人操作，请立即修改密码并检查账号安全。",
-	))
+	notificationsvc.ToUser(c.Request.Context(), claims.UserID, notificationsvc.NewEmailBoundMessage(pending.Email))
 	if previous != nil && !strings.EqualFold(previous.Email, pending.Email) {
-		notifysvc.Send(notifysvc.Recipients{Email: previous.Email}, notifysvc.NewMessage(
-			"邮箱已更换",
-			"你的账号已更换绑定邮箱",
-			"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 更换绑定邮箱，新邮箱为 "+pending.Email+"。",
-			"如非本人操作，请立即联系管理员。",
-		))
+		notificationsvc.SendAsync(
+			c.Request.Context(),
+			notificationsvc.Target{Email: previous.Email},
+			notificationsvc.NewEmailChangedMessage(previous.Email, pending.Email),
+			[]model.NotificationChannel{model.NotificationChannelEmail},
+		)
 	}
 
 	handling.RespondOK(c)
@@ -422,15 +417,15 @@ func emailUnbindHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	msg := notifysvc.NewMessage(
-		"邮箱已解绑",
-		"你的账号已解绑邮箱",
-		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 解绑邮箱："+current.Email+"。",
-		"解绑后将无法使用该邮箱接收验证码或重置密码。如非本人操作，请立即联系管理员。",
+	msg := notificationsvc.NewEmailUnboundMessage(current.Email)
+	// 邮箱已从账号移除，需显式发给该地址；QQ 与站内通知由 ToUser 自动补上
+	notificationsvc.ToUser(c.Request.Context(), claims.UserID, msg)
+	notificationsvc.SendAsync(
+		c.Request.Context(),
+		notificationsvc.Target{Email: current.Email},
+		msg,
+		[]model.NotificationChannel{model.NotificationChannelEmail},
 	)
-	// 邮箱已从账号移除，需显式发给该地址；QQ 渠道由 ToUser 自动补上
-	notifysvc.ToUser(c.Request.Context(), claims.UserID, msg)
-	notifysvc.Send(notifysvc.Recipients{Email: current.Email}, msg)
 
 	handling.RespondOK(c)
 	return nil
@@ -518,12 +513,7 @@ func totpBindVerifyHandler(c *gin.Context) *errs.Error {
 	authsvc.DeletePendingTOTPBind(c.Request.Context(), claims.UserID)
 	authsvc.ResetBindAttempts(c.Request.Context(), bindTOTPAttemptsKind, claims.UserID)
 
-	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
-		"TOTP 已绑定",
-		"你的账号已绑定 TOTP 二次验证",
-		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 绑定 TOTP 二次验证。",
-		"如非本人操作，请立即修改密码并检查账号安全。",
-	))
+	notificationsvc.ToUser(c.Request.Context(), claims.UserID, notificationsvc.NewTOTPBoundMessage())
 
 	handling.RespondOK(c)
 	return nil
@@ -543,12 +533,7 @@ func totpUnbindHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
-		"TOTP 已解绑",
-		"你的账号已解绑 TOTP 二次验证",
-		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 解绑 TOTP 二次验证。",
-		"解绑后账号将失去该验证方式，安全性可能降低。如非本人操作，请立即联系管理员。",
-	))
+	notificationsvc.ToUser(c.Request.Context(), claims.UserID, notificationsvc.NewTOTPUnboundMessage())
 
 	handling.RespondOK(c)
 	return nil
@@ -644,7 +629,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 	pullCtx, cancel := context.WithTimeout(c.Request.Context(), authsvc.QQPullTimeout)
 	defer cancel()
 
-	messages, e := notifysvc.GetFriendMsgHistory(pullCtx, pending.QQ, 20)
+	messages, e := notificationsvc.GetFriendMsgHistory(pullCtx, pending.QQ, 20)
 	if e != nil {
 		return errs.CreateAndLogInternalError(e, "Failed to pull QQ messages from NapCat").
 			AppendDetails("NapCat 错误")
@@ -679,12 +664,7 @@ func qqBindVerifyHandler(c *gin.Context) *errs.Error {
 
 	authsvc.DeletePendingQQBind(c.Request.Context(), claims.UserID)
 
-	notifysvc.ToUser(c.Request.Context(), claims.UserID, notifysvc.NewMessage(
-		"QQ 已绑定",
-		"你的账号已绑定 QQ",
-		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 绑定 QQ："+pending.QQ+"。",
-		"该 QQ 可用于登录验证与密码重置。如非本人操作，请立即修改密码并检查账号安全。",
-	))
+	notificationsvc.ToUser(c.Request.Context(), claims.UserID, notificationsvc.NewQQBoundMessage(pending.QQ))
 
 	handling.RespondOK(c)
 	return nil
@@ -704,15 +684,15 @@ func qqUnbindHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
-	msg := notifysvc.NewMessage(
-		"QQ 已解绑",
-		"你的账号已解绑 QQ",
-		"你好！你的复旦附中学生 ID 账号已于北京时间 "+notifysvc.BeijingTime()+" 解绑 QQ："+current.QQ+"。",
-		"解绑后该 QQ 将无法用于登录验证与密码重置。如非本人操作，请立即联系管理员。",
+	msg := notificationsvc.NewQQUnboundMessage(current.QQ)
+	// QQ 已从账号移除，需显式发给该 QQ；邮箱与站内通知由 ToUser 自动补上
+	notificationsvc.ToUser(c.Request.Context(), claims.UserID, msg)
+	notificationsvc.SendAsync(
+		c.Request.Context(),
+		notificationsvc.Target{QQ: current.QQ},
+		msg,
+		[]model.NotificationChannel{model.NotificationChannelQQ},
 	)
-	// QQ 已从账号移除，需显式发给该 QQ；邮箱渠道由 ToUser 自动补上
-	notifysvc.ToUser(c.Request.Context(), claims.UserID, msg)
-	notifysvc.Send(notifysvc.Recipients{QQ: current.QQ}, msg)
 
 	handling.RespondOK(c)
 	return nil

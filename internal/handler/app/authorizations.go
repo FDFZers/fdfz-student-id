@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"fdfz-student-id/internal/errs"
+	appsvc "fdfz-student-id/internal/service/app"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	oauthsvc "fdfz-student-id/internal/service/oauth"
 	permsvc "fdfz-student-id/internal/service/perm"
 	"fdfz-student-id/internal/util/handling"
@@ -72,6 +74,13 @@ func revokeAuthorizationHandler(c *gin.Context) *errs.Error {
 	if err := oauthsvc.DeleteAuthorization(c.Request.Context(), authorizationID); err != nil {
 		return err
 	}
+
+	// 管理员代为撤销时也通知授权所属用户本人。
+	appName := ""
+	if app, e := appsvc.GetAppByID(c.Request.Context(), authorization.AppID); e == nil && app != nil {
+		appName = app.Name
+	}
+	notificationsvc.ToUser(c.Request.Context(), authorization.UserID, notificationsvc.NewOAuthAuthorizationRevokedMessage(appName))
 
 	handling.RespondOK(c)
 	return nil

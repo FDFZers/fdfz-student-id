@@ -128,7 +128,7 @@ func updateAppHandler(c *gin.Context) *errs.Error {
 		a.RequestedPerms = requestedPerms
 	}
 
-	if !a.ClientType.IsConfidential() {
+	if !a.ClientType.SupportsSecret() {
 		a.SecretHash = null.String{}
 	}
 

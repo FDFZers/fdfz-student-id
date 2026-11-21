@@ -4,6 +4,7 @@ import (
 	"fdfz-student-id/internal/db"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
+	notificationsvc "fdfz-student-id/internal/service/notifications"
 	permsvc "fdfz-student-id/internal/service/perm"
 	usersvc "fdfz-student-id/internal/service/user"
 	"fdfz-student-id/internal/util/handling"
@@ -103,6 +104,8 @@ func banUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	notificationsvc.ToUser(c.Request.Context(), targetID, notificationsvc.NewUserBannedMessage(req.Reason, req.EndTime))
+
 	attrs := []any{
 		"user_id", targetID,
 		"operator_id", claims.UserID,
@@ -133,8 +136,18 @@ func unbanUserHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 
+	// 幂等接口：无生效中的封禁时不发送解除通知。
+	existingBan, err := usersvc.GetUserBan(c.Request.Context(), targetID)
+	if err != nil {
+		return err
+	}
+
 	if err := usersvc.UnbanUser(c.Request.Context(), targetID); err != nil {
 		return err
+	}
+
+	if existingBan != nil {
+		notificationsvc.ToUser(c.Request.Context(), targetID, notificationsvc.NewUserUnbannedMessage())
 	}
 
 	slog.Info("User unbanned", "user_id", targetID, "operator_id", claims.UserID)

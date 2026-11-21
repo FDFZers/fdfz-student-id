@@ -42,6 +42,10 @@ func InitRoutes(api, internal *gin.RouterGroup) {
 	group.GET("/2fa", middleware.RequireUserToken(), handling.Wrap("二次验证设置获取失败", getTwoFactorSettingHandler))
 	group.PUT("/2fa", middleware.RequireStepupToken(), handling.Wrap("二次验证设置修改失败", updateTwoFactorSettingHandler))
 
+	// 关闭后任何应用都不能再向该用户发送通知
+	group.GET("/app-notifications", middleware.RequireUserToken(), handling.Wrap("应用通知设置获取失败", getAppNotificationsSettingHandler))
+	group.PUT("/app-notifications", middleware.RequireUserToken(), handling.Wrap("应用通知设置修改失败", updateAppNotificationsSettingHandler))
+
 	// 邮箱、TOTP、QQ 的绑定与解绑
 	group.POST("/email/init", middleware.RequireStepupToken(), handling.Wrap("邮箱绑定失败", emailBindInitHandler))
 	group.POST("/email/verify", middleware.RequireStepupToken(), handling.Wrap("邮箱绑定失败", emailBindVerifyHandler))

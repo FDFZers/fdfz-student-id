@@ -24,6 +24,8 @@ const (
 
 	MaxFuzzyWords = 8
 
+	MaxFieldQueries = 20
+
 	pgInvalidRegularExpression = "2201B"
 )
 
@@ -158,12 +160,8 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 
 	var conditions []sq.Sqlizer
 	trimmed := strings.TrimSpace(req.Query)
-
-	if len([]rune(trimmed)) > MaxQueryLength {
-		return nil, errs.BadRequestError().AppendDetails("搜索表达式过长")
-	}
-	if method == MatchMethodFuzzy && len(strings.Fields(trimmed)) > MaxFuzzyWords {
-		return nil, errs.BadRequestError().AppendDetails("搜索词过多")
+	if e := validateSearchQuery(trimmed, method); e != nil {
+		return nil, e
 	}
 
 	// 关键词条件：各字段之间用 OR 连接；没有有效条件时整个关键词条件省略
@@ -176,6 +174,41 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		}
 		if len(orParts) > 0 {
 			conditions = append(conditions, sq.Or(orParts))
+		}
+	}
+
+	// 字段级条件与总关键词条件之间为 AND，匹配方法/大小写缺省沿用顶层设置。
+	if len(req.FieldQueries) > MaxFieldQueries {
+		return nil, errs.BadRequestError().AppendDetails("字段查询条件过多")
+	}
+	for _, fieldQuery := range req.FieldQueries {
+		f, ok := fieldsByID[fieldQuery.Field]
+		if !ok {
+			return nil, errs.BadRequestError().AppendDetails("搜索字段不存在：" + fieldQuery.Field)
+		}
+
+		query := strings.TrimSpace(fieldQuery.Query)
+		if query == "" {
+			continue
+		}
+
+		fieldMethod := method
+		if fieldQuery.MatchMethod != nil {
+			fieldMethod = *fieldQuery.MatchMethod
+			if _, ok := allowedMatch[fieldMethod]; !ok {
+				return nil, errs.BadRequestError().AppendDetails("匹配方法不受支持：" + string(fieldMethod))
+			}
+		}
+		fieldCaseSensitive := caseSensitive
+		if fieldQuery.CaseSensitive != nil {
+			fieldCaseSensitive = *fieldQuery.CaseSensitive
+		}
+
+		if e := validateSearchQuery(query, fieldMethod); e != nil {
+			return nil, e
+		}
+		if c := buildMatchCondition(f, query, fieldMethod, fieldCaseSensitive); c != nil {
+			conditions = append(conditions, c)
 		}
 	}
 
@@ -279,6 +312,16 @@ func BuildSearch(cfg *SearchConfig, req *SearchRequest) (*SearchQuery, *errs.Err
 		Count: Query{SQL: countSQL, Args: countArgs},
 		Data:  Query{SQL: dataSQL, Args: dataArgs},
 	}, nil
+}
+
+func validateSearchQuery(query string, method MatchMethod) *errs.Error {
+	if len([]rune(query)) > MaxQueryLength {
+		return errs.BadRequestError().AppendDetails("搜索表达式过长")
+	}
+	if method == MatchMethodFuzzy && len(strings.Fields(query)) > MaxFuzzyWords {
+		return errs.BadRequestError().AppendDetails("搜索词过多")
+	}
+	return nil
 }
 
 // buildMatchCondition 为单个字段与关键词构建匹配条件，方法不受支持时返回 nil。
