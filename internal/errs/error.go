@@ -79,6 +79,11 @@ func IllegalStateError() *Error {
 	return CreateError(http.StatusForbidden, "illegal_state")
 }
 
+// PasswordResetRequiredError 返回 403 password_reset_required，表示必须先设置新密码才能继续登录。
+func PasswordResetRequiredError() *Error {
+	return CreateError(http.StatusForbidden, "password_reset_required")
+}
+
 // RequestTooLargeError 返回 413 request_too_large，表示请求体超出大小限制。
 func RequestTooLargeError() *Error {
 	return CreateError(http.StatusRequestEntityTooLarge, "request_too_large")

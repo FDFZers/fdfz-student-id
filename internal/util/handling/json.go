@@ -148,10 +148,6 @@ func UsersJSON(ctx context.Context, claims *model.RegisteredTokenClaims, targetU
 		}
 
 		res := gin.H{"id": targetUser.ID}
-		// 重设密码标记只对管理侧可见，供管理端展示与操作确认。
-		if isAdmin {
-			res["password_reset_required"] = targetUser.PasswordResetRequired
-		}
 		if basic {
 			res["username"] = targetUser.Username
 			res["nickname"] = targetUser.Nickname
@@ -171,6 +167,9 @@ func UsersJSON(ctx context.Context, claims *model.RegisteredTokenClaims, targetU
 		}
 		if visibilities {
 			res["visibilities"] = targetUser.Visibilities
+		}
+		if isAdmin {
+			res["password_reset_required"] = targetUser.PasswordResetRequired
 		}
 		results = append(results, res)
 	}

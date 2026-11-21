@@ -22,8 +22,6 @@ type adminResetPasswordReq struct {
 }
 
 // resetUserPasswordHandler 管理员重置指定用户的密码：校验后写入新密码哈希、撤销其全部会话与提权令牌。
-// 需要 users.password.write 权限；默认给目标账号打上「需要重设密码」标记，用户登录后会收到提示。
-// 注意：不能重置自己或拥有管理侧写权限的账号，避免绕过原密码与二次验证接管高权限账号。
 func resetUserPasswordHandler(c *gin.Context) *errs.Error {
 	claims := handling.MustGetClaims(c)
 
@@ -105,8 +103,6 @@ func resetUserPasswordHandler(c *gin.Context) *errs.Error {
 		"require_password_reset", requireReset,
 	)
 
-	c.JSON(http.StatusOK, gin.H{
-		"password_reset_required": requireReset,
-	})
+	c.JSON(http.StatusOK, gin.H{})
 	return nil
 }

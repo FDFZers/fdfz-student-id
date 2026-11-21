@@ -122,6 +122,43 @@ func SetPasswordResetRequired(ctx context.Context, userID int64, required bool) 
 	return nil
 }
 
+// setUserPasswordAndClearResetRequiredSQL 在单条语句中写入新密码并清除重设标记，
+// 避免出现密码已更新但仍要求重设（或反之）的中间状态。
+// target 为空（用户不存在或已注销）时不会写入密码，主 UPDATE 也不会命中，最终返回无行。
+const setUserPasswordAndClearResetRequiredSQL = `
+WITH target AS (
+    SELECT id FROM users WHERE id = $1 AND deleted_at IS NULL
+),
+updated_password AS (
+    INSERT INTO user_passwords (user_id, password)
+    SELECT id, $2 FROM target
+    ON CONFLICT (user_id)
+    DO UPDATE SET password = EXCLUDED.password
+    RETURNING updated_at
+)
+UPDATE users
+SET password_reset_required = FALSE
+WHERE id IN (SELECT id FROM target)
+RETURNING (SELECT updated_at FROM updated_password)
+`
+
+// SetUserPasswordAndClearResetRequired 登录时设置新密码并清除重设标记，写入后失效用户缓存。
+// passwordHash 须已哈希；用户不存在或已注销时返回 404。
+func SetUserPasswordAndClearResetRequired(ctx context.Context, userID int64, passwordHash string) *errs.Error {
+	var updatedAt time.Time
+	err := db.R.QueryRow(ctx, setUserPasswordAndClearResetRequiredSQL, userID, passwordHash).Scan(&updatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errs.NotFoundError().AppendDetails("用户不存在")
+		}
+		return errs.CreatePGError(err, "用户", "Failed to set user password").
+			AppendDetails("密码设置失败")
+	}
+
+	db.R.Del(ctx, UserCacheKey(userID))
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // 获取 TOTP
 // ---------------------------------------------------------------------------

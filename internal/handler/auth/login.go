@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"fdfz-student-id/internal/cfg"
 	"fdfz-student-id/internal/errs"
 	"fdfz-student-id/internal/model"
 	authsvc "fdfz-student-id/internal/service/auth"
 	captchasvc "fdfz-student-id/internal/service/captcha"
+	notifysvc "fdfz-student-id/internal/service/notify"
 	permsvc "fdfz-student-id/internal/service/perm"
 	usersvc "fdfz-student-id/internal/service/user"
 	userpermsvc "fdfz-student-id/internal/service/userperm"
@@ -29,7 +31,8 @@ type loginInitRequestReq struct {
 }
 
 // loginInitHandler 校验用户名密码、封禁状态与 Altcha，创建登录用鉴权会话并返回可用的二次验证方式。
-// 注意：不需要二次验证（校园 IP、用户关闭登录二次验证或未绑定任何方式）时直接返回 passed=true，由 finalize 建会话；
+// 注意：账号被封禁时返回 banned=true 的封禁信息，不创建鉴权会话；
+// 不需要二次验证（校园 IP、用户关闭登录二次验证或未绑定任何方式）时直接返回 passed=true，由 finalize 建会话；
 // 用户不存在时也执行一次密码哈希，避免通过响应耗时枚举账号。
 func loginInitHandler(c *gin.Context) *errs.Error {
 	var req loginInitRequestReq
@@ -75,7 +78,9 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 		return err
 	}
 	if ban != nil {
-		return handling.BannedError(ban)
+		// 凭据已验证，直接返回封禁信息供前端展示封禁页，不创建鉴权会话
+		c.JSON(http.StatusOK, handling.BanJSON(ban))
+		return nil
 	}
 
 	// 校园 IP 内登录免二次验证；其余场景按已绑定的方式启用验证，用户主动关闭登录二次验证时同样跳过。
@@ -97,6 +102,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"banned":     false,
 		"session_id": session.ID,
 		"2fa":        methods,
 		"passed":     session.Passed2FA,
@@ -107,6 +113,7 @@ func loginInitHandler(c *gin.Context) *errs.Error {
 // loginFinalizeRequestReq 是登录完成的请求体。
 type loginFinalizeRequestReq struct {
 	SessionID uuid.UUID `json:"session_id"` // 登录初始化返回的鉴权会话 ID
+	Password  string    `json:"password"`
 }
 
 // loginFinalizeHandler 完成登录：校验鉴权会话状态，创建用户会话并签发访问令牌、写入 Cookie。
@@ -157,11 +164,27 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
 
-	if usr, err := usersvc.GetUserByID(c.Request.Context(), authSession.UserID); err != nil {
+	usr, err := usersvc.GetUserByID(c.Request.Context(), authSession.UserID)
+	if err != nil {
 		return err
 	} else if usr == nil {
 		return errs.ForbiddenError().AppendDetails("用户名或密码错误")
 	}
+
+	// 管理员重置密码后必须先设置新密码才能完成登录
+	if usr.PasswordResetRequired {
+		if req.Password == "" {
+			// 延长鉴权会话，给用户留出设置新密码的时间；未提供密码时前端据此展示重设表单
+			if err := authsvc.UpdateAuthSession(c.Request.Context(), authSession, true); err != nil {
+				return err
+			}
+			return errs.PasswordResetRequiredError().AppendDetails("请设置新密码后继续登录").Seal()
+		}
+		if err := resetPasswordAtLogin(c.Request.Context(), usr.ID, req.Password); err != nil {
+			return err
+		}
+	}
+	// 不需要重设密码时忽略 password 字段，保持接口可重试等幂等语义
 
 	// 创建用户会话并生成会话令牌
 	sessionToken, e := crypto.GenerateCode(128, crypto.TokenCharset)
@@ -226,6 +249,42 @@ func loginFinalizeHandler(c *gin.Context) *errs.Error {
 	handling.SetTokenCookies(c, accessToken, sessionToken, int(cfg.C.AccessTokenTTL.Seconds()), int(exp.Sub(time.Now()).Seconds()))
 
 	handling.RespondOK(c)
+	return nil
+}
+
+// resetPasswordAtLogin 在登录流程中设置新密码并清除管理员重置标记。
+// 注意：新密码须满足复杂度要求且不能与当前密码相同。
+func resetPasswordAtLogin(ctx context.Context, userID int64, newPassword string) *errs.Error {
+	if err := handling.ValidatePassword(newPassword); err != nil {
+		return err
+	}
+
+	current, err := usersvc.GetUserPassword(ctx, userID)
+	if err != nil {
+		return err
+	} else if current == nil {
+		return errs.NotFoundError().AppendDetails("密码不存在")
+	}
+	if ok, e := crypto.VerifyArgon2ID(newPassword, current.Password); e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to verify user password").AppendDetails("密码校验失败")
+	} else if ok {
+		return errs.BadRequestError().AppendDetails("新密码不能与原密码相同")
+	}
+
+	pwdHash, e := crypto.HashArgon2ID(newPassword)
+	if e != nil {
+		return errs.CreateAndLogInternalError(e, "Failed to hash new password").AppendDetails("密码哈希失败")
+	}
+	if err := usersvc.SetUserPasswordAndClearResetRequired(ctx, userID, pwdHash); err != nil {
+		return err
+	}
+
+	notifysvc.ToUser(ctx, userID, notifysvc.NewMessage(
+		"密码已重设",
+		"你的账号密码已在登录时重设",
+		"你好！你的复旦附中学生 ID 账号密码已于北京时间 "+notifysvc.BeijingTime()+" 在登录时重设。",
+		"如非本人操作，请立即联系管理员。",
+	))
 	return nil
 }
 

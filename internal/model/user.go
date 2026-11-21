@@ -56,12 +56,8 @@ type User struct {
 
 	Visibilities Visibilities `json:"visibilities" db:"visibilities"` // 资料可见性，JSONB 列
 
-	// PasswordResetRequired 表示管理员创建账号或重置密码后，用户下次登录应重设密码。
 	PasswordResetRequired bool `json:"password_reset_required" db:"password_reset_required"`
-
-	// TwoFactorEnabled 表示登录时是否要求二次验证；关闭后登录只需密码，
-	// 但修改密码、绑定方式、会话管理等敏感操作仍要求二次验证。
-	TwoFactorEnabled bool `json:"two_factor_enabled" db:"two_factor_enabled"`
+	TwoFactorEnabled      bool `json:"two_factor_enabled" db:"two_factor_enabled"`
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
